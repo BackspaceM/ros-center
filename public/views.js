@@ -146,7 +146,7 @@ function renderTrafficStats(range) {
   if (!STATS_RANGES[state.usageRange]) state.usageRange = 'today';
   $('content').innerHTML = `
     <div class="page-head">
-      <div><h1>${t('stats_title') || L('流量统计', 'Traffic statistics')}</h1><p>${t('stats_sub')}</p></div>
+      <div><h1>${t('stats_title')}</h1><p>${t('stats_sub')}</p></div>
       <div class="page-actions">
         <span class="badge-live" id="statsBadge"><span class="d"></span>${esc(t(state.mode))}</span>
         <button class="btn" id="statsRefresh">${t('refresh')}</button>
@@ -154,12 +154,16 @@ function renderTrafficStats(range) {
     </div>
     <div class="scope-bar" id="statsScope">
       <span class="tag blue">${t('stats_scope')}</span>
-      <span class="scope-text" id="statsScopeText">${t('stats_scope_wait')}</span>
+      <div class="iface-chips" id="statsIfaceChips"></div>
       <span class="scope-spacer"></span>
-      <label class="scope-view" title="${esc(t('stats_view_hint'))}">${t('stats_view')}
-        <select id="statsViewIface"><option value="">${esc(t('stats_view_scope'))}</option></select></label>
-      <button class="btn btn-sm" id="statsIfaceBtn">⚙ ${t('stats_iface_btn')}</button>
+      <button class="btn btn-sm" id="statsCustomBtn">+ ${t('stats_custom_btn')}</button>
     </div>
+    <div class="iface-custom" id="statsCustom" hidden>
+      <input type="text" id="statsCustomInput" placeholder="pppoe-*, vlan??">
+      <span class="form-hint">${t('stats_iface_manual_hint')}</span>
+      <button class="btn btn-sm primary" id="statsCustomSave">${t('save')}</button>
+    </div>
+    <div class="scope-hint" id="statsScopeHint"></div>
     <div class="tabs stats-tabs" id="statsTabs">
       ${Object.keys(STATS_RANGES).map((k) => `<button class="tab ${k === state.usageRange ? 'active' : ''}" data-range="${k}">${esc(STATS_RANGES[k].label())}</button>`).join('')}
     </div>
@@ -171,18 +175,35 @@ function renderTrafficStats(range) {
     </div>
     <div class="panel" style="margin-top:14px">
       <div class="panel-head"><div><h2>${t('stats_detail')}</h2><p class="sub" id="statsDetailLabel"></p></div></div>
-      <div class="table-scroll"><table><thead><tr><th>${t('time')}</th><th class="num">${t('legend_rx')}</th><th class="num">${t('legend_tx')}</th><th class="num">${t('total')}</th></tr></thead>
+      <div class="table-scroll"><table><thead><tr><th>${t('stats_col_time')}</th><th>${t('stats_col_iface')}</th>
+        <th class="num">${t('legend_rx')}</th><th class="num">${t('legend_tx')}</th><th class="num">${t('stats_col_sum')}</th></tr></thead>
         <tbody id="statsBody"></tbody></table></div>
+      <div class="pager"><span id="statsPageInfo"></span>
+        <button id="statsPrev">${t('stats_prev')}</button><button id="statsNext">${t('stats_next')}</button></div>
     </div>`;
   $('statsTabs').querySelectorAll('.tab').forEach((b) => b.onclick = () => {
-    state.usageRange = b.dataset.range;
+    if (state.usageRange === b.dataset.range) return;
+    state.usageRange = b.dataset.range; state.usageDetailPage = 1;
     $('statsTabs').querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.range === state.usageRange));
-    if (state.usageData) paintTrafficStats(state.usageData);
+    $('statsRangeLabel').textContent = STATS_RANGES[state.usageRange].series();
+    $('statsDetailLabel').textContent = t('stats_detail_hint');
+    refreshUsageData();
   });
   $('statsRefresh').onclick = () => { state.usageData = null; refreshUsageData(); };
-  $('statsViewIface').onchange = (e) => { state.usageViewIface = e.target.value; state.usageData = null; refreshUsageData(); };
-  $('statsIfaceBtn').onclick = () => openUsageInterfaces(state.usageData || {});
-  if (state.usageData) paintTrafficStats(state.usageData);
+  $('statsCustomBtn').onclick = () => { const c = $('statsCustom'); c.hidden = !c.hidden; if (!c.hidden) $('statsCustomInput').focus(); };
+  $('statsCustomSave').onclick = () => {
+    const raw = $('statsCustomInput').value || '';
+    const extra = raw.split(/[\n,，;；]+/).map((x) => x.trim()).filter(Boolean);
+    const cur = (state.usageData && state.usageData.interfaces) || [];
+    const names = [...new Set([...cur, ...extra])];
+    if (!names.length && !(state.usageData && state.usageData.scope === 'all')) { toast(t('stats_iface_need_one'), 'err'); return; }
+    saveUsageInterfaces(names);
+  };
+  $('statsPrev').onclick = () => { state.usageDetailPage--; paintUsageDetail(state.usageData); };
+  $('statsNext').onclick = () => { state.usageDetailPage++; paintUsageDetail(state.usageData); };
+  $('statsRangeLabel').textContent = STATS_RANGES[state.usageRange].series();
+  $('statsDetailLabel').textContent = t('stats_detail_hint');
+  if (state.usageData && state.usageData.detailRange === state.usageRange) paintTrafficStats(state.usageData);
   else $('statCards').innerHTML = `<div class="empty" style="grid-column:1/-1">${t('loading')}</div>`;
   refreshUsageData();
   ensureUsageTimer(true);
@@ -193,7 +214,7 @@ function paintTrafficStats(d) {
   const val = d[range] || { rx: 0, tx: 0 };
   const rate = d.rate || { rx: 0, tx: 0, real: false };
   updateStatsBadge(d);
-  paintUsageScope(d);
+  paintUsageChips(d);
   const card = (label, bytes, cls, foot) => {
     const f = splitBytes(bytes);
     return `<div class="card ${cls}"><div class="card-label">${esc(label)}</div><div class="card-value">${f.v}<small>${f.u}</small></div><div class="card-foot">${esc(foot)}</div></div>`;
@@ -208,124 +229,80 @@ function paintTrafficStats(d) {
         <div class="card-foot">${rate.real ? '↓ ' + rr.v + ' ' + rr.u + ' · ↑ ' + rt.v + ' ' + rt.u : esc(t('stats_source_fake'))}</div></div>`;
   const src = $('statsSource');
   if (src) {
-    const real = !!d.dataReal;
+    const real = !!d.dataReal, info = (k, n) => esc(t(k).replace('{n}', String(n)));
     src.className = 'data-source ' + (real ? 'real' : 'fake');
     src.innerHTML = `<span class="d"></span><b>${esc(real ? t('stats_source_real') : t('stats_source_fake'))}</b>
       <span>${esc(t('stats_updated'))} ${esc(fmtTime(d.ts))} · ${esc(t('stats_sample'))} ${d.sampleTs ? esc(fmtTime(d.sampleTs)) : esc(t('stats_no_sample'))}</span>
       ${d.resetNotice ? '<em>' + esc(t('stats_reset_notice')) + '</em>' : ''}
-      ${d.resets ? '<em>' + esc(L('计数器重置跳过 ' + d.resets + ' 次采样', d.resets + ' counter resets skipped')) + '</em>' : ''}`;
+      ${d.migrated ? '<em>' + esc(t('stats_migrated')) + '</em>' : ''}
+      ${d.resets ? '<em>' + info('stats_reset_info', d.resets) + '</em>' : ''}
+      ${d.gaps ? '<em>' + info('stats_gap_info', d.gaps) + '</em>' : ''}`;
   }
   const buckets = (d.series && d.series[range]) || [];
   const sub = STATS_RANGES[range].series();
   $('statsRangeLabel').textContent = sub;
-  const dl = $('statsDetailLabel'); if (dl) dl.textContent = sub;
   drawBarChart('statsChart', 'statsTip', buckets, fmtBytes);
-  $('statsBody').innerHTML = buckets.slice().reverse().map((b) => {
+  paintUsageDetail(d);
+}
+/* 明细：每页 3 行；今日按小时、本周/本月按天、累计按月，逐网口列出真实用量 */
+function paintUsageDetail(d) {
+  const body = $('statsBody'); if (!body) return;
+  const rows = (d && d.detail) || [], perPage = 3;
+  const pages = Math.max(1, Math.ceil(rows.length / perPage));
+  state.usageDetailPage = Math.max(1, Math.min(pages, state.usageDetailPage || 1));
+  const pageRows = rows.slice((state.usageDetailPage - 1) * perPage, state.usageDetailPage * perPage);
+  body.innerHTML = pageRows.map((b) => {
     const rx = splitBytes(b.rx), tx = splitBytes(b.tx);
-    return `<tr><td>${esc(b.label)}</td><td class="num"><span class="rate rx">${rx.v}</span> <span class="tag">${rx.u}</span></td>
-    <td class="num"><span class="rate tx">${tx.v}</span> <span class="tag">${tx.u}</span></td><td class="num">${fmtBytes(b.rx + b.tx)}</td></tr>`;
-  }).join('') || emptyRow(4);
+    const iface = b.iface ? esc(b.iface) : `<span class="tag blue">${esc(t('stats_detail_all'))}</span>`;
+    return `<tr${b.iface ? '' : ' class="sum-row"'}><td>${esc(b.label)}</td><td>${iface}</td>
+      <td class="num"><span class="rate rx">${rx.v}</span> <span class="tag">${rx.u}</span></td>
+      <td class="num"><span class="rate tx">${tx.v}</span> <span class="tag">${tx.u}</span></td>
+      <td class="num">${fmtBytes(b.rx + b.tx)}</td></tr>`;
+  }).join('') || `<tr><td colspan="5" class="empty">${esc(t('stats_detail_empty'))}</td></tr>`;
+  $('statsPageInfo').textContent = `${t('stats_page')} ${state.usageDetailPage} ${t('stats_of')} ${pages} ${t('stats_page_unit')} · ${rows.length} ${t('rows')}`;
+  $('statsPrev').disabled = state.usageDetailPage <= 1;
+  $('statsNext').disabled = state.usageDetailPage >= pages;
 }
-/* 范围条 + 查看接口下拉：只在接口清单变化时重建下拉，避免实时刷新打断用户选择 */
-function paintUsageScope(d) {
-  const box = $('statsScopeText'); if (!box) return;
-  const custom = d.scope === 'custom';
-  const names = (d.interfaces || []);
-  const matched = Number(d.matched) || 0;
-  const label = custom ? names.map((n) => esc(n)).join(' · ') : t('stats_scope_all');
-  const viewTag = d.viewIface ? `<span class="tag blue">${esc(t('stats_view'))} · <b>${esc(d.viewIface)}</b></span>` : '';
-  box.innerHTML = `<b title="${esc(names.join(', '))}">${label || t('stats_scope_custom')}</b>
-      <span class="scope-meta">${t('stats_iface_matched')} ${matched} ${t('stats_iface_unit')}${custom && !matched ? ' · ' + t('stats_iface_none') : ''}</span>${viewTag}`;
-  const sel = $('statsViewIface');
-  if (sel) {
-    const avail = d.available || [];
-    const sig = avail.map((i) => i.name).join('|');
-    if (sel.dataset.sig !== sig) {
-      const cur = state.usageViewIface;
-      sel.innerHTML = `<option value="">${esc(t('stats_view_scope'))}</option>`
-        + avail.map((i) => `<option value="${esc(i.name)}">${esc(i.name)}${i.type ? ' (' + esc(i.type) + ')' : ''}</option>`).join('');
-      sel.dataset.sig = sig;
-      sel.value = avail.some((i) => i.name === cur) ? cur : '';
-      state.usageViewIface = sel.value;
+/* 统计网口多选：真实网口 + 自定义通配符，点击即时保存，无需弹窗 */
+function paintUsageChips(d) {
+  const box = $('statsIfaceChips'), hint = $('statsScopeHint');
+  if (!box) return;
+  const avail = d.available || [], sel = d.interfaces || [], all = d.scope !== 'custom';
+  const sig = avail.map((i) => i.name).join('|') + '##' + sel.join('|') + '##' + (all ? '1' : '0');
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    const known = new Set(avail.map((i) => i.name));
+    const manual = sel.filter((x) => /[*?]/.test(x) || !known.has(x));
+    const chips = [`<button class="iface-chip${all ? ' active' : ''}" data-all="1" title="${esc(t('stats_iface_all'))}">${esc(t('stats_iface_all'))}</button>`];
+    if (!avail.length) chips.push(`<span class="scope-meta">${esc(t('stats_iface_no_list'))}</span>`);
+    for (const i of avail) {
+      const on = sel.includes(i.name);
+      chips.push(`<label class="iface-chip${on ? ' active' : ''}" title="${esc(i.comment || i.name)}${i.type ? ' · ' + esc(i.type) : ''}">
+        <input type="checkbox" data-name="${esc(i.name)}" ${on ? 'checked' : ''}><span>${esc(i.name)}</span></label>`);
     }
-  }
-  const btn = $('statsIfaceBtn'); if (btn) btn.onclick = () => openUsageInterfaces(d);
-}
-/* 自定义参与统计的接口：全部 / 勾选真实接口 + 手动输入通配符 */
-function openUsageInterfaces(d) {
-  const custom = d.scope === 'custom';
-  const sel = d.interfaces || [];
-  const avail = d.available || [];
-  const known = new Set(avail.map((i) => i.name));
-  const manual = sel.filter((x) => /[*?]/.test(x) || !known.has(x));
-  const listHtml = avail.length ? avail.map((i) =>
-    `<label class="iface-opt" data-name="${esc(i.name.toLowerCase())}" title="${esc(i.comment || i.name)}">
-      <input type="checkbox" class="iface-cb" value="${esc(i.name)}" ${sel.includes(i.name) ? 'checked' : ''}>
-      <span class="iface-name">${esc(i.name)}</span><span class="tag">${esc(i.type || '-')}</span></label>`).join('')
-    : `<div class="empty">${t('stats_iface_no_list') || L('暂时没有读取到接口，请手动填写', 'No interfaces available yet')}</div>`;
-  openModal(t('stats_iface_title') || L('流量统计接口', 'Traffic statistics interfaces'), `
-    <div class="note-card">${t('stats_iface_tip') || L('建议只选 WAN 口，避免内外网重复计入', 'Select only WAN interfaces to avoid double counting')}</div>
-    <div class="form-row"><label>${t('stats_scope') || L('统计范围', 'Scope')}</label><div>
-      <label class="form-check"><input type="radio" name="usageScope" value="all" ${custom ? '' : 'checked'}> ${t('stats_iface_all') || L('统计全部接口', 'Count all interfaces')}</label>
-      <label class="form-check"><input type="radio" name="usageScope" value="custom" ${custom ? 'checked' : ''}> ${t('stats_iface_custom') || L('仅统计指定接口', 'Count only selected interfaces')}</label>
-    </div></div>
-    <div id="usageCustom" ${custom ? '' : 'hidden'}>
-      <div class="form-row"><label>${t('stats_iface_list') || L('从路由器接口中选择', 'Pick from router interfaces')}</label><div>
-        <input type="search" id="usageIfaceSearch" class="usage-search" placeholder="${t('stats_iface_search') || L('搜索接口…', 'Search interfaces…')}">
-        <div class="iface-picker" id="usageIfaceList">${listHtml}</div></div></div>
-      <div class="form-row"><label>${t('stats_iface_manual') || L('手动填写接口名 / 通配符', 'Manual names / wildcards')}</label><div>
-        <textarea id="usageManual" placeholder="pppoe-*">${esc(manual.join('\n'))}</textarea>
-        <p class="form-hint">${t('stats_iface_manual_hint') || L('支持 * 和 ? 通配符', 'Wildcards * and ? are supported')}</p></div></div>
-    </div>
-    <div class="modal-note">${t('stats_iface_reset') || L('切换范围会重建计数基线，历史数据保留。', 'Changing the scope resets the counter baseline; history is kept.')}</div>`,
-    `<button class="btn" data-close>${t('cancel')}</button><button class="btn primary" data-ok>${t('save')}</button>`,
-    (m) => {
-      const customBox = m.querySelector('#usageCustom');
-      const sync = () => { customBox.hidden = m.querySelector('input[name="usageScope"]:checked').value !== 'custom'; };
-      m.querySelectorAll('input[name="usageScope"]').forEach((r) => { r.onchange = sync; });
-      sync();
-      const search = m.querySelector('#usageIfaceSearch');
-      if (search) search.oninput = (e) => {
-        const q = e.target.value.trim().toLowerCase();
-        m.querySelectorAll('.iface-opt').forEach((el) => { el.hidden = !!(q && !el.dataset.name.includes(q)); });
-      };
-      const ok = m.querySelector('[data-ok]');
-      ok.onclick = async () => {
-        const scope = m.querySelector('input[name="usageScope"]:checked').value;
-        let names = [];
-        if (scope === 'custom') {
-          m.querySelectorAll('.iface-cb:checked').forEach((cb) => names.push(cb.value));
-          (m.querySelector('#usageManual').value || '').split(/[\n,，;；]+/).forEach((x) => { const v = x.trim(); if (v) names.push(v); });
-          names = [...new Set(names)];
-          if (!names.length) { toast(t('stats_iface_need_one') || L('请至少选择一个接口', 'Select at least one interface'), 'err'); return; }
-        }
-        ok.disabled = true;
-        try {
-          const r = await api('/api/usage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interfaces: names, iface: state.usageViewIface }) });
-          closeModal();
-          state.usageData = r;
-          if (state.section === 'trafficStats') paintTrafficStats(r);
-          toast(t('stats_iface_saved'), 'ok');
-        } catch (e) { toast(e.message, 'err'); ok.disabled = false; }
-      };
+    for (const x of manual) chips.push(`<button class="iface-chip active custom" data-remove="${esc(x)}" title="${esc(t('stats_iface_manual'))}">${esc(x)} ✕</button>`);
+    box.innerHTML = chips.join('');
+    box.querySelectorAll('[data-all]').forEach((el) => el.onclick = () => saveUsageInterfaces([]));
+    box.querySelectorAll('[data-remove]').forEach((el) => el.onclick = () => saveUsageInterfaces(sel.filter((x) => x !== el.dataset.remove)));
+    box.querySelectorAll('input[data-name]').forEach((el) => el.onchange = () => {
+      const name = el.dataset.name;
+      const next = el.checked ? [...sel.filter((x) => x !== name), name] : sel.filter((x) => x !== name);
+      saveUsageInterfaces(next);
     });
-}
-function aggregateUsage(daily, range) {
-  if (range === 'day') return daily.slice(-30).map((x) => ({ label: x.day, rx: x.rx, tx: x.tx }));
-  const keyOf = (day) => {
-    const dt = new Date(day + 'T00:00:00');
-    if (range === 'month') return day.slice(0, 7);
-    // ISO 周：以周一为起始
-    const d = new Date(dt); const dayNum = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dayNum);
-    const p = (n) => String(n).padStart(2, '0');
-    return d.getFullYear() + '-W' + p(d.getMonth() + 1) + '/' + p(d.getDate());
-  };
-  const map = new Map();
-  for (const x of daily) {
-    const k = keyOf(x.day); const cur = map.get(k) || { label: k, rx: 0, tx: 0 };
-    cur.rx += x.rx; cur.tx += x.tx; map.set(k, cur);
   }
-  return [...map.values()].slice(range === 'week' ? -12 : -12);
+  if (hint) hint.innerHTML = `<span>${esc(t('stats_iface_tip'))}</span>
+    <span class="tag">${esc(t('stats_iface_matched'))} ${Number(d.matched) || 0} ${esc(t('stats_iface_unit'))}</span>
+    ${all ? '' : `<span class="tag">${esc(t('stats_iface_custom'))}</span>`}`;
+}
+async function saveUsageInterfaces(names) {
+  try {
+    const r = await api('/api/usage', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interfaces: names, range: state.usageRange }) });
+    state.usageData = r; state.usageDetailPage = 1;
+    if (state.section === 'trafficStats') paintTrafficStats(r);
+    const c = $('statsCustomInput'); if (c) c.value = '';
+    toast(t('stats_iface_saved'), 'ok');
+  } catch (e) { toast(e.message, 'err'); }
 }
 function drawBarChart(canvasId, tipId, buckets, fmt) {
   const cv = $(canvasId); if (!cv) return;

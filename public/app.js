@@ -17,6 +17,8 @@ const I18N = {
     stream_on: '实时流', stream_off: '轮询',
     add: '新增', refresh: '刷新', save: '保存', cancel: '取消', edit: '编辑', delete: '删除',
     enable: '启用', disable: '禁用', enabled: '已启用', disabled: '已禁用', yes: '是', no: '否',
+    run_script: '运行', run_script_row: '运行此脚本', run_script_none: '请先选择要运行的脚本',
+    run_script_ok: '脚本已提交运行', run_script_confirm: '确定立即运行选中的 {n} 个脚本？',
     filter: '筛选', search: '搜索', clear: '清空', close: '关闭', confirm: '确认',
     no_data: '暂无数据', waiting: '等待数据…', loading: '加载中…', selected: '已选',
     row_one: '条记录', rows: '条记录', page: '页', of: '/', prev: '上一页', next: '下一页',
@@ -70,29 +72,29 @@ const I18N = {
     wg_route: '客户端 AllowedIPs', wg_psk: '预共享密钥', wg_responder: '仅响应 (responder)',
     wg_save_peer: '保存到 RouterOS', wg_peer_saved: '对端已保存', wg_auto: '自动', wg_required_wg: '请填写接口、允许地址和私钥',
     sort_hint: '点击排序（升序 / 降序）', singleton_hint: '该页面只有一组配置，点「编辑」直接修改',
-    stats_title: '流量统计', stats_sub: '来自 RouterOS 接口累计字节计数器的真实差分，每秒采样',
-    stats_chart: '流量趋势', stats_detail: '明细', stats_from_router: '真实计数器差分',
-    stats_scope: '统计范围', stats_scope_all: '全部接口', stats_scope_custom: '自定义接口',
-    stats_scope_wait: '读取统计配置…', stats_iface_btn: '设置统计接口',
-    stats_view: '查看接口', stats_view_scope: '按统计范围', stats_view_hint: '选中某个接口后，卡片、趋势和明细只显示该接口',
+    stats_title: '流量统计', stats_sub: '来自 RouterOS 接口累计字节计数器的真实差分，每秒采样 · 重拨清零自动续计',
+    stats_chart: '流量趋势', stats_detail: '每日明细', stats_from_router: '真实计数器差分',
+    stats_scope: '统计网口', stats_scope_all: '全部网口', stats_scope_custom: '指定网口', stats_scope_wait: '读取网口…',
+    stats_iface_tip: '可多选要统计的网口；只选 WAN 口可避免内外网重复计入。历史按网口分别保存，随时可切换。',
+    stats_iface_all: '全部网口', stats_iface_custom: '仅统计勾选的网口',
+    stats_iface_manual: '自定义网口名 / 通配符', stats_iface_manual_hint: '支持 * 和 ?，如 pppoe-*、vlan??；多个用逗号或换行分隔',
+    stats_iface_no_list: '暂未读取到网口', stats_iface_saved: '统计网口已保存，历史按网口即时重算',
+    stats_iface_need_one: '请至少选择一个网口', stats_custom_btn: '自定义',
+    stats_iface_matched: '已选', stats_iface_unit: '个网口', stats_iface_none: '当前没有匹配到任何网口，请检查名称',
     stats_range_today: '今日', stats_range_week: '本周', stats_range_month: '本月', stats_range_total: '累计',
     stats_card_rx: '下载', stats_card_tx: '上传', stats_card_sum: '合计', stats_card_rate: '当前速率',
-    stats_series_today: '今日 · 最近 60 分钟（按分钟）', stats_series_week: '本周 · 按天', stats_series_month: '本月 · 按天', stats_series_total: '累计 · 按月',
-    stats_source_real: '真实数据 · /interface/print 的 rx-byte / tx-byte 计数器差分，每秒采样',
+    stats_series_today: '今日 · 按小时', stats_series_week: '本周 · 按天', stats_series_month: '本月 · 按天', stats_series_total: '累计 · 按月',
+    stats_source_real: '真实数据 · /interface/print 的 rx-byte / tx-byte 按网口差分，每秒采样；重拨清零按新计数继续累计',
     stats_source_fake: '演示模式或路由器离线：统计不累计，下方数字不是真实流量',
     stats_updated: '更新于', stats_sample: '最近采样', stats_no_sample: '尚无真实采样',
-    stats_reset_notice: '旧版混合统计已清空（无法按接口拆分），从现在起按接口精确记录',
-    stats_iface_title: '流量统计接口', stats_iface_tip: '默认统计所有接口。若只想统计上网流量，请只勾选 WAN / 外网口（如 pppoe-out1、ether1），否则 LAN 与 WAN 会被重复计入。历史按接口分别保存，随时可切换。',
-    stats_iface_all: '统计全部接口', stats_iface_custom: '仅统计指定接口',
-    stats_iface_list: '从路由器接口中选择', stats_iface_manual: '手动填写接口名 / 通配符',
-    stats_iface_manual_hint: '每行或用逗号分隔一个名称，支持 * 和 ? 通配符，例如 ether1、pppoe-*、vlan??。可填写当前列表中不存在的接口。',
-    stats_iface_no_list: '暂时没有读取到接口，请手动填写',
-    stats_iface_saved: '统计接口已保存，历史按接口即时重算',
-    stats_iface_need_one: '请至少选择一个接口或填写一个接口名',
-    stats_iface_reset: '历史按接口分别记录，切换范围不重置基线、不丢历史；单独选择某接口即只显示它的流量。',
-    stats_iface_matched: '已匹配', stats_iface_unit: '个接口',
-    stats_iface_none: '当前没有匹配到任何接口，请检查名称',
-    stats_iface_search: '搜索接口…',
+    stats_reset_notice: '旧版混合统计已清空（无法按网口拆分），从现在起按网口精确记录',
+    stats_reset_info: '检测到 {n} 次计数器清零（PPPoE 重拨 / 接口重建），已按清零后的真实计数继续累计',
+    stats_gap_info: '服务停机 {n} 次，停机期间的真实差分已计入当日合计（不摊到具体小时）',
+    stats_migrated: '历史已从旧版迁移并补出每日每网口数据',
+    stats_col_time: '时间', stats_col_iface: '网口', stats_col_sum: '合计', stats_detail_all: '全部网口（小计）',
+    stats_detail_hint: '今日按小时、本周/本月按天、累计按月，逐网口列出真实用量',
+    stats_detail_empty: '该范围暂无真实采样数据', stats_page: '第', stats_of: '/', stats_page_unit: '页',
+    stats_prev: '上一页', stats_next: '下一页',
   },
   en: {
     page_title: 'ROS Center', brand: 'ROS', brand_sub: 'Center', search_menu: 'Search menu…',
@@ -109,6 +111,8 @@ const I18N = {
     stream_on: 'STREAM', stream_off: 'POLL',
     add: 'Add', refresh: 'Refresh', save: 'Save', cancel: 'Cancel', edit: 'Edit', delete: 'Delete',
     enable: 'Enable', disable: 'Disable', enabled: 'Enabled', disabled: 'Disabled', yes: 'Yes', no: 'No',
+    run_script: 'Run', run_script_row: 'Run this script', run_script_none: 'Select the scripts to run first',
+    run_script_ok: 'Script run submitted', run_script_confirm: 'Run the {n} selected script(s) now?',
     filter: 'Filter', search: 'Search', clear: 'Clear', close: 'Close', confirm: 'Confirm',
     no_data: 'No data', waiting: 'Waiting for data…', loading: 'Loading…', selected: 'selected',
     row_one: 'record', rows: 'records', page: 'Page', of: '/', prev: 'Prev', next: 'Next',
@@ -162,29 +166,29 @@ const I18N = {
     wg_route: 'Client AllowedIPs', wg_psk: 'Preshared key', wg_responder: 'Responder only',
     wg_save_peer: 'Save to RouterOS', wg_peer_saved: 'Peer saved', wg_auto: 'Auto', wg_required_wg: 'Interface, allowed address and private key are required',
     sort_hint: 'Click to sort (ascending / descending)', singleton_hint: 'A single settings block - use Edit to change values',
-    stats_title: 'Traffic statistics', stats_sub: 'Real deltas of RouterOS interface byte counters, sampled every second',
-    stats_chart: 'Traffic trend', stats_detail: 'Details', stats_from_router: 'Real counter deltas',
-    stats_scope: 'Scope', stats_scope_all: 'All interfaces', stats_scope_custom: 'Custom interfaces',
-    stats_scope_wait: 'Loading statistics settings…', stats_iface_btn: 'Configure interfaces',
-    stats_view: 'View interface', stats_view_scope: 'Follow scope', stats_view_hint: 'Pick one interface to show only its counters, trend and details',
+    stats_title: 'Traffic statistics', stats_sub: 'Real per-interface counter deltas from RouterOS, sampled every second · redial resets are carried forward',
+    stats_chart: 'Traffic trend', stats_detail: 'Daily details', stats_from_router: 'Real counter deltas',
+    stats_scope: 'Interfaces', stats_scope_all: 'All interfaces', stats_scope_custom: 'Selected interfaces', stats_scope_wait: 'Loading interfaces…',
+    stats_iface_tip: 'Select one or more interfaces. Pick only the WAN uplink to avoid double counting LAN + WAN. History is stored per interface and can be re-scoped at any time.',
+    stats_iface_all: 'All interfaces', stats_iface_custom: 'Only checked interfaces',
+    stats_iface_manual: 'Custom names / wildcards', stats_iface_manual_hint: 'Wildcards * and ? are supported, e.g. pppoe-*, vlan??; separate with commas or new lines',
+    stats_iface_no_list: 'No interfaces available yet', stats_iface_saved: 'Interfaces saved. History is recomputed per interface immediately',
+    stats_iface_need_one: 'Select at least one interface', stats_custom_btn: 'Custom',
+    stats_iface_matched: 'Selected', stats_iface_unit: 'interfaces', stats_iface_none: 'No interface matches the current selection - check the names',
     stats_range_today: 'Today', stats_range_week: 'This week', stats_range_month: 'This month', stats_range_total: 'All time',
     stats_card_rx: 'Download', stats_card_tx: 'Upload', stats_card_sum: 'Total', stats_card_rate: 'Current rate',
-    stats_series_today: 'Today · last 60 minutes', stats_series_week: 'This week · daily', stats_series_month: 'This month · daily', stats_series_total: 'All time · monthly',
-    stats_source_real: 'Real data · rx-byte / tx-byte counter deltas from /interface/print, sampled every second',
+    stats_series_today: 'Today · hourly', stats_series_week: 'This week · daily', stats_series_month: 'This month · daily', stats_series_total: 'All time · monthly',
+    stats_source_real: 'Real data · rx-byte / tx-byte per-interface counter deltas from /interface/print, sampled every second; counter resets are carried forward',
     stats_source_fake: 'Demo mode or router offline: statistics are not accumulating and the numbers below are not real traffic',
     stats_updated: 'Updated', stats_sample: 'Last sample', stats_no_sample: 'No real sample yet',
     stats_reset_notice: 'Legacy mixed-interface history was cleared (cannot be split per interface); new history is exact',
-    stats_iface_title: 'Traffic statistics interfaces', stats_iface_tip: 'All interfaces are counted by default. To measure internet usage, select only the WAN / uplink interface (e.g. pppoe-out1, ether1); counting LAN and WAN together double-counts traffic. History is stored per interface, so you can switch scope at any time.',
-    stats_iface_all: 'Count all interfaces', stats_iface_custom: 'Count only selected interfaces',
-    stats_iface_list: 'Pick from router interfaces', stats_iface_manual: 'Manual names / wildcards',
-    stats_iface_manual_hint: 'One name per line or comma-separated. Wildcards * and ? are supported, e.g. ether1, pppoe-*, vlan??. Names not present in the list are allowed.',
-    stats_iface_no_list: 'No interfaces available yet - enter names manually',
-    stats_iface_saved: 'Interfaces saved. History is recomputed per interface immediately',
-    stats_iface_need_one: 'Select at least one interface or enter a name',
-    stats_iface_reset: 'History is stored per interface: changing scope does not reset the baseline or lose history, and selecting a single interface shows only that interface.',
-    stats_iface_matched: 'Matched', stats_iface_unit: 'interfaces',
-    stats_iface_none: 'No interface matches the current selection - check the names',
-    stats_iface_search: 'Search interfaces…',
+    stats_reset_info: '{n} counter resets detected (PPPoE redial / interface re-created); post-reset real bytes keep accumulating',
+    stats_gap_info: '{n} service gaps: real deltas during downtime were added to the day total (never spread across hours)',
+    stats_migrated: 'Legacy history migrated into per-day, per-interface buckets',
+    stats_col_time: 'Time', stats_col_iface: 'Interface', stats_col_sum: 'Total', stats_detail_all: 'All interfaces (subtotal)',
+    stats_detail_hint: 'Hourly today, daily for week/month, monthly for all time - listed per interface',
+    stats_detail_empty: 'No real samples in this range yet', stats_page: 'Page', stats_of: '/', stats_page_unit: '',
+    stats_prev: 'Previous', stats_next: 'Next',
   },
 };
 const urlLang = new URLSearchParams(location.search).get('lang');
@@ -197,8 +201,9 @@ const L = (zh, en) => (lang === 'zh' ? zh : en);
 const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
-  hoverIndex: -1, selectedIface: '__all__', mode: 'connecting', configDemo: false,
-  usageRange: 'today', usageData: null, usageViewIface: '', usageTimer: null, usageLoading: false,
+  hoverIndex: -1, selectedIface: '__all__', mode: 'connecting', configDemo: false, configOffline: false,
+  usageRange: 'today', usageData: null, usageTimer: null, usageLoading: false,
+  usageDetailPage: 1, usageIfaceSig: '',
   collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
   authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
 };
@@ -464,7 +469,7 @@ async function switchDevice(id, silent) {
   state.deviceId = id;
   try { localStorage.setItem('ros-traffic-device', id); } catch (e) { /* ignore */ }
   state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); state.selectedIface = '__all__';
-  state.latest = null; state.connRows = []; state.usageData = null; state.usageViewIface = '';
+  state.latest = null; state.connRows = []; state.usageData = null; state.usageDetailPage = 1; state.usageIfaceSig = '';
   renderDevicePicker();
   const nowDev = state.devices.find((x) => x.id === id);
   if (nowDev && $('adminName')) $('adminName').textContent = nowDev.user || 'admin';
@@ -550,7 +555,7 @@ async function refreshUsageData() {
   if (state.usageLoading) return;
   state.usageLoading = true;
   try {
-    const q = state.usageViewIface ? '?iface=' + encodeURIComponent(state.usageViewIface) : '';
+    const q = '?range=' + encodeURIComponent(state.usageRange);
     const d = await api('/api/usage' + q);
     state.usageData = d;
     if (state.section === 'trafficStats') paintTrafficStats(d);
@@ -584,6 +589,7 @@ function updateTopbar(d) {
     streamEl.classList.toggle('on', !!d.streaming);
   }
   $('sideDot').parentElement.classList.toggle('live', state.mode === 'live');
+  if (typeof syncConfigTag === 'function') syncConfigTag();
   const r = d.resource || {};
   const cpu = num(r['cpu-load']), memPct = r['total-memory'] ? Math.round((1 - num(r['free-memory']) / num(r['total-memory'])) * 100) : 0;
   const diskPct = r['total-hdd-space'] ? Math.round((1 - num(r['free-hdd-space']) / num(r['total-hdd-space'])) * 100) : 0;

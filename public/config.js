@@ -3,9 +3,17 @@
 /* ================= 配置表格页 ================= */
 async function loadRows(sec) {
   const d = await api('/api/config?section=' + encodeURIComponent(sec.id));
-  state.rows = d.rows || []; state.configDemo = !!d.demo;
+  state.rows = d.rows || []; state.configDemo = !!d.demo; state.configOffline = !!d.offline;
   if (sec.id === 'connections') state.connRows = state.rows;
   return state.rows;
+}
+/* 配置页状态标签随实时帧更新，避免首屏停留在过期的 DEMO */
+function syncConfigTag() {
+  const el = $('cfgModeTag') || $('sioModeTag'); if (!el) return;
+  const real = state.mode === 'live' && !state.configDemo && !state.configOffline;
+  const label = real ? 'LIVE' : state.configDemo ? 'DEMO' : (state.configOffline ? 'OFFLINE' : t('offline'));
+  el.textContent = label;
+  el.className = 'tag ' + (real ? 'green' : 'amber');
 }
 
 function renderConfigPage(sec) {
@@ -16,7 +24,8 @@ function renderConfigPage(sec) {
       <div><h1>${esc(tx(sec.title))}</h1><p>${esc(sec.path || '')}${!writable ? ' · ' + t('readonly_tip') : ''}</p></div>
       <div class="page-actions">
         ${writable ? `<button class="btn primary" id="btnAdd">+ ${t('add')}</button>` : ''}
-        ${writable && sec.toggle !== false ? `<button class="btn" id="btnEnable">${t('enable')}</button><button class="btn" id="btnDisable">${t('disable')}</button>` : ''}
+        ${writable && sec.runAction ? `<button class="btn" id="btnRun">▶ ${t('run_script')}</button>` : ''}
+        ${writable && !sec.runAction && sec.toggle !== false ? `<button class="btn" id="btnEnable">${t('enable')}</button><button class="btn" id="btnDisable">${t('disable')}</button>` : ''}
         ${writable ? `<button class="btn ghost-danger" id="btnDelete">${t('delete')}</button>` : ''}
         <button class="btn" id="btnRefresh">${t('refresh')}</button>
       </div>
@@ -27,7 +36,7 @@ function renderConfigPage(sec) {
         <input type="search" id="rowSearch" placeholder="${t('search')}…" value="${esc(state.rowFilter)}">
         <span class="tag" id="rowCount">0 ${t('rows')}</span>
         <span class="spacer"></span>
-        <span class="tag">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span>
+        <span class="tag" id="cfgModeTag">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span>
       </div>
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
@@ -41,8 +50,16 @@ function renderConfigPage(sec) {
   $('btnRefresh').onclick = () => loadRows(sec).then(() => { renderConfigPage(sec); toast(t('refresh') + ' OK', 'ok'); }).catch((e) => toast(e.message, 'err'));
   if (writable) {
     $('btnAdd').onclick = () => openForm(sec, null);
-    $('btnEnable').onclick = () => bulk(sec, 'enable');
-    $('btnDisable').onclick = () => bulk(sec, 'disable');
+    if (sec.runAction) {
+      $('btnRun').onclick = () => {
+        const ids = [...state.selectedIds];
+        if (!ids.length) { toast(t('run_script_none'), 'err'); return; }
+        confirmModal(t('run_script'), t('run_script_confirm').replace('{n}', String(ids.length)), true, () => bulk(sec, 'run'));
+      };
+    } else {
+      if ($('btnEnable')) $('btnEnable').onclick = () => bulk(sec, 'enable');
+      if ($('btnDisable')) $('btnDisable').onclick = () => bulk(sec, 'disable');
+    }
     $('btnDelete').onclick = () => confirmModal(t('confirm_delete'), `<b>${t('confirm_delete_msg')}</b><br><br>${t('selected')}: <b>${state.selectedIds.size}</b> ${t('row_one')}`, true,
       () => bulk(sec, 'remove'));
   }
@@ -60,7 +77,7 @@ function renderConfigPage(sec) {
   };
   $('prevPage').onclick = () => { if (state.page > 1) { state.page--; renderRows(sec); } };
   $('nextPage').onclick = () => { if (state.page < Math.max(1, Math.ceil(sortedRows(sec).length / state.pageSize))) { state.page++; renderRows(sec); } };
-  loadRows(sec).then(() => renderRows(sec)).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
+  loadRows(sec).then(() => { syncConfigTag(); renderRows(sec); }).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
 }
 
 /* 单例配置（DNS / 设备标识 / 时钟 / NTP）：只展示一组参数，避免误用新增/删除 */
@@ -74,11 +91,12 @@ function renderSingletonPage(sec) {
       </div></div>
     ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
     <div class="panel"><div class="panel-head"><div><h2>${esc(tx(sec.title))}</h2><p class="sub">${t('singleton_hint')}</p></div>
-      <span class="tag ${state.mode === 'live' && !state.configDemo ? 'green' : 'amber'}">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span></div>
+      <span class="tag ${state.mode === 'live' && !state.configDemo ? 'green' : 'amber'}" id="sioModeTag">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span></div>
       <div class="panel-body"><div class="kv-grid" id="sioBody"><div class="empty">${t('loading')}</div></div></div></div>`;
   $('sioRefresh').onclick = () => renderSingletonPage(sec);
   const edit = $('sioEdit'); if (edit) edit.onclick = () => openForm(sec, state.rows[0] || null);
   loadRows(sec).then(() => {
+    syncConfigTag();
     const box = $('sioBody'); if (!box) return;
     const row = state.rows[0] || {};
     const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
@@ -148,7 +166,8 @@ function renderRows(sec) {
     <td class="num" style="color:var(--muted)">${Number.isFinite(nid) ? nid : esc(r['.id'] || '—')}</td>
     ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''}>${cellHtml(r, c, sec)}</td>`).join('')}
     ${writable ? `<td><div class="row-actions">
-      ${sec.toggle !== false ? `<button class="icon-btn" data-act="toggle" title="${boolOn(r.disabled) ? t('enable') : t('disable')}">${boolOn(r.disabled) ? '○' : '●'}</button>` : ''}
+      ${sec.runAction ? `<button class="icon-btn run" data-act="run" title="${esc(t('run_script_row'))}">▶</button>` : ''}
+      ${!sec.runAction && sec.toggle !== false ? `<button class="icon-btn" data-act="toggle" title="${boolOn(r.disabled) ? t('enable') : t('disable')}">${boolOn(r.disabled) ? '○' : '●'}</button>` : ''}
       ${sec.id === 'wireguard' || sec.id === 'wgPeers' ? `<button class="icon-btn qr" data-act="qr" title="${t('wg_qr')}">▣</button>` : ''}
       <button class="icon-btn" data-act="edit" title="${t('edit')}">✎</button>
       <button class="icon-btn del" data-act="del" title="${t('delete')}">✕</button>
@@ -162,6 +181,7 @@ function renderRows(sec) {
     const act = b.dataset.act;
     if (act === 'edit') { const row = state.rows.find((x) => x['.id'] === id); openForm(sec, row); }
     else if (act === 'qr') { const row = state.rows.find((x) => x['.id'] === id); openWireguardQr(row, sec); }
+    else if (act === 'run') confirmModal(t('run_script'), t('run_script_confirm').replace('{n}', '1'), true, () => bulk(sec, 'run', [id]));
     else if (act === 'toggle') bulk(sec, boolOn((state.rows.find((x) => x['.id'] === id) || {}).disabled) ? 'enable' : 'disable', [id]);
     else if (act === 'del') confirmModal(t('confirm_delete'), t('confirm_delete_msg'), true, () => bulk(sec, 'remove', [id]));
   });
@@ -240,7 +260,7 @@ async function bulk(sec, action, ids) {
   if (!chosen.length) { toast(t('selected_none'), 'err'); return; }
   try {
     const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section: sec.id, action, ids: chosen }) });
-    toast(`${t('action_ok')} (${r.changed || 0})`, 'ok');
+    toast(action === 'run' ? t('run_script_ok') : `${t('action_ok')} (${r.changed || 0})`, 'ok');
     state.selectedIds.clear(); await loadRows(sec); renderConfigPage(sec);
   } catch (e) { toast(e.message, 'err'); }
 }

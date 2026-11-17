@@ -222,10 +222,18 @@ const SECTIONS = [
       F('start-date', '开始日期', 'Start date', 'text'), F('start-time', '开始时间', 'Start time', 'text'),
       F('interval', '间隔', 'Interval', 'text'), F('comment', '备注', 'Comment', 'text'), F('disabled', '禁用', 'Disabled', 'bool')],
     { columns: ['name', 'start-date', 'start-time', 'interval', 'comment', 'disabled'] }),
+  /* 官方文档 https://help.mikrotik.com/docs/spaces/ROS/pages/47579229/Scripting
+     /system/script 没有 disabled 字段，不能启用/禁用；菜单命令是 /system/script/run + .id。
+     可写属性：name / source / policy / dont-require-permissions / comment
+     只读属性：owner / run-count / last-started */
   S('scripts', 'system', '脚本', 'Scripts', '/system/script',
-    [F('.id', 'ID', 'ID', 'id'), F('name', '名称', 'Name', 'text', { required: true }), F('source', '内容', 'Source', 'textarea'),
-      F('owner', '所有者', 'Owner', 'readonly'), F('comment', '备注', 'Comment', 'text')],
-    { columns: ['name', 'owner', 'comment'] }),
+    [F('.id', 'ID', 'ID', 'id'), F('name', '名称', 'Name', 'text', { required: true }),
+      F('source', '内容', 'Source', 'textarea'), F('policy', '权限策略', 'Policy', 'text'),
+      F('dont-require-permissions', '免权限校验', "Don't require permissions", 'bool'),
+      F('owner', '所有者', 'Owner', 'readonly'), F('run-count', '运行次数', 'Run count', 'readonly'),
+      F('last-started', '上次运行', 'Last started', 'readonly'), F('comment', '备注', 'Comment', 'text')],
+    { columns: ['name', 'owner', 'run-count', 'last-started', 'comment'],
+      toggle: false, runAction: true, runPath: '/system/script/run' }),
   S('systemPackage', 'system', '软件包', 'Packages', '/system/package',
     [F('.id', 'ID', 'ID', 'id'), F('name', '名称', 'Name', 'readonly'), F('version', '版本', 'Version', 'readonly'),
       F('enabled', '启用', 'Enabled', 'readonly'), F('scheduled', '计划', 'Scheduled', 'readonly')],
@@ -400,7 +408,9 @@ const seed = {
     { '.id': '*1', name: 'daily-backup', 'on-event': '/system/backup/save name=daily', 'start-date': '2026-01-01', 'start-time': '03:00:00', interval: '1d', comment: '每日备份', disabled: 'false' },
   ],
   scripts: [
-    { '.id': '*1', name: 'backup', source: '/system/backup/save name=auto-backup', owner: 'admin', comment: '备份脚本' },
+    { '.id': '*1', name: 'backup', source: '/system/backup/save name=auto-backup', owner: 'admin',
+      policy: 'read,write', 'dont-require-permissions': 'false', 'run-count': '3',
+      'last-started': '2026-11-17 09:00:00', comment: '备份脚本' },
   ],
   systemPackage: [
     { '.id': '*1', name: 'routeros', version: '7.15.2', enabled: 'true', scheduled: 'false' },

@@ -234,27 +234,56 @@ function parseRouterUptime(v) {
 
 /* ================= 流量统计 =================
    唯一数据源：RouterOS /interface/print 的 rx-byte / tx-byte 真实累计字节计数器。
-   每秒采样一次，对「每个接口分别」求差分（本次值 - 上次值），写入「接口 × 小时」桶。
-   不使用速率积分、随机数、演示数据或任何估算；只有真实在线采样才写入历史。
-   因为历史按接口独立保存，切换统计范围 / 单独查看某个接口时可以精确重算，
-   不会混入其他接口的流量，也不必丢弃历史或重建基线。 */
-const USAGE_VERSION = 2;
+   每秒采样一次，对「每个接口分别」求差分（本次值 - 上次值），同时写入
+     · hours[YYYY-MM-DDTHH][接口]  —— 今日按小时的明细 / 趋势
+     · days[YYYY-MM-DD][接口]      —— 每日每网口真实用量（日/周/月/累计的唯一依据）
+   PPPoE 重拨、接口重建、路由器重启都会把计数器清零：计数器下降时不再丢弃采样，
+   而是把「清零后的计数器值」作为自清零以来的真实字节计入（并记一次 reset），
+   这样重拨后当天/当月的流量继续累计，不会归零也不会停记。
+   32 位计数器回绕单独识别（仅在该设备从未出现 64 位数值时启用）。
+   服务长时间停机的断档：差分仍是真实字节，计入当天日合计，但不虚构到某个小时。
+   演示模式 / 离线 / 采不到计数器时绝不写历史；无速率积分、无估算、无假数据。 */
+const USAGE_VERSION = 3;
 const USAGE_KEEP_HOURS = 24 * 400;
+const USAGE_KEEP_DAYS = 400;
+const USAGE_GAP_MS = 10 * 60 * 1000;
 let usageResetNotice = false;
-let usageStore = loadUsage();
+let usageMigrated = false;
 let usageDirty = false;
+let usageStore = loadUsage();
 function emptyUsageStore() { return { version: USAGE_VERSION, devices: {} }; }
 function loadUsage() {
   let raw;
   try { raw = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8')); } catch (e) { return emptyUsageStore(); }
   if (!raw || typeof raw !== 'object' || !raw.devices || typeof raw.devices !== 'object') return emptyUsageStore();
-  /* v1 把全部接口混在同一个日桶里，无法按接口拆分；不把它冒充成真实数据，直接清空重新记录 */
-  if (raw.version !== USAGE_VERSION) {
-    usageResetNotice = true;
-    console.warn('[usage] old mixed-interface history detected - resetting; new history is recorded per interface from now on');
-    return emptyUsageStore();
+  if (raw.version === USAGE_VERSION) return raw;
+  if (raw.version === 2) {
+    /* v2 已有「接口 × 小时」桶：沿用并补出每日桶，不清零、不丢历史 */
+    usageMigrated = true;
+    for (const d of Object.values(raw.devices)) {
+      if (!d || typeof d !== 'object') continue;
+      d.days = d.days || {};
+      for (const [hk, slots] of Object.entries(d.hours || {})) {
+        const dk = String(hk).slice(0, 10), day = d.days[dk] || (d.days[dk] = {});
+        for (const [name, v] of Object.entries(slots || {})) {
+          const s = day[name] || (day[name] = { rx: 0, tx: 0 });
+          s.rx += num(v.rx); s.tx += num(v.tx);
+        }
+      }
+      for (const [name, v] of Object.entries(d.perIface || {})) {
+        d.perIface[name] = { rx: num(v.rx), tx: num(v.tx), ts: num(d.lastTs) };
+      }
+      delete d.minutes;
+      d.bit64 = false; d.gaps = 0; d.resetLog = []; d.resets = num(d.resets);
+    }
+    raw.version = USAGE_VERSION;
+    usageDirty = true;
+    console.log('[usage] v2 history migrated into per-day buckets without data loss');
+    return raw;
   }
-  return raw;
+  usageResetNotice = true;
+  console.warn('[usage] legacy mixed-interface history cleared; new history is exact per interface');
+  return emptyUsageStore();
 }
 function saveUsage(force) {
   if (!usageDirty && !force) return;
@@ -266,18 +295,21 @@ function saveUsage(force) {
   } catch (e) { /* ignore */ }
 }
 function usageBucket(dev) {
-  if (!usageStore.devices[dev.id]) usageStore.devices[dev.id] = { interfaces: [], perIface: {}, lastTs: 0, hours: {}, minutes: {}, resets: 0 };
+  if (!usageStore.devices[dev.id]) usageStore.devices[dev.id] = {
+    interfaces: [], perIface: {}, lastTs: 0, bit64: false,
+    hours: {}, days: {}, resets: 0, resetLog: [], gaps: 0,
+  };
   const b = usageStore.devices[dev.id];
   if (!Array.isArray(b.interfaces)) b.interfaces = [];
   if (!b.hours || typeof b.hours !== 'object') b.hours = {};
-  if (!b.minutes || typeof b.minutes !== 'object') b.minutes = {};
+  if (!b.days || typeof b.days !== 'object') b.days = {};
   if (!b.perIface || typeof b.perIface !== 'object') b.perIface = {};
+  if (!Array.isArray(b.resetLog)) b.resetLog = [];
   return b;
 }
 const pad2 = (n) => String(n).padStart(2, '0');
 function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
 function hourKey(ts) { const d = new Date(ts); return dayKey(ts) + 'T' + pad2(d.getHours()); }
-function minuteKey(ts) { const d = new Date(ts); return hourKey(ts) + ':' + pad2(d.getMinutes()); }
 /* 接口名匹配：精确匹配 + * / ? 通配符（RouterOS 接口名如 ether1、vlan-20、pppoe-out1） */
 function matchIface(name, pattern) {
   if (name === pattern) return true;
@@ -288,41 +320,66 @@ function matchIface(name, pattern) {
 function ifaceSelected(name, patterns) {
   return !patterns.length || patterns.some((p) => matchIface(name, p));
 }
+/* 计数器差分：
+   - 正常递增：本次 - 上次
+   - 32 位回绕（仅在设备从未出现 64 位数值时）：2^32 - 上次 + 本次
+   - 清零（PPPoE 重拨 / 接口重建 / 路由重启）：本次值就是清零以来的真实字节，照实计入
+   绝不按速率补值、绝不把清零后的流量丢掉。 */
+function counterDelta(prev, cur, bit64) {
+  if (cur >= prev) return { d: cur - prev, reset: false };
+  if (!bit64 && prev > 0xFF000000 && cur < 0x10000000) return { d: 0x100000000 - prev + cur, reset: false };
+  return { d: cur, reset: true };
+}
 /* 记录一次真实采样。real=false（演示模式 / 离线 / 采不到计数器）时绝不写历史 */
 function recordUsage(dev, ifaces, real) {
   const b = usageBucket(dev);
   if (!real || !Array.isArray(ifaces) || !ifaces.length) return;
-  const now = Date.now(), prevTs = b.lastTs || 0, prev = b.perIface || {};
+  const now = Date.now(), prevTs = num(b.lastTs), prev = b.perIface || {};
   const cur = {};
   for (const i of ifaces) {
     if (!i || !i.name || i.rxBytes == null || i.txBytes == null) continue;
     const rx = Number(i.rxBytes), tx = Number(i.txBytes);
     if (!Number.isFinite(rx) || !Number.isFinite(tx) || rx < 0 || tx < 0) continue;
     cur[i.name] = { rx, tx };
+    if (rx > 0xFFFFFFFF || tx > 0xFFFFFFFF) b.bit64 = true;
   }
-  b.perIface = cur; b.lastTs = now; usageDirty = true;
-  if (!prevTs || !Object.keys(prev).length || now - prevTs > 24 * 3600 * 1000) return; // 只重建基线
-  const key = hourKey(now), hour = b.hours[key] || (b.hours[key] = {});
-  const mkey = minuteKey(now), minute = b.minutes[mkey] || (b.minutes[mkey] = {});
+  /* 接口短暂消失时保留旧计数器（7 天），重拨后重新出现才能识别清零并继续累计 */
+  const nextPer = {};
+  for (const [name, p] of Object.entries(prev)) {
+    if (now - num(p.ts, prevTs) < 7 * 86400000) nextPer[name] = p;
+  }
+  for (const [name, c] of Object.entries(cur)) nextPer[name] = { rx: c.rx, tx: c.tx, ts: now };
+  b.perIface = nextPer; b.lastTs = now;
+  if (!Object.keys(cur).length) { usageDirty = true; return; }
+  const longGap = prevTs > 0 && now - prevTs > USAGE_GAP_MS;
+  if (longGap) b.gaps = num(b.gaps) + 1;
+  const hour = hourKey(now), day = dayKey(now);
   for (const [name, c] of Object.entries(cur)) {
-    const p = prev[name]; if (!p) continue;                       // 新出现的接口下一次采样才计入
-    let drx = c.rx - p.rx, dtx = c.tx - p.tx;
-    // 32 位计数器回绕修正（部分 RouterOS 平台的 rx-byte 为 32-bit）
-    if (drx < 0 && p.rx > 0xFF000000 && c.rx < 0x10000000) drx += 0x100000000;
-    if (dtx < 0 && p.tx > 0xFF000000 && c.tx < 0x10000000) dtx += 0x100000000;
-    if (drx < 0 || dtx < 0) { b.resets = (b.resets || 0) + 1; continue; }  // 计数器重置：跳过该接口该次
-    if (drx > 1e12 || dtx > 1e12) continue;                                // 明显异常值：跳过
+    const p = prev[name];
+    if (!p) continue;                                   // 首次见到该接口：只建基线
+    const a = counterDelta(num(p.rx), c.rx, b.bit64), z = counterDelta(num(p.tx), c.tx, b.bit64);
+    if (a.reset || z.reset) {
+      b.resets = num(b.resets) + 1;
+      b.resetLog.push({ ts: now, iface: name, rx: c.rx, tx: c.tx });
+      if (b.resetLog.length > 30) b.resetLog.shift();
+    }
+    const drx = a.d, dtx = z.d;
+    if (drx < 0 || dtx < 0 || drx > 1e12 || dtx > 1e12) continue;   // 明显异常值：跳过
     if (!drx && !dtx) continue;
-    const slot = hour[name] || (hour[name] = { rx: 0, tx: 0 });
-    slot.rx += drx; slot.tx += dtx;
-    const mslot = minute[name] || (minute[name] = { rx: 0, tx: 0 });
-    mslot.rx += drx; mslot.tx += dtx;
+    if (!longGap) {                                     // 长时间停机不虚构小时分布
+      const slot = b.hours[hour] || (b.hours[hour] = {});
+      const hs = slot[name] || (slot[name] = { rx: 0, tx: 0 });
+      hs.rx += drx; hs.tx += dtx;
+    }
+    const daySlot = b.days[day] || (b.days[day] = {});  // 日合计始终是完整真实差分
+    const ds = daySlot[name] || (daySlot[name] = { rx: 0, tx: 0 });
+    ds.rx += drx; ds.tx += dtx;
   }
-  const keys = Object.keys(b.hours).sort();
-  while (keys.length > USAGE_KEEP_HOURS) { delete b.hours[keys.shift()]; }
-  // 分钟桶只保留最近 26 小时，供「今日」实时趋势用
-  const mkeys = Object.keys(b.minutes).sort();
-  while (mkeys.length > 26 * 60) { delete b.minutes[mkeys.shift()]; }
+  usageDirty = true;
+  const hk = Object.keys(b.hours).sort();
+  while (hk.length > USAGE_KEEP_HOURS) { delete b.hours[hk.shift()]; }
+  const dk = Object.keys(b.days).sort();
+  while (dk.length > USAGE_KEEP_DAYS) { delete b.days[dk.shift()]; }
 }
 /* 可选接口清单：只取真实接口元数据；仅显式演示模式才用演示接口 */
 function usageAvailable(dev) {
@@ -333,84 +390,114 @@ function usageAvailable(dev) {
 }
 function emptyUsageResponse() {
   return { deviceId: '', ts: Date.now(), mode: 'offline', demo: false, dataReal: false, source: '', interval: INTERVAL,
-    sampleTs: 0, resets: 0, resetNotice: false, today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 },
+    sampleTs: 0, resets: 0, resetLog: [], gaps: 0, migrated: false, resetNotice: false,
+    today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 },
     month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 }, rate: { rx: 0, tx: 0, real: false },
-    series: { today: [], week: [], month: [], total: [] }, interfaces: [], scope: 'all', viewIface: '',
-    available: [], matched: 0, hours: 0 };
+    series: { today: [], week: [], month: [], total: [] }, detail: [], detailRange: 'today',
+    interfaces: [], scope: 'all', available: [], matched: 0, hours: 0, days: 0 };
 }
-/* 汇总：patterns 为空 = 全部接口；opts.iface 指定时只统计/查看该接口 */
+/* 汇总：按「日 × 网口」真实累计；opts.range 决定明细粒度（今日按小时，其余按天/月） */
 function usageSummary(dev, opts = {}) {
-  const b = usageStore.devices[dev.id] || { hours: {}, interfaces: [] };
-  const hours = b.hours || {};
+  const b = usageStore.devices[dev.id] || { hours: {}, days: {}, interfaces: [] };
   const sel = Array.isArray(b.interfaces) ? b.interfaces.slice() : [];
-  const viewIface = String(opts.iface || '').trim().slice(0, 64);
-  const patterns = viewIface ? [viewIface] : sel;
+  const patterns = sel;
+  const range = ['today', 'week', 'month', 'total'].includes(opts.range) ? opts.range : 'today';
   const available = usageAvailable(dev);
-  const now = new Date();
-  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const now = new Date(), nowMs = now.getTime(), todayStr = dayKey(nowMs);
   const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1); monthStart.setHours(0, 0, 0, 0);
-  const hourTs = (hk) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(hk);
-    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4]).getTime() : NaN;
-  };
-  const addSlots = (slots, acc) => {
+
+  /* 每日总量 + 每日每网口明细（唯一日/周/月/累计依据） */
+  const dayTotals = new Map(), dayIfaces = new Map();
+  for (const [dk, slots] of Object.entries(b.days || {})) {
+    const acc = { rx: 0, tx: 0 }, per = new Map();
     for (const [name, v] of Object.entries(slots || {})) {
       if (!ifaceSelected(name, patterns)) continue;
-      acc.rx += num(v.rx); acc.tx += num(v.tx);
+      const rx = num(v.rx), tx = num(v.tx);
+      acc.rx += rx; acc.tx += tx;
+      const c = per.get(name) || { rx: 0, tx: 0 }; c.rx += rx; c.tx += tx; per.set(name, c);
     }
-  };
-  const sumRange = (fromMs) => {
+    dayTotals.set(dk, acc); dayIfaces.set(dk, per);
+  }
+  const sumDays = (from) => {
     const acc = { rx: 0, tx: 0 };
-    for (const [hk, slots] of Object.entries(hours)) {
-      const ts = hourTs(hk);
-      if (!(ts >= fromMs && ts <= now.getTime())) continue;
-      addSlots(slots, acc);
-    }
+    for (const [dk, v] of dayTotals) if (dk >= from && dk <= todayStr) { acc.rx += v.rx; acc.tx += v.tx; }
     return { rx: Math.round(acc.rx), tx: Math.round(acc.tx) };
   };
-  const today = sumRange(todayStart.getTime()), week = sumRange(monday.getTime());
-  const month = sumRange(monthStart.getTime()), total = sumRange(0);
-  /* 图表序列：今日按分钟（最近 60 分钟，只列真实采样区间）/ 本周按天 / 本月按天 / 累计按月 */
+  const today = sumDays(todayStr), week = sumDays(dayKey(monday.getTime()));
+  const month = sumDays(dayKey(monthStart.getTime())), total = sumDays('0000-00-00');
+
+  /* 今日每小时总量 + 每小时每网口明细（小时桶只含连续采样区间） */
+  const hourTotals = new Map(), hourIfaces = new Map();
+  for (const [hk, slots] of Object.entries(b.hours || {})) {
+    if (!String(hk).startsWith(todayStr)) continue;
+    const hh = String(hk).slice(11), acc = { rx: 0, tx: 0 }, per = new Map();
+    for (const [name, v] of Object.entries(slots || {})) {
+      if (!ifaceSelected(name, patterns)) continue;
+      const rx = num(v.rx), tx = num(v.tx);
+      acc.rx += rx; acc.tx += tx;
+      const c = per.get(name) || { rx: 0, tx: 0 }; c.rx += rx; c.tx += tx; per.set(name, c);
+    }
+    hourTotals.set(hh, acc); hourIfaces.set(hh, per);
+  }
+  /* 图表序列：今日按小时 / 本周按天 / 本月按天 / 累计按月 */
   const series = { today: [], week: [], month: [], total: [] };
-  const perDay = new Map();
-  for (const [hk, slots] of Object.entries(hours)) {
-    const acc = { rx: 0, tx: 0 }; addSlots(slots, acc);
-    const d = hk.slice(0, 10), c = perDay.get(d) || { rx: 0, tx: 0 };
-    c.rx += acc.rx; c.tx += acc.tx; perDay.set(d, c);
+  for (let h = 0; h <= now.getHours(); h++) {
+    const hh = pad2(h), v = hourTotals.get(hh) || { rx: 0, tx: 0 };
+    series.today.push({ label: hh + ':00', rx: Math.round(v.rx), tx: Math.round(v.tx) });
   }
-  const minuteAcc = new Map();
-  for (const [mk, slots] of Object.entries(b.minutes || {})) {
-    const acc = { rx: 0, tx: 0 }; addSlots(slots, acc);
-    minuteAcc.set(mk, acc);
-  }
-  const labelKeys = [];
-  for (let i = 59; i >= 0; i--) labelKeys.push(minuteKey(now.getTime() - i * 60000));
-  const first = labelKeys.findIndex((k) => minuteAcc.has(k));
-  const minuteKeys = first >= 0 ? labelKeys.slice(first) : [minuteKey(now.getTime())];
-  series.today = minuteKeys.map((k) => {
-    const v = minuteAcc.get(k) || { rx: 0, tx: 0 };
-    return { label: k.slice(11), rx: Math.round(v.rx), tx: Math.round(v.tx) };
-  });
   const daySeries = (from, count) => {
     const out = [], base = new Date(from); base.setHours(0, 0, 0, 0);
     for (let i = 0; i < count; i++) {
       const d = new Date(base); d.setDate(base.getDate() + i);
-      if (d.getTime() > now.getTime()) break;
-      const v = perDay.get(dayKey(d.getTime())) || { rx: 0, tx: 0 };
-      out.push({ label: dayKey(d.getTime()).slice(5), rx: Math.round(v.rx), tx: Math.round(v.tx) });
+      if (d.getTime() > nowMs) break;
+      const k = dayKey(d.getTime()), v = dayTotals.get(k) || { rx: 0, tx: 0 };
+      out.push({ label: k.slice(5), rx: Math.round(v.rx), tx: Math.round(v.tx) });
     }
     return out;
   };
-  series.week = daySeries(monday, Math.max(1, Math.min(7, Math.floor((now - monday) / 86400000) + 1)));
-  series.month = daySeries(monthStart, Math.max(1, Math.floor((now - monthStart) / 86400000) + 1));
-  const perMonth = new Map();
-  for (const [d, v] of perDay) {
-    const k = d.slice(0, 7), c = perMonth.get(k) || { rx: 0, tx: 0 };
+  series.week = daySeries(monday, Math.max(1, Math.min(7, Math.floor((nowMs - monday) / 86400000) + 1)));
+  series.month = daySeries(monthStart, Math.max(1, Math.floor((nowMs - monthStart) / 86400000) + 1));
+  const perMonth = new Map(), monthIfaces = new Map();
+  for (const [dk, per] of dayIfaces) {
+    const k = dk.slice(0, 7), c = perMonth.get(k) || { rx: 0, tx: 0 }, v = dayTotals.get(dk);
     c.rx += v.rx; c.tx += v.tx; perMonth.set(k, c);
+    const mi = monthIfaces.get(k) || new Map();
+    for (const [name, x] of per) {
+      const y = mi.get(name) || { rx: 0, tx: 0 }; y.rx += x.rx; y.tx += x.tx; mi.set(name, y);
+    }
+    monthIfaces.set(k, mi);
   }
   series.total = [...perMonth.entries()].sort().slice(-24)
     .map(([k, v]) => ({ label: k, rx: Math.round(v.rx), tx: Math.round(v.tx) }));
+
+  /* 明细行：每个时间段先一行「全部接口」小计，再逐网口列出真实用量（最新在前） */
+  const entries = [];
+  if (range === 'today') {
+    for (const [hh, per] of [...hourIfaces.entries()].sort()) {
+      const t = hourTotals.get(hh) || { rx: 0, tx: 0 };
+      if (!t.rx && !t.tx) continue;
+      entries.push({ label: todayStr + ' ' + hh + ':00', total: t, per });
+    }
+  } else if (range === 'total') {
+    for (const [k, per] of [...monthIfaces.entries()].sort()) {
+      entries.push({ label: k, total: perMonth.get(k) || { rx: 0, tx: 0 }, per });
+    }
+  } else {
+    const from = range === 'week' ? dayKey(monday.getTime()) : dayKey(monthStart.getTime());
+    for (const dk of [...dayTotals.keys()].sort()) {
+      if (dk < from || dk > todayStr) continue;
+      const v = dayTotals.get(dk); if (!v.rx && !v.tx) continue;
+      entries.push({ label: dk, total: v, per: dayIfaces.get(dk) || new Map() });
+    }
+  }
+  entries.reverse();
+  const detail = [];
+  for (const e of entries.slice(0, 400)) {
+    detail.push({ label: e.label, iface: '', rx: Math.round(e.total.rx), tx: Math.round(e.total.tx) });
+    const per = [...e.per.entries()].sort((a, c) => (c[1].rx + c[1].tx) - (a[1].rx + a[1].tx));
+    for (const [name, v] of per) detail.push({ label: e.label, iface: name, rx: Math.round(v.rx), tx: Math.round(v.tx) });
+  }
   /* 当前速率：monitor-traffic 的真实 bps，不做任何推算 */
   let rate = { rx: 0, tx: 0, real: false };
   if (!dev.forceDemo && dev.mode === 'live' && dev.lastRates && dev.lastRates.size) {
@@ -424,12 +511,14 @@ function usageSummary(dev, opts = {}) {
   return {
     deviceId: dev.id, ts: Date.now(), mode: dev.mode, demo: dev.forceDemo,
     dataReal: !dev.forceDemo && dev.mode === 'live',
-    source: 'RouterOS /interface/print: rx-byte / tx-byte cumulative counters, per-interface deltas',
-    interval: INTERVAL, sampleTs: b.lastTs || 0, resets: b.resets || 0,
-    resetNotice: usageResetNotice, today, week, month, total, series, rate,
-    interfaces: sel, scope: sel.length ? 'custom' : 'all', viewIface, available,
+    source: 'RouterOS /interface/print rx-byte / tx-byte per-interface counter deltas; redial resets counted, no estimation',
+    interval: INTERVAL, sampleTs: num(b.lastTs), resets: num(b.resets),
+    resetLog: (b.resetLog || []).slice(-5), gaps: num(b.gaps),
+    migrated: usageMigrated, resetNotice: usageResetNotice,
+    today, week, month, total, series, detail, detailRange: range, rate,
+    interfaces: sel, scope: sel.length ? 'custom' : 'all', available,
     matched: available.filter((i) => ifaceSelected(i.name, patterns)).length,
-    hours: Object.keys(hours).length,
+    hours: Object.keys(b.hours || {}).length, days: Object.keys(b.days || {}).length,
   };
 }
 
@@ -663,6 +752,7 @@ async function rosWrite(dev, section, action, payload) {
       case 'enable': return { changed: demoToggle(dev, section.id, ids, true) };
       case 'disable': return { changed: demoToggle(dev, section.id, ids, false) };
       case 'remove': return { changed: demoRemove(dev, section.id, ids) };
+      case 'run': throw new Error('演示模式不能运行脚本 / Demo mode cannot run scripts');
       default: throw new Error('不支持的操作');
     }
   }
@@ -676,6 +766,11 @@ async function rosWrite(dev, section, action, payload) {
       cmds.push([`${section.path}/set`, `=.id=${ids[0]}`, ...wv]); break;
     case 'enable': case 'disable': for (const id of ids) cmds.push([`${section.path}/${action}`, `=.id=${id}`]); break;
     case 'remove': for (const id of ids) cmds.push([`${section.path}/remove`, `=.id=${id}`]); break;
+    /* /system/script 没有 enabled/disabled 字段，只有 run 命令（官方文档 Scripting → Script repository） */
+    case 'run':
+      if (!section.runPath) throw new Error('该分类不支持运行');
+      for (const id of ids) cmds.push([section.runPath, `=.id=${id}`]);
+      break;
     default: throw new Error('不支持的操作');
   }
   let changed = 0;
@@ -1277,11 +1372,11 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/snapshot') return json(res, 200, snapshotOf(reqDevice(req, url)));
   if (p === '/api/usage' && req.method === 'GET') {
     const dev = reqDevice(req, url);
-    const iface = String(url.searchParams.get('iface') || '').trim().slice(0, 64);
-    return json(res, 200, dev ? usageSummary(dev, { iface }) : emptyUsageResponse());
+    const range = String(url.searchParams.get('range') || '').trim();
+    return json(res, 200, dev ? usageSummary(dev, { range }) : emptyUsageResponse());
   }
-  /* 自定义参与流量统计的接口：interfaces=[] 表示全部接口，元素支持 * / ? 通配符。
-     历史按接口独立保存，切换范围无需重建基线、不会丢历史，也不会混入其他接口。 */
+  /* 多选参与统计的网口：interfaces=[] 表示全部接口，元素支持 * / ? 通配符。
+     历史按「日 × 网口」独立保存，切换范围无需重建基线、不会丢历史，也不会混入其他网口。 */
   if (p === '/api/usage' && req.method === 'POST') {
     try {
       const body = await readBody(req);
@@ -1293,7 +1388,7 @@ const server = http.createServer(async (req, res) => {
       usageBucket(dev).interfaces = cleaned;
       usageDirty = true; saveUsage(true);
       console.log(`[usage] ${dev.name} interfaces=${cleaned.length ? cleaned.join(',') : 'ALL'} by=${req.socket.remoteAddress}`);
-      return json(res, 200, { ok: true, ...usageSummary(dev, { iface: String(body.iface || '').trim().slice(0, 64) }) });
+      return json(res, 200, { ok: true, ...usageSummary(dev, { range: String(body.range || '').trim() }) });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/history') {
@@ -1330,7 +1425,8 @@ const server = http.createServer(async (req, res) => {
     if (!section || !section.path) return json(res, 400, { error: '未知配置分类' });
     try {
       const dev = reqDevice(req, url);
-      return json(res, 200, { deviceId: dev && dev.id, rows: await rosPrint(dev, section), demo: !dev || dev.forceDemo || !(dev.api && dev.api.connected) });
+      return json(res, 200, { deviceId: dev && dev.id, rows: await rosPrint(dev, section),
+        demo: !!(dev && dev.forceDemo), offline: !dev || !(dev.api && dev.api.connected) });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
   if (p === '/api/config' && req.method === 'POST') {
@@ -1339,9 +1435,11 @@ const server = http.createServer(async (req, res) => {
       const section = SECTION_MAP[body.section];
       if (!section || !section.path) throw new Error('未知配置分类');
       if (!section.writable) throw new Error('该分类为只读');
-      if (!['add', 'set', 'enable', 'disable', 'remove'].includes(body.action)) throw new Error('不支持的操作');
+      if (!['add', 'set', 'enable', 'disable', 'remove', 'run'].includes(body.action)) throw new Error('不支持的操作');
+      if ((body.action === 'enable' || body.action === 'disable') && section.toggle === false) throw new Error('该分类不支持启用/禁用');
+      if (body.action === 'run' && !section.runPath) throw new Error('该分类不支持运行');
       const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === 'string').slice(0, 200) : [];
-      if (['set', 'enable', 'disable', 'remove'].includes(body.action) && !ids.length && !(body.action === 'set' && section.singleton)) throw new Error('请至少选择一条记录');
+      if (['set', 'enable', 'disable', 'remove', 'run'].includes(body.action) && !ids.length && !(body.action === 'set' && section.singleton)) throw new Error('请至少选择一条记录');
       if (body.values && typeof body.values !== 'object') throw new Error('参数格式错误');
       const dev = reqDevice(req, url, body);
       const result = await rosWrite(dev, section, body.action, { ids, values: body.values || {} });
