@@ -1,0 +1,34 @@
+name: Diagnose Hub API
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hub API auth probes
+        env:
+          HUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set +e
+          echo "=== basic lowercase hub api ==="
+          curl -sS -o /tmp/basic.json -w 'HTTP:%{http_code}\n' -u "$HUB_USER:$HUB_TOKEN" https://hub.docker.com/v2/user/
+          head -c 150 /tmp/basic.json; echo
+          echo "=== users/login API ==="
+          CODE=$(curl -sS -o /tmp/login.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$HUB_USER\",\"password\":\"$HUB_TOKEN\"}" https://hub.docker.com/v2/users/login/)
+          echo "LOGIN:$CODE"
+          python3 -c "import json;d=json.load(open('/tmp/login.json'));print('keys',list(d),'token_len',len(d.get('token','')))"
+          if [ "$CODE" != "200" ]; then head -c 200 /tmp/login.json; echo; exit 0; fi
+          TOK=$(python3 -c "import json;print(json.load(open('/tmp/login.json'))['token'])")
+          echo "=== GET repo ==="
+          curl -sS -o /tmp/repo.json -w 'HTTP:%{http_code}\n' -H "Authorization: JWT $TOK" "https://hub.docker.com/v2/repositories/$HUB_USER/ros-center/"
+          head -c 150 /tmp/repo.json; echo
+          echo "=== PATCH repo with README ==="
+          python3 - <<'PY' > /tmp/meta.json
+          import json
+          print(json.dumps({"description":"ROS Center - multi-router RouterOS control center: live traffic, config, bilingual UI and 10 themes","full_description":open("README.md",encoding="utf-8").read()}))
+          PY
+          curl -sS -o /tmp/patch.json -w 'HTTP:%{http_code}\n' -X PATCH -H "Authorization: JWT $TOK" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/meta.json "https://hub.docker.com/v2/repositories/$HUB_USER/ros-center/"
+          head -c 300 /tmp/patch.json; echo
