@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="page_title">ROS Center</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-brand">
+      <div class="logo" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <div class="brand-name"><b data-i18n="brand">ROS</b><small data-i18n="brand_sub">Center</small></div>
+      <button class="side-collapse" id="collapseBtn" type="button" title="收起 / Collapse">‹</button>
+    </div>
+    <div class="side-search">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <input id="navSearch" type="search" data-i18n-ph="search_menu" placeholder="搜索菜单…">
+    </div>
+    <div class="nav-fold-bar"><span data-i18n="sidebar_hint">点击箭头折叠侧栏，拖动右侧边缘调整宽度</span><button id="foldAllBtn" type="button" title="收起/展开全部分组">−</button></div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot">
+      <div class="side-status"><span class="dot" id="sideDot"></span><span id="sideMode">DEMO</span></div>
+      <div class="side-foot-actions">
+        <button class="side-logout" id="settingsShortcut" type="button" title="连接设置 / Connection settings">⚙</button>
+        <button class="side-logout" id="logoutBtn" type="button" title="获取配置快照 / Export snapshot" data-i18n-title="export_hint">⇩</button>
+      </div>
+    </div>
+    <div class="side-resize" id="sideResize" title="拖动调整宽度 / Drag to resize"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="top-left">
+        <button class="menu-toggle" id="menuToggle" type="button" aria-label="菜单">☰</button>
+        <div class="crumbs"><span id="crumbGroup">系统概览</span><span class="crumb-sep">/</span><b id="crumbSection">系统概览</b></div>
+      </div>
+      <div class="top-right">
+        <div class="health" id="health">
+          <div class="health-item"><span class="h-label" data-i18n="cpu">CPU</span><span class="h-value" id="cpuVal">--</span><span class="h-bar"><i id="cpuBar"></i></span></div>
+          <div class="health-item"><span class="h-label" data-i18n="mem">内存</span><span class="h-value" id="memVal">--</span><span class="h-bar"><i id="memBar"></i></span></div>
+          <div class="health-item"><span class="h-label" data-i18n="disk">存储</span><span class="h-value" id="diskVal">--</span><span class="h-bar"><i id="diskBar"></i></span></div>
+        </div>
+        <span class="top-sep"></span>
+        <div class="uptime"><span data-i18n="uptime">运行</span> <b id="uptimeText">--</b></div>
+        <span class="top-sep"></span>
+        <label class="theme-pick" title="界面风格 / Theme">
+          <span class="palette-icon">◐</span>
+          <select id="themeSelect" aria-label="Theme">
+            <option value="system" data-i18n="theme_system">跟随系统</option>
+            <option value="light" data-i18n="theme_light">浅色</option>
+            <option value="dark" data-i18n="theme_dark">深色</option>
+            <option value="glass" data-i18n="theme_glass">毛玻璃</option>
+            <option value="porcelain" data-i18n="theme_porcelain">青花瓷</option>
+            <option value="liquid" data-i18n="theme_liquid">液态玻璃</option>
+            <option value="aurora" data-i18n="theme_aurora">极光</option>
+            <option value="ocean" data-i18n="theme_ocean">深海</option>
+            <option value="sakura" data-i18n="theme_sakura">樱粉</option>
+            <option value="mono" data-i18n="theme_mono">黑白极简</option>
+          </select>
+        </label>
+        <button class="lang" id="langBtn" type="button"><span class="lang-globe"></span><span id="langLabel">EN</span></button>
+        <div class="admin" id="adminBtn" title="连接设置 / Connection settings"><span class="avatar">B</span><span id="adminName">Backspace</span><span class="caret">▾</span></div>
+      </div>
+    </header>
+
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<div class="modal-mask" id="modalMask" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div class="toast-wrap" id="toastWrap"></div>
+<script src="/app.js"></script>
+<script src="/views.js"></script>
+<script src="/qrcode.bundle.js"></script>
+<script src="/config.js"></script>
+</body>
+</html>
