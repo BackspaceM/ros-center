@@ -47,7 +47,7 @@ const I18N = {
     device_status: '状态', device_test: '测试连接', device_saved: '设备已保存', device_switch: '已切换到',
     device_current: '当前为主设备', device_count: '设备数量', device_hint: '点顶栏设备下拉即可切换；主设备决定默认显示哪台。',
     device_reconnect: '重新连接', device_no_password: '留空表示不修改', device_required: '请填写名称、地址、端口和账号',
-    theme_default: '经典蓝', theme_glass: '毛玻璃', theme_porcelain: '青花瓷', theme_liquid: '液态玻璃',
+    theme_unifi: 'UniFi 风格', theme_default: '经典蓝', theme_glass: '毛玻璃', theme_porcelain: '青花瓷', theme_liquid: '液态玻璃',
     theme_aurora: '极光', theme_ocean: '深海', theme_sakura: '樱粉', theme_mono: '黑白极简',
     theme_forest: '森林绿', theme_amber: '琥珀金', theme_violet: '紫罗兰', theme_coffee: '咖啡棕', theme_mint: '薄荷绿',
     mode_light: '浅色', mode_dark: '深色', mode_system: '跟随系统',
@@ -145,7 +145,7 @@ const I18N = {
     device_status: 'Status', device_test: 'Test connection', device_saved: 'Device saved', device_switch: 'Switched to',
     device_current: 'Primary device', device_count: 'Devices', device_hint: 'Use the device dropdown in the top bar to switch; the primary device is shown by default.',
     device_reconnect: 'Reconnect', device_no_password: 'Leave blank to keep', device_required: 'Name, host, port and user are required',
-    theme_default: 'Classic blue', theme_glass: 'Glass', theme_porcelain: 'Porcelain', theme_liquid: 'Liquid glass',
+    theme_unifi: 'UniFi', theme_default: 'Classic blue', theme_glass: 'Glass', theme_porcelain: 'Porcelain', theme_liquid: 'Liquid glass',
     theme_aurora: 'Aurora', theme_ocean: 'Deep sea', theme_sakura: 'Sakura', theme_mono: 'Mono',
     theme_forest: 'Forest', theme_amber: 'Amber', theme_violet: 'Violet', theme_coffee: 'Coffee', theme_mint: 'Mint',
     mode_light: 'Light', mode_dark: 'Dark', mode_system: 'System',
@@ -224,16 +224,22 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 
 /* ================= 主题：配色风格 × 深浅模式 两套独立维度 =================
    theme = 配色风格；mode = light / dark / system，可任意组合，例如「深色 + 樱粉」。 */
-const THEMES = ['default', 'ocean', 'aurora', 'sakura', 'forest', 'amber', 'violet', 'coffee', 'mint', 'mono', 'glass', 'porcelain', 'liquid'];
+const THEMES = ['unifi', 'default', 'ocean', 'aurora', 'sakura', 'forest', 'amber', 'violet', 'coffee', 'mint', 'mono', 'glass', 'porcelain', 'liquid'];
 const MODES = ['light', 'dark', 'system'];
 const MODE_ICON = { light: '☀', dark: '☾', system: '◐' };
 const qs = new URLSearchParams(location.search);
 const urlTheme = qs.get('theme'), urlMode = qs.get('mode');
 const legacyTheme = localStorage.getItem('ros-traffic-theme'); // 旧版本单一主题键
-let theme = THEMES.includes(urlTheme) ? urlTheme : (localStorage.getItem('ros-theme') || (legacyTheme && THEMES.includes(legacyTheme) ? legacyTheme : 'default'));
+/* v2 起默认主题改为 UniFi：老用户首次升级时忽略旧偏好，之后仍尊重其手动选择 */
+let themeMigrated = false;
+try { themeMigrated = localStorage.getItem('ros-theme-v2') === '1'; } catch (e) { /* ignore */ }
+let theme;
+if (THEMES.includes(urlTheme)) theme = urlTheme;
+else if (!themeMigrated) theme = 'unifi';
+else theme = localStorage.getItem('ros-theme') || (legacyTheme && THEMES.includes(legacyTheme) ? legacyTheme : 'unifi');
 let mode = MODES.includes(urlMode) ? urlMode : (MODES.includes(localStorage.getItem('ros-mode')) ? localStorage.getItem('ros-mode')
   : (legacyTheme === 'dark' || legacyTheme === 'light' ? legacyTheme : 'system'));
-if (!THEMES.includes(theme)) theme = 'default';
+if (!THEMES.includes(theme)) theme = 'unifi';
 const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
 function effectiveMode() { return mode === 'system' ? (systemDark && systemDark.matches ? 'dark' : 'light') : mode; }
 function cssVar(name, fallback) {
@@ -276,6 +282,10 @@ function themeFill(name, fallback, alpha) {
 }
 function applyTheme(persist) {
   const root = document.documentElement;
+  /* 切换瞬间开启过渡，420ms 后撤掉，避免影响日常 hover / 拖拽性能 */
+  root.classList.add('theme-switching');
+  clearTimeout(applyTheme._timer);
+  applyTheme._timer = setTimeout(() => root.classList.remove('theme-switching'), 420);
   root.dataset.theme = theme;
   root.dataset.mode = mode;
   root.dataset.scheme = effectiveMode(); // 实际生效的深浅，供 CSS 复用
@@ -292,9 +302,24 @@ function applyTheme(persist) {
     mb.dataset.mode = mode;
   }
   if (persist === false) return;
-  try { localStorage.setItem('ros-theme', theme); localStorage.setItem('ros-mode', mode); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('ros-theme', theme); localStorage.setItem('ros-mode', mode); localStorage.setItem('ros-theme-v2', '1'); } catch (e) { /* ignore */ }
 }
 if (systemDark && systemDark.addEventListener) systemDark.addEventListener('change', () => { if (mode === 'system') { applyTheme(false); if (state.section === 'dashboard') renderDashboard(); } });
+
+/* 动画效果总开关（记忆偏好，关闭后所有 CSS 动画/过渡立即停用） */
+let motionOn = (() => { try { return localStorage.getItem('ros-motion') !== 'off'; } catch (e) { return true; } })();
+function applyMotion() {
+  const root = document.documentElement;
+  root.dataset.motion = motionOn ? 'on' : 'off';
+  const btn = $('motionBtn');
+  if (btn) {
+    btn.textContent = motionOn ? '✦' : '✧';
+    btn.classList.toggle('off', !motionOn);
+    btn.title = (motionOn ? L('关闭动画', 'Turn motion off') : L('开启动画', 'Turn motion on')) + ' / Motion';
+  }
+  try { localStorage.setItem('ros-motion', motionOn ? 'on' : 'off'); } catch (e) { /* ignore */ }
+}
+applyMotion();
 
 /* ================= 工具 ================= */
 function fmtRate(bps) {
@@ -322,7 +347,7 @@ function toast(msg, kind = '') {
 }
 async function api(path, opts) {
   /* 所有配置类接口自动带上当前设备；设备管理/目录接口除外 */
-  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status|usage)(\?|$)/.test(path)) {
+  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status|usage|topology)(\?|$)/.test(path)) {
     path += (path.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(state.deviceId);
   }
   const r = await fetch(path, opts);
@@ -702,6 +727,7 @@ function renderPage() {
   if (sec.id === 'dashboard') return renderDashboard();
   if (sec.id === 'trafficStats') return renderTrafficStats();
   if (sec.id === 'systemTools') return renderTools();
+  if (sec.id === 'topology') return window.renderTopologyPage ? window.renderTopologyPage() : undefined;
   if (sec.id === 'connectionSettings') return renderConnectionSettings();
   if (sec.path) return sec.singleton ? renderSingletonPage(sec) : renderConfigPage(sec);
 }
@@ -735,6 +761,11 @@ async function boot() {
     applyTheme();
     toast(t('mode_title') + ': ' + (t('mode_' + mode) || mode), 'ok');
     if (state.section === 'dashboard') renderDashboard();
+  };
+  $('motionBtn').onclick = () => {
+    motionOn = !motionOn;
+    applyMotion();
+    toast(L('动画效果', 'Motion') + ': ' + (motionOn ? L('已开启', 'On') : L('已关闭', 'Off')), 'ok');
   };
   const urlCollapse = new URLSearchParams(location.search).get('collapse');
   const collapsed = urlCollapse === '1' || (urlCollapse !== '0' && localStorage.getItem('ros-traffic-collapsed') === '1');

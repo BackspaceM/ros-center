@@ -28,6 +28,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
+const TOPOLOGY_FILE = path.join(DATA_DIR, 'topology.json');
+const TOPO_ICON_DIR = path.join(DATA_DIR, 'topology-icons');
 const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
 let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
@@ -294,6 +296,32 @@ function saveUsage(force) {
     usageResetNotice = false;
   } catch (e) { /* ignore */ }
 }
+
+/* ================= 网络拓扑：用户自定义节点（按设备隔离） =================
+   自动发现的节点不落盘，每次实时从 RouterOS 邻居表 / DHCP 租约读取；
+   这里只保存用户手工添加的节点，避免把可能过期的发现结果固化。 */
+let topoStore = loadTopology();
+function emptyTopology() { return { v: 1, devices: {} }; }
+function loadTopology() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TOPOLOGY_FILE, 'utf8'));
+    if (raw && raw.v === 1 && raw.devices && typeof raw.devices === 'object') return raw;
+  } catch (e) { /* 首次启动 */ }
+  return emptyTopology();
+}
+function saveTopology() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(TOPOLOGY_FILE, JSON.stringify(topoStore, null, 2) + '\n', { mode: 0o600 });
+    return true;
+  } catch (e) { console.warn('[topology] cannot save topology.json:', e.message); return false; }
+}
+function customTopology(dev) {
+  if (!dev || !topoStore.devices[dev.id]) return [];
+  const v = topoStore.devices[dev.id].nodes;
+  return Array.isArray(v) ? v : [];
+}
+
 function usageBucket(dev) {
   if (!usageStore.devices[dev.id]) usageStore.devices[dev.id] = {
     interfaces: [], perIface: {}, lastTs: 0, bit64: false,
@@ -1073,6 +1101,55 @@ function snapshotOf(dev) {
 
 /* ================= WebSocket ================= */
 const clients = new Set();
+/* 自动发现：路由器本身 + LLDP/MNDP 邻居 + DHCP 租约。
+   任一路读取失败只降级提示，不让整张拓扑图不可用。 */
+async function autoTopology(dev) {
+  if (!dev) return { nodes: [], ok: false, notes: ['没有可用设备'], counts: {} };
+  const rootName = (dev.lastResource && dev.lastResource['board-name']) || dev.name || 'RouterOS';
+  /* 根节点默认关联当前最忙的接口，使「上级 → 下级」连线能按实时流量变速 */
+  const busiest = ((dev.lastPacket && dev.lastPacket.ifaces) || [])
+    .slice().sort((a, b) => ((b.rxBps || 0) + (b.txBps || 0)) - ((a.rxBps || 0) + (a.txBps || 0)))[0];
+  const rootIface = busiest ? String(busiest.name || '') : '';
+  const nodes = [{ id: 'root', name: rootName, type: 'router', ip: String(dev.cfg.host || ''),
+    parent: null, parentPort: '', ports: [], auto: true, note: dev.name || '', iface: rootIface }];
+  const notes = [];
+  let neighbors = [], leases = [];
+  try { neighbors = (await rosPrint(dev, SECTION_MAP.neighbors)) || []; }
+  catch (e) { notes.push('邻居发现不可用：' + e.message); }
+  try { leases = (await rosPrint(dev, SECTION_MAP.dhcpLeases)) || []; }
+  catch (e) { notes.push('DHCP 租约不可用：' + e.message); }
+
+  const macKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^0-9a-f]/g, '');
+  const byMac = new Map();
+  for (const r of neighbors) {
+    if (!r || typeof r !== 'object') continue;
+    const mac = macKey(r['mac-address']);
+    const name = String(r.identity || r.address || mac.slice(0, 8) || '邻居设备');
+    const hint = name + ' ' + String(r.platform || '') + ' ' + String(r.interface || '');
+    const type = /ap|wifi|wlan|cap|groove/i.test(hint) ? 'ap' : /nas|linux|server|storage/i.test(hint) ? 'nas' : 'switch';
+    const node = { id: 'auto_n_' + (mac || encodeURIComponent(name)), name, type,
+      ip: String(r.address || ''), parent: 'root', parentPort: String(r.interface || ''),
+      ports: [], auto: true, note: String(r.platform || ''), iface: String(r.interface || '') };
+    nodes.push(node);
+    if (mac) byMac.set(mac, node.id);
+  }
+  for (const r of leases) {
+    if (!r || typeof r !== 'object') continue;
+    const status = String(r.status || '');
+    if (status && !/^(bound|waiting)$/i.test(status)) continue;
+    const mac = macKey(r['mac-address']);
+    if (mac && byMac.has(mac)) continue;
+    const name = String(r['host-name'] || r.address || mac.slice(0, 8) || '终端');
+    const type = /ap|wifi|wlan/i.test(name) ? 'ap' : /nas|server|storage/i.test(name) ? 'nas' : 'client';
+    nodes.push({ id: 'auto_l_' + (mac || encodeURIComponent(name)), name, type,
+      ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
+      parent: (mac && byMac.get(mac)) || 'root', parentPort: '',
+      ports: [], auto: true, note: status === 'waiting' ? '等待中' : '' });
+  }
+  return { nodes, ok: neighbors.length > 0 || leases.length > 0, notes,
+    counts: { neighbors: neighbors.length, leases: leases.length } };
+}
+
 function wsAccept(key) { return crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64'); }
 function sendFrame(socket, text) {
   if (socket.destroyed) return;
@@ -1120,6 +1197,14 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 128 * 1024) { reject(new Error('请求体过大')); req.destroy(); } });
+    req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch (e) { reject(new Error('JSON 格式错误')); } });
+  });
+}
+/* 图标上传单独放宽到 1.5MB（base64 膨胀约 1.33 倍），仍拒绝超大请求 */
+function readBodyLimit(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > maxBytes) { reject(new Error('图片过大')); req.destroy(); } });
     req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch (e) { reject(new Error('JSON 格式错误')); } });
   });
 }
@@ -1402,6 +1487,88 @@ const server = http.createServer(async (req, res) => {
     const dev = reqDevice(req, url);
     return json(res, 200, { points: dev ? dev.history : [], resource: dev ? dev.resourceHistory : [] });
   }
+  /* 网络拓扑：自动发现 + 用户自定义节点（custom 按设备持久化） */
+  if (p === '/api/topology') {
+    const dev = reqDevice(req, url);
+    if (req.method === 'GET') {
+      try {
+        const auto = await autoTopology(dev);
+        const store = (dev && topoStore.devices[dev.id]) || {};
+        return json(res, 200, { deviceId: dev && dev.id, auto: auto.nodes, custom: customTopology(dev),
+          discovery: { ok: auto.ok, notes: auto.notes, counts: auto.counts },
+          updatedAt: store.updatedAt || 0, demo: !!(dev && dev.forceDemo) });
+      } catch (e) { return json(res, 500, { error: e.message }); }
+    }
+    if (req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const target = reqDevice(req, url, body);
+        if (!target) throw new Error('没有可用设备');
+        if (!Array.isArray(body.nodes)) throw new Error('节点格式错误');
+        const allowed = new Set(['router', 'switch', 'ap', 'nas', 'client', 'other']);
+        const clean = (n) => {
+          const id = String((n && n.id) || '').slice(0, 80);
+          const name = String((n && n.name) || '').trim().slice(0, 48);
+          if (!id || !name) return null;
+          return { id, name, type: allowed.has(n && n.type) ? n.type : 'other',
+            ip: String((n && n.ip) || '').slice(0, 64),
+            parent: n && n.parent == null ? null : String((n && n.parent) || '').slice(0, 80),
+            parentPort: String((n && n.parentPort) || '').slice(0, 32),
+            iface: String((n && n.iface) || '').slice(0, 64),
+            /* 点击该节点触发的动画：none | ports | pulse | flow | ripple */
+            anim: ['none', 'pulse', 'flow', 'ripple'].includes(n && n.anim) ? n.anim : 'none',
+            /*  tombstone：隐藏自动发现的节点；calcFrom：按多选下级设备求和 */
+            deleted: !!(n && n.deleted),
+            calcFrom: Array.isArray(n && n.calcFrom)
+              ? n.calcFrom.slice(0, 64).map((x) => String(x).slice(0, 80)).filter(Boolean) : [],
+            ports: Array.isArray(n && n.ports)
+              ? n.ports.slice(0, 64).map((p) => String(p).trim().slice(0, 32)).filter(Boolean) : [],
+            icon: /^\/api\/topology\/icon\/[A-Za-z0-9_-]+\.(png|jpe?g|webp|gif)$/i.test(String((n && n.icon) || '')) ? n.icon : '',
+            note: String((n && n.note) || '').slice(0, 120),
+            /* 同一层级从 1 开始的显示顺序 */
+            order: n && Number.isFinite(Number(n.order)) ? Math.max(0, Math.min(999, Math.round(Number(n.order)))) : 0,
+            x: n && Number.isFinite(n.x) ? Math.round(n.x) : 0,
+            y: n && Number.isFinite(n.y) ? Math.round(n.y) : 0 };
+        };
+        const seen = new Set(); const nodes = [];
+        for (const n of body.nodes.slice(0, 200).map(clean)) {
+          if (!n || seen.has(n.id)) continue; seen.add(n.id); nodes.push(n);
+        }
+        topoStore.devices[target.id] = { nodes, updatedAt: Date.now() };
+        if (!saveTopology()) throw new Error('写入 data/topology.json 失败');
+        console.log(`[topology] ${target.name} custom nodes=${nodes.length} by=${req.socket.remoteAddress}`);
+        return json(res, 200, { ok: true, nodes, updatedAt: topoStore.devices[target.id].updatedAt });
+      } catch (e) { return json(res, 400, { error: e.message }); }
+    }
+    return json(res, 405, { error: '不支持的请求方法' });
+  }
+  /* 设备图标：仅常见位图，拒绝 SVG 防脚本注入；读取时强制图片 MIME + nosniff */
+  if (p === '/api/topology/icon' && req.method === 'POST') {
+    try {
+      const dev = activeDevice(); if (!dev) throw new Error('没有可用设备');
+      const b = await readBodyLimit(req, 2 * 1024 * 1024);
+      const m = /^data:(image\/(png|jpe?g|webp|gif));base64,([\s\S]+)$/i.exec(String(b.data || ''));
+      if (!m) throw new Error('仅支持 PNG / JPEG / WebP / GIF 图片');
+      const buf = Buffer.from(m[3], 'base64');
+      if (!buf.length || buf.length > 900 * 1024) throw new Error('图片大小需在 900KB 以内');
+      const rawExt = m[2].toLowerCase(); const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+      const name = String(dev.id).replace(/[^A-Za-z0-9_-]/g, '_') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+      fs.mkdirSync(TOPO_ICON_DIR, { recursive: true });
+      fs.writeFileSync(path.join(TOPO_ICON_DIR, name), buf, { mode: 0o644 });
+      return json(res, 200, { ok: true, url: '/api/topology/icon/' + name });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p.startsWith('/api/topology/icon/') && req.method === 'GET') {
+    const name = decodeURIComponent(p.slice('/api/topology/icon/'.length));
+    if (!/^[A-Za-z0-9_-]+\.(png|jpe?g|webp|gif)$/i.test(name)) return json(res, 400, { error: '无效图标名' });
+    try {
+      const buf = fs.readFileSync(path.join(TOPO_ICON_DIR, name));
+      const ext = name.split('.').pop().toLowerCase();
+      const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+      return res.end(buf);
+    } catch (e) { return json(res, 404, { error: '图标不存在' }); }
+  }
   if (p === '/api/settings' && req.method === 'GET') {
     const dev = activeDevice();
     return json(res, 200, { ...(dev ? dev.snapshotCfg() : {}), mode: dev && dev.mode, connected: !!(dev && dev.api && dev.api.connected), error: dev && dev.lastError, hostPort: Number(process.env.WEB_PORT || 0) || PORT });
@@ -1454,6 +1621,67 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, ...result });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
+  if (p === '/api/ping/stream' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    const address = String(url.searchParams.get('address') || '').trim();
+    if (!address) return json(res, 400, { error: '请填写目标地址 / Address is required' });
+    if (!/^[a-zA-Z0-9_.:-]+$/.test(address)) return json(res, 400, { error: '地址格式不正确' });
+    const count = Math.max(1, Math.floor(Number(url.searchParams.get('count')) || 5));
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 400, { error: '没有可用设备 / No device' });
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+    const send = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (e) { /* ignore */ } };
+    let closed = false, timer = null;
+    const finish = () => { if (closed) return; closed = true; if (timer) clearInterval(timer); try { res.end(); } catch (e) { /* ignore */ } };
+    req.on('close', finish);
+    if (dev.forceDemo) {
+      let i = 0;
+      timer = setInterval(() => {
+        if (closed) return;
+        i++;
+        send({ row: { seq: String(i), host: address, time: (1 + Math.random() * 3).toFixed(2) + 'ms', ttl: '64', size: '56' } });
+        if (i >= count) { send({ done: true, demo: true }); finish(); }
+      }, 650);
+    } else {
+      if (!(dev.api && dev.api.connected)) { send({ error: '路由器未连接，无法执行真实 ping / Router offline' }); finish(); return; }
+      const client = new RouterOSAPI({ ...dev.cfg });
+      client.connect().then(() => {
+        if (closed) return null;
+        /* onRecord 让每一条 ICMP 回复一到就立刻推送，前端逐格点亮 */
+        return client.exec(['/ping', `=address=${address}`, `=count=${count}`], {
+          onRecord: (rec) => { if (!closed && rec && (rec.seq !== undefined || rec.time !== undefined)) send({ row: rec }); },
+        });
+      }).then((r) => {
+        if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || 'ping 失败');
+        if (!closed) { send({ done: true }); finish(); }
+      }).catch((e) => {
+        if (!closed) { send({ error: e.message || String(e) }); finish(); }
+      }).finally(() => { try { client.close(); } catch (e) { /* ignore */ } });
+    }
+    return;
+  }
+
+  /* 配置导出：返回纯文本，由浏览器生成文件下载到用户自己的设备 */
+  if (p === '/api/export' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 400, { error: '没有可用设备 / No device' });
+    const raw = String(url.searchParams.get('name') || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+    const name = raw || ('config-' + new Date().toISOString().slice(0, 10));
+    try {
+      if (dev.forceDemo) {
+        return json(res, 200, { name, demo: true, text: `# ROS Center DEMO export\n# device: ${dev.name}\n# 演示模式：以下为示例文本，不是真实配置\n/interface print\n/system resource print\n` });
+      }
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法导出配置 / Router offline');
+      const r = await dev.api.exec(['/export', '=hide-sensitive=yes']);
+      if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '导出失败');
+      const lines = ((r && r.re) || []).map((x) => x && (x.output !== undefined ? x.output : x.ret !== undefined ? x.ret : x.line)).filter((v) => v !== undefined && v !== null).map(String);
+      const text = (lines.length ? lines.join('\n') : '') + '\n';
+      return json(res, 200, { name, text });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+
   if (p === '/api/action' && req.method === 'POST') {
     try {
       const body = await readBody(req);

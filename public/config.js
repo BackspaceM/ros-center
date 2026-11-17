@@ -268,39 +268,77 @@ function renderTools() {
   $('content').innerHTML = `
     <div class="page-head"><div><h1>${t('tools_title')}</h1><p>${t('tools_sub')}</p></div></div>
     <div class="grid-2">
-      <div class="panel"><div class="panel-head"><div><h2>${t('ping_title')}</h2><p class="sub">ICMP echo · 5 packets</p></div></div>
+      <div class="panel"><div class="panel-head"><div><h2>${t('system_title')}</h2></div></div>
         <div class="panel-body">
-          <div class="form-row"><label>${t('ping_addr')}</label><div><input type="text" id="pingAddr" value="10.0.0.1"></div></div>
-          <button class="btn primary" id="pingRun">${t('ping_run')}</button>
-          <div id="pingOut" style="margin-top:14px"></div>
+          <div class="card" style="border-left:3px solid var(--red);padding:12px 14px">
+            <div style="font-weight:600;margin-bottom:6px">${t('reboot_title')}</div>
+            <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">${t('reboot_msg')}</div>
+            <button class="btn ghost-danger" id="rebootBtn">${t('reboot_title')}</button>
+          </div>
+          <div class="modal-note" style="margin-top:16px;font-size:11.5px;color:var(--muted)">
+            <b>${t('note')}:</b> ${t('write_warn')}
+          </div>
         </div></div>
       <div class="panel"><div class="panel-head"><div><h2>${t('backup_title')}</h2><p class="sub">${t('backup_msg')}</p></div></div>
         <div class="panel-body">
           <div class="form-row"><label>${t('backup_name')}</label><div><input type="text" id="backupName" value="auto-backup"></div></div>
           <button class="btn primary" id="backupRun">${t('backup_title')}</button>
-          <div id="backupOut" style="margin-top:14px"></div>
         </div></div>
     </div>
-    <div class="panel" style="margin-top:14px"><div class="panel-head"><div><h2>${t('system_title')}</h2></div></div>
+    <div class="panel ping-panel" style="margin-top:14px"><div class="panel-head"><div><h2>${esc(L('网络诊断', 'Network diagnosis'))}</h2><p class="sub">ICMP echo · ${esc(L('逐条实时显示', 'results stream in real time'))}</p></div></div>
       <div class="panel-body">
-        <div class="card" style="border-left:3px solid var(--red);padding:12px 14px">
-          <div style="font-weight:600;margin-bottom:6px">${t('reboot_title')}</div>
-          <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">${t('reboot_msg')}</div>
-          <button class="btn ghost-danger" id="rebootBtn">${t('reboot_title')}</button>
-        </div>
-        <div class="modal-note" style="margin-top:16px;font-size:11.5px;color:var(--muted)">
-          <b>${t('note')}:</b> ${t('write_warn')}
-        </div>
+        <div class="form-row"><label>${esc(L('目标地址', 'Target address'))}</label><div><input type="text" id="pingAddr" placeholder="${esc(L('填写 IP 或域名', 'Enter IP or hostname'))}" autocomplete="off" style="width:300px;max-width:100%"></div></div>
+        <div class="form-row"><label>${esc(L('包数量', 'Packets'))}</label><div><input type="number" id="pingCount" min="1" value="5" style="width:110px"></div></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" id="pingRun" type="button">${esc(L('开始诊断', 'Start diagnosis'))}</button><button class="btn" id="pingStop" type="button">${esc(L('停止', 'Stop'))}</button><span id="pingStatus" class="topo-hint"></span></div>
+        <div id="pingOut" class="ping-log"></div>
       </div></div>`;
-  $('pingRun').onclick = async () => {
-    try {
-      const r = await api('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ping', params: { address: $('pingAddr').value } }) });
-      $('pingOut').innerHTML = `<table><thead><tr><th>#</th><th>Host</th><th>Time</th><th>TTL</th><th>Size</th></tr></thead><tbody>${(r.rows || []).map((x) => `<tr><td>${esc(x.seq || x['.id'] || '')}</td><td>${esc(x.host || x.address || '')}</td><td>${esc(x.time || '')}</td><td>${esc(x.ttl || '')}</td><td>${esc(x['size'] || '')}</td></tr>`).join('')}</tbody></table>`;
-    } catch (e) { toast(e.message, 'err'); }
+  /* ICMP 逐条流式诊断 */
+  const stopPing = () => {
+    if (window.__rosPingSource) { try { window.__rosPingSource.close(); } catch (e) { /* ignore */ } window.__rosPingSource = null; }
+    if ($('pingStop')) $('pingStop').disabled = true;
   };
-  $('backupRun').onclick = () => confirmModal(t('backup_title'), `${t('backup_msg')}<br><br>${t('backup_name')}: <b>${esc($('backupName').value)}</b>`, false, async () => {
-    try { const r = await api('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'backup', params: { name: $('backupName').value } }) }); $('backupOut').innerHTML = `<div class="tag green">OK · ${esc(r.name)}.backup ${r.demo ? '(demo)' : ''}</div>`; toast(t('action_ok'), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
+  $('pingStop').disabled = true;
+  $('pingStop').onclick = () => { stopPing(); if ($('pingStatus')) $('pingStatus').textContent = L('已停止', 'Stopped'); };
+  $('pingRun').onclick = () => {
+    const address = $('pingAddr').value.trim();
+    const count = Math.max(1, Math.floor(Number($('pingCount').value) || 5));
+    if (!address) { toast(L('请先填写目标地址', 'Enter a target address first'), 'err'); $('pingAddr').focus(); return; }
+    stopPing();
+    const out = $('pingOut'), status = $('pingStatus');
+    out.innerHTML = `<table><thead><tr><th>#</th><th>${esc(L('目标', 'Host'))}</th><th>${esc(L('时延', 'Time'))}</th><th>TTL</th><th>${esc(L('大小', 'Size'))}</th></tr></thead><tbody></tbody></table>`;
+    status.textContent = L('正在诊断…', 'Running…');
+    $('pingStop').disabled = false;
+    let received = 0, lost = 0;
+    const qs = 'address=' + encodeURIComponent(address) + '&count=' + count + (state.deviceId ? '&device=' + encodeURIComponent(state.deviceId) : '');
+    const es = new EventSource('/api/ping/stream?' + qs);
+    window.__rosPingSource = es;
+    es.onmessage = (ev) => {
+      let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      if (d.error) { status.textContent = d.error; toast(d.error, 'err'); stopPing(); return; }
+      if (d.row) {
+        received++;
+        const ok = !!d.row.time;
+        if (!ok) lost++;
+        out.querySelector('tbody').insertAdjacentHTML('beforeend', `<tr class="${ok ? '' : 'row-fail'}"><td>${esc(d.row.seq || received)}</td><td>${esc(d.row.host || d.row.address || address)}</td><td>${esc(d.row.time || L('超时', 'timeout'))}</td><td>${esc(d.row.ttl || '')}</td><td>${esc(d.row.size || '')}</td></tr>`);
+        out.scrollTop = out.scrollHeight;
+        status.textContent = `${received}/${count} · ${L('已收到', 'received')} ${received - lost} · ${L('丢失', 'lost')} ${lost}`;
+      }
+      if (d.done) { status.textContent += d.demo ? ` · ${L('演示模式', 'DEMO')}` : ` · ${L('完成', 'Done')}`; stopPing(); }
+    };
+    es.onerror = () => { if (window.__rosPingSource === es) { status.textContent = L('诊断中断', 'Diagnosis interrupted'); stopPing(); } };
+  };
+  /* 配置备份：导出为浏览器文件，下载到用户当前使用的设备 */
+  $('backupRun').onclick = () => confirmModal(t('backup_title'), `${t('backup_msg')}<br><br>${t('backup_name')}: <b>${esc($('backupName').value)}</b><br><span class="form-hint">${esc(L('文件将下载到当前浏览器所在设备（电脑或手机），不会保存到 RouterOS。', 'The file is downloaded to the device running this browser, not stored on RouterOS.'))}</span>`, false, async () => {
+    try {
+      const name = ($('backupName').value.trim().replace(/[^a-zA-Z0-9_\-]/g, '') || 'config-backup');
+      const qs = '?name=' + encodeURIComponent(name) + (state.deviceId ? '&device=' + encodeURIComponent(state.deviceId) : '');
+      const r = await api('/api/export' + qs);
+      const blob = new Blob([r.text || ''], { type: 'text/plain;charset=utf-8' });
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = href; a.download = name + '.rsc';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 1500);
+    } catch (e) { toast(e.message, 'err'); }
   });
   $('rebootBtn').onclick = () => confirmModal(t('reboot_title'), `<b>${t('reboot_msg')}</b>`, true, async () => {
     try { await api('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reboot' }) }); toast(t('action_ok'), 'ok'); }

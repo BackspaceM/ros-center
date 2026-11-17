@@ -8,6 +8,8 @@ services:
       - "${WEB_PORT:-10086}:${CONTAINER_PORT:-10086}"
     volumes:
       - ./data:/app/data
+      # 拓扑设备图标上传目录，可单独映射到宿主机便于备份
+      - ./data/topology-icons:/app/data/topology-icons
     environment:
       PORT: ${CONTAINER_PORT:-10086}
       HOST: 0.0.0.0

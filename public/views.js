@@ -7,6 +7,7 @@ function demoBadge(id) {
 
 /* ================= 概览仪表盘 ================= */
 function renderDashboard() {
+  const topoKeep = document.getElementById('topoPanel'); // 拓扑面板保持 DOM，避免每秒重绘打断拖拽
   const d = state.latest || {};
   const r = d.resource || {};
   const cpu = num(r['cpu-load']);
@@ -60,6 +61,7 @@ function renderDashboard() {
       ${topTablePanel('topIfPanel', t('top_if'), t('top_if_sub'), ['#', t('iface'), t('rate_rx'), t('rate_tx'), t('total')])}
       ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), ['#', L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')])}
     </div>`;
+  if (topoKeep) topoKeep.remove();
 
   drawLineChart('dashChart', 'dashTip', state.points, [
     { key: 'rx', color: cssVar('--blue', '#2563eb'), fill: themeFill('--blue', '#2563eb', .10), label: t('legend_rx') },
@@ -309,7 +311,8 @@ function drawBarChart(canvasId, tipId, buckets, fmt) {
     ctx.fillStyle = colors.rx; ctx.fillRect(cx - bw - 1, pad.t + ph - hRx, bw, hRx);
     ctx.fillStyle = colors.tx; ctx.fillRect(cx + 1, pad.t + ph - hTx, bw, hTx);
     if (i % Math.ceil(buckets.length / 8) === 0) {
-      ctx.fillStyle = cssVar('--axis', '#9aa5bd'); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillStyle = cssVar('--axis', '#9aa5bd'); ctx.textBaseline = 'top';
+      ctx.textAlign = cx < pad.l + 28 ? 'left' : cx > pad.l + pw - 28 ? 'right' : 'center';
       const lbl = String(b.label); ctx.fillText(lbl.length > 7 ? lbl.slice(-5) : lbl, cx, pad.t + ph + 7);
     }
   });
@@ -348,11 +351,13 @@ function drawLineChart(canvasId, tipId, data, series, fmt) {
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
     ctx.fillStyle = cssVar('--axis', '#9aa5bd'); ctx.textAlign = 'right'; ctx.fillText(fmt(top * (1 - i / 4)), pad.l - 7, y);
   }
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.textBaseline = 'top';
   const labels = Math.min(5, data.length);
   for (let i = 0; i < labels; i++) {
     const idx = Math.round(i / Math.max(1, labels - 1) * (data.length - 1));
-    ctx.fillStyle = cssVar('--axis', '#9aa5bd'); ctx.fillText(fmtTime(data[idx].ts), pad.l + pw * idx / Math.max(1, data.length - 1), pad.t + ph + 7);
+    const x = pad.l + pw * idx / Math.max(1, data.length - 1);
+    ctx.textAlign = i === 0 ? 'left' : i === labels - 1 ? 'right' : 'center';
+    ctx.fillStyle = cssVar('--axis', '#9aa5bd'); ctx.fillText(fmtTime(data[idx].ts), x, pad.t + ph + 7);
   }
   const xAt = (i) => pad.l + pw * i / Math.max(1, data.length - 1);
   const yAt = (v) => pad.t + ph * (1 - Math.min(1, num(v) / top));
