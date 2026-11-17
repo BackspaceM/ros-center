@@ -4,11 +4,11 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe hub usernames
+      - name: Probe registry auth
         env:
           TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          for u in BackspaceM backspacem backspace BackSpaceM lys backspace_m; do
-            code=$(curl -s -o /tmp/hubresp -w "%{http_code}" -u "$u:$TOKEN" https://hub.docker.com/v2/user/ || true)
-            echo "PROBE $u -> $code $(head -c 100 /tmp/hubresp)"
+          for u in BackspaceM backspacem backspace lys; do
+            code=$(curl -s -o /tmp/authr -w "%{http_code}" -u "$u:$TOKEN" "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/busybox:pull" || true)
+            echo "AUTH $u -> $code $(head -c 100 /tmp/authr)"
           done
