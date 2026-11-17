@@ -9,13 +9,17 @@ const I18N = {
     total_rx: '总下载', total_tx: '总上传', active_if: '活跃接口', peak_rx: '峰值下载',
     rx_hint: '所有接口接收速率之和', tx_hint: '所有接口发送速率之和', if_hint: '已启用并运行的接口',
     trend_title: '实时流量趋势', trend_sub: '最近 6 分钟 · 每秒采样', conn_title: '连接状态',
-    conn_sub: '活跃连接数 · IPv4 / IPv6 分开统计', conn_total: '连接总数', health_title: '设备健康', health_sub: 'CPU 与内存占用',
+    conn_sub: '活跃连接数 · 来自路由器连接表', conn_total: '连接总数', health_title: '设备健康', health_sub: 'CPU 与内存占用',
     ifdist_title: '接口类型分布', ifdist_sub: '按实际接口类型统计，非估算', wlan_title: '终端概览', wlan_sub: '在线终端与接口分布', top_if: '接口流量排行 (TOP 10)',
     top_if_sub: '按累计流量排序', top_conn: '连接流量排行 (TOP 10)', top_conn_sub: '按连接字节数排序',
     all: '全部接口', legend_rx: '下载 RX', legend_tx: '上传 TX',
-    live: '实时 LIVE', demo: '演示 DEMO', connecting: '连接中', reconnect: '重连中', offline: '离线 OFFLINE',
+    live: '在线', demo: '演示 DEMO', connecting: '连接中', reconnect: '重连中', offline: '离线',
     stream_on: '实时流', stream_off: '轮询',
     add: '新增', refresh: '刷新', save: '保存', cancel: '取消', edit: '编辑', delete: '删除',
+    auto_refresh: '自动刷新', auto_on: '自动刷新已开启', auto_off: '自动刷新已关闭',
+    conn_total_hint: '当前活跃连接', conn_group_all: '全部', conn_tcp: 'TCP', conn_udp: 'UDP', conn_other: '其他', conn_v4: 'IPv4', conn_v6: 'IPv6',
+    device_online: '在线', device_offline: '离线', demo_only: '演示 DEMO',
+    stats_iface_all_short: '全部网口', stats_chart_prefix: '范围', search_hint: '快捷键搜索菜单',
     enable: '启用', disable: '禁用', enabled: '已启用', disabled: '已禁用', yes: '是', no: '否',
     run_script: '运行', run_script_row: '运行此脚本', run_script_none: '请先选择要运行的脚本',
     run_script_ok: '脚本已提交运行', run_script_confirm: '确定立即运行选中的 {n} 个脚本？',
@@ -37,7 +41,7 @@ const I18N = {
     rate_rx: '下载速率', rate_tx: '上传速率', spark: '趋势', total: '累计流量', status: '状态',
     time: '时间', topics: '主题', message: '内容', clear_log: '清空日志',
     count: '数量', name: '名称', value: '值', group: '用户组', comment: '备注',
-    devices: '设备管理', devices_sub: '集中管控多台 RouterOS，切换后所有页面自动跟随当前设备',
+    devices: '设备管理', devices_sub: '集中管控多台 RouterOS 设备',
     device_name: '设备名称', device_primary: '设为主设备', device_active: '当前设备', device_add: '新增设备',
     device_edit: '编辑设备', device_del: '删除设备', device_del_msg: '确定删除该设备？其历史数据和演示配置将一并清除。',
     device_status: '状态', device_test: '测试连接', device_saved: '设备已保存', device_switch: '已切换到',
@@ -54,7 +58,7 @@ const I18N = {
     conn_tip: '填写后点"测试连接"验证，再点"保存并连接"。设置保存在容器的 /app/data/settings.json，重启不会丢失。首次使用演示模式可先熟悉界面。',
     conn_masked: '已保存密码（留空表示不修改）', conn_current: '当前状态', conn_security: '安全建议',
     conn_security_tip: '请在 RouterOS 上为 WebUI 单独建只读账号，并用防火墙限制 API 端口来源，切勿把服务暴露到公网。',
-    sidebar_hint: '点击箭头折叠侧栏，拖动右侧边缘调整宽度',
+    sidebar_hint: '点击箭头折叠 · 拖动边缘调宽',
     conn_web_port: 'WebUI 监听端口', conn_web_port_hint: '容器内监听端口；修改后需重启容器，并把 compose 的端口映射同步为「外部端口:此端口」',
     conn_host_port: '外部访问端口', conn_restart: '监听端口已保存，请重启容器后生效',
     wg_qr: '扫码添加', wg_qr_title: 'WireGuard 客户端配置', wg_qr_sub: '修改参数后扫描二维码，或在手机客户端导入 .conf 文件',
@@ -72,10 +76,10 @@ const I18N = {
     wg_route: '客户端 AllowedIPs', wg_psk: '预共享密钥', wg_responder: '仅响应 (responder)',
     wg_save_peer: '保存到 RouterOS', wg_peer_saved: '对端已保存', wg_auto: '自动', wg_required_wg: '请填写接口、允许地址和私钥',
     sort_hint: '点击排序（升序 / 降序）', singleton_hint: '该页面只有一组配置，点「编辑」直接修改',
-    stats_title: '流量统计', stats_sub: '来自 RouterOS 接口累计字节计数器的真实差分，每秒采样 · 重拨清零自动续计',
+    stats_title: '流量统计', stats_sub: '按网口真实计数器差分 · 重拨清零自动续计',
     stats_chart: '流量趋势', stats_detail: '每日明细', stats_from_router: '真实计数器差分',
     stats_scope: '统计网口', stats_scope_all: '全部网口', stats_scope_custom: '指定网口', stats_scope_wait: '读取网口…',
-    stats_iface_tip: '可多选要统计的网口；只选 WAN 口可避免内外网重复计入。历史按网口分别保存，随时可切换。',
+    stats_iface_tip: '可多选；只选 WAN 口避免内外网重复计入。历史按网口分别保存。',
     stats_iface_all: '全部网口', stats_iface_custom: '仅统计勾选的网口',
     stats_iface_manual: '自定义网口名 / 通配符', stats_iface_manual_hint: '支持 * 和 ?，如 pppoe-*、vlan??；多个用逗号或换行分隔',
     stats_iface_no_list: '暂未读取到网口', stats_iface_saved: '统计网口已保存，历史按网口即时重算',
@@ -84,8 +88,8 @@ const I18N = {
     stats_range_today: '今日', stats_range_week: '本周', stats_range_month: '本月', stats_range_total: '累计',
     stats_card_rx: '下载', stats_card_tx: '上传', stats_card_sum: '合计', stats_card_rate: '当前速率',
     stats_series_today: '今日 · 按小时', stats_series_week: '本周 · 按天', stats_series_month: '本月 · 按天', stats_series_total: '累计 · 按月',
-    stats_source_real: '真实数据 · /interface/print 的 rx-byte / tx-byte 按网口差分，每秒采样；重拨清零按新计数继续累计',
-    stats_source_fake: '演示模式或路由器离线：统计不累计，下方数字不是真实流量',
+    stats_source_real: '真实数据 · rx-byte / tx-byte 按网口差分，每秒采样',
+    stats_source_fake: '演示 / 离线：统计不累计，数字不是真实流量',
     stats_updated: '更新于', stats_sample: '最近采样', stats_no_sample: '尚无真实采样',
     stats_reset_notice: '旧版混合统计已清空（无法按网口拆分），从现在起按网口精确记录',
     stats_reset_info: '检测到 {n} 次计数器清零（PPPoE 重拨 / 接口重建），已按清零后的真实计数继续累计',
@@ -103,13 +107,17 @@ const I18N = {
     total_rx: 'Total download', total_tx: 'Total upload', active_if: 'Active ports', peak_rx: 'Peak download',
     rx_hint: 'Sum of receive rates', tx_hint: 'Sum of transmit rates', if_hint: 'Enabled and running interfaces',
     trend_title: 'Live traffic trend', trend_sub: 'Last 6 minutes · 1s sampling', conn_title: 'Connection status',
-    conn_sub: 'Active connections · IPv4 / IPv6 counted separately', conn_total: 'Total connections', health_title: 'Device health', health_sub: 'CPU and memory usage',
+    conn_sub: 'Active connections · from the router connection table', conn_total: 'Total connections', health_title: 'Device health', health_sub: 'CPU and memory usage',
     ifdist_title: 'Interface types', ifdist_sub: 'Counted by real interface type, not estimated', wlan_title: 'Client overview', wlan_sub: 'Online clients and interface distribution', top_if: 'Interface traffic (TOP 10)',
     top_if_sub: 'Sorted by total traffic', top_conn: 'Connection traffic (TOP 10)', top_conn_sub: 'Sorted by bytes',
     all: 'All interfaces', legend_rx: 'Download RX', legend_tx: 'Upload TX',
-    live: 'LIVE', demo: 'DEMO', connecting: 'Connecting', reconnect: 'Reconnecting', offline: 'OFFLINE',
+    live: 'Online', demo: 'DEMO', connecting: 'Connecting', reconnect: 'Reconnecting', offline: 'Offline',
     stream_on: 'STREAM', stream_off: 'POLL',
     add: 'Add', refresh: 'Refresh', save: 'Save', cancel: 'Cancel', edit: 'Edit', delete: 'Delete',
+    auto_refresh: 'Auto refresh', auto_on: 'Auto refresh on', auto_off: 'Auto refresh off',
+    conn_total_hint: 'Active connections', conn_group_all: 'All', conn_tcp: 'TCP', conn_udp: 'UDP', conn_other: 'Other', conn_v4: 'IPv4', conn_v6: 'IPv6',
+    device_online: 'Online', device_offline: 'Offline', demo_only: 'DEMO',
+    stats_iface_all_short: 'All interfaces', stats_chart_prefix: 'Range', search_hint: 'Search menu shortcut',
     enable: 'Enable', disable: 'Disable', enabled: 'Enabled', disabled: 'Disabled', yes: 'Yes', no: 'No',
     run_script: 'Run', run_script_row: 'Run this script', run_script_none: 'Select the scripts to run first',
     run_script_ok: 'Script run submitted', run_script_confirm: 'Run the {n} selected script(s) now?',
@@ -131,7 +139,7 @@ const I18N = {
     rate_rx: 'Download rate', rate_tx: 'Upload rate', spark: 'Trend', total: 'Total traffic', status: 'Status',
     time: 'Time', topics: 'Topics', message: 'Message', clear_log: 'Clear log',
     count: 'Count', name: 'Name', value: 'Value', group: 'Group', comment: 'Comment',
-    devices: 'Devices', devices_sub: 'Manage multiple RouterOS routers; every page follows the selected device',
+    devices: 'Devices', devices_sub: 'Manage multiple RouterOS routers in one place',
     device_name: 'Device name', device_primary: 'Set primary', device_active: 'Current device', device_add: 'Add device',
     device_edit: 'Edit device', device_del: 'Delete device', device_del_msg: 'Delete this device? Its history and demo config will be removed.',
     device_status: 'Status', device_test: 'Test connection', device_saved: 'Device saved', device_switch: 'Switched to',
@@ -148,7 +156,7 @@ const I18N = {
     conn_tip: 'Click "Test connection" to verify, then "Save & connect". Settings persist in /app/data/settings.json. Demo mode is handy for a first look.',
     conn_masked: 'Password saved (leave blank to keep)', conn_current: 'Current status', conn_security: 'Security tip',
     conn_security_tip: 'Create a dedicated read-only user on RouterOS and restrict the API port with firewall rules. Never expose this service to the internet.',
-    sidebar_hint: 'Click the arrow to collapse; drag the right edge to resize',
+    sidebar_hint: 'Collapse · drag edge to resize',
     conn_web_port: 'WebUI listen port', conn_web_port_hint: 'Container listen port. Restart the container after changing it and update the compose mapping to "external:this port"',
     conn_host_port: 'External port', conn_restart: 'Port saved. Restart the container to apply',
     wg_qr: 'Scan to add', wg_qr_title: 'WireGuard client config', wg_qr_sub: 'Edit the fields, then scan the QR or import the .conf on your device',
@@ -166,10 +174,10 @@ const I18N = {
     wg_route: 'Client AllowedIPs', wg_psk: 'Preshared key', wg_responder: 'Responder only',
     wg_save_peer: 'Save to RouterOS', wg_peer_saved: 'Peer saved', wg_auto: 'Auto', wg_required_wg: 'Interface, allowed address and private key are required',
     sort_hint: 'Click to sort (ascending / descending)', singleton_hint: 'A single settings block - use Edit to change values',
-    stats_title: 'Traffic statistics', stats_sub: 'Real per-interface counter deltas from RouterOS, sampled every second · redial resets are carried forward',
+    stats_title: 'Traffic statistics', stats_sub: 'Real per-interface counter deltas · redial resets carried forward',
     stats_chart: 'Traffic trend', stats_detail: 'Daily details', stats_from_router: 'Real counter deltas',
     stats_scope: 'Interfaces', stats_scope_all: 'All interfaces', stats_scope_custom: 'Selected interfaces', stats_scope_wait: 'Loading interfaces…',
-    stats_iface_tip: 'Select one or more interfaces. Pick only the WAN uplink to avoid double counting LAN + WAN. History is stored per interface and can be re-scoped at any time.',
+    stats_iface_tip: 'Multi-select; pick only the WAN uplink to avoid double counting. History is stored per interface.',
     stats_iface_all: 'All interfaces', stats_iface_custom: 'Only checked interfaces',
     stats_iface_manual: 'Custom names / wildcards', stats_iface_manual_hint: 'Wildcards * and ? are supported, e.g. pppoe-*, vlan??; separate with commas or new lines',
     stats_iface_no_list: 'No interfaces available yet', stats_iface_saved: 'Interfaces saved. History is recomputed per interface immediately',
@@ -178,8 +186,8 @@ const I18N = {
     stats_range_today: 'Today', stats_range_week: 'This week', stats_range_month: 'This month', stats_range_total: 'All time',
     stats_card_rx: 'Download', stats_card_tx: 'Upload', stats_card_sum: 'Total', stats_card_rate: 'Current rate',
     stats_series_today: 'Today · hourly', stats_series_week: 'This week · daily', stats_series_month: 'This month · daily', stats_series_total: 'All time · monthly',
-    stats_source_real: 'Real data · rx-byte / tx-byte per-interface counter deltas from /interface/print, sampled every second; counter resets are carried forward',
-    stats_source_fake: 'Demo mode or router offline: statistics are not accumulating and the numbers below are not real traffic',
+    stats_source_real: 'Real data · per-interface rx-byte / tx-byte deltas, 1s sampling',
+    stats_source_fake: 'Demo / offline: not accumulating, numbers are not real traffic',
     stats_updated: 'Updated', stats_sample: 'Last sample', stats_no_sample: 'No real sample yet',
     stats_reset_notice: 'Legacy mixed-interface history was cleared (cannot be split per interface); new history is exact',
     stats_reset_info: '{n} counter resets detected (PPPoE redial / interface re-created); post-reset real bytes keep accumulating',
@@ -198,12 +206,15 @@ const tx = (obj) => (obj && (obj[lang] || obj.zh)) || '';
 const L = (zh, en) => (lang === 'zh' ? zh : en);
 
 /* ================= 状态 ================= */
+let autoRefreshPref = true;
+try { autoRefreshPref = localStorage.getItem('ros-auto-refresh') !== '0'; } catch (e) { /* ignore */ }
 const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
   hoverIndex: -1, selectedIface: '__all__', mode: 'connecting', configDemo: false, configOffline: false,
-  usageRange: 'today', usageData: null, usageTimer: null, usageLoading: false,
+  usageRange: 'today', usageData: null, usageTimer: null, usageLoading: false, usageSeq: 0,
   usageDetailPage: 1, usageIfaceSig: '',
+  autoRefresh: autoRefreshPref, autoTimer: null,
   collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
   authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
 };
@@ -230,14 +241,37 @@ function cssVar(name, fallback) {
   return v || fallback;
 }
 function themeFill(name, fallback, alpha) {
-  const c = cssVar(name, fallback);
+  /* 深色主题的强调色是 color-mix()：自定义属性读出来仍是原始表达式，
+     画布无法直接给它加透明度。用隐藏探针取计算后的具体颜色，再统一转 rgba。 */
+  let c = cssVar(name, fallback);
+  if (/color-mix\(|^color\(|var\(/.test(c)) {
+    try {
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none';
+      probe.style.color = `var(${name}, ${fallback})`;
+      document.body.appendChild(probe);
+      c = getComputedStyle(probe).color || c;
+      probe.remove();
+    } catch (e) { /* 老浏览器退回原色 */ }
+  }
+  let r, g, b;
   if (c.startsWith('#')) {
     let h = c.slice(1);
     if (h.length === 3) h = h.split('').map((x) => x + x).join('');
+    if (h.length === 4) h = h.slice(0, 3);
     const n = parseInt(h, 16);
-    if (Number.isFinite(n)) return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+    if (Number.isFinite(n)) { r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255; }
+  } else {
+    const m = c.match(/rgba?\(([^)]+)\)/i);
+    if (m) {
+      const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+      [r, g, b] = p;
+    } else {
+      const cm = c.match(/color\(\s*srgb\s+([^)\s]+)\s+([^)\s]+)\s+([^)\s]+)/i);
+      if (cm) [r, g, b] = cm.slice(1).map((x) => x.endsWith('%') ? parseFloat(x) * 2.55 : parseFloat(x) * 255);
+    }
   }
-  if (c.startsWith('rgb(')) return c.replace('rgb(', 'rgba(').replace(')', `,${alpha})`);
+  if ([r, g, b].every((x) => Number.isFinite(x))) return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${alpha})`;
   return c;
 }
 function applyTheme(persist) {
@@ -331,7 +365,7 @@ function buildNav(filter = '') {
   const nav = $('sideNav'); const f = filter.trim().toLowerCase();
   const groups = state.schema.groups;
   nav.innerHTML = groups.map((g) => {
-    const items = state.schema.sections.filter((s) => s.group === g.id && (!f || tx(s.title).toLowerCase().includes(f) || s.id.includes(f)));
+    const items = state.schema.sections.filter((s) => s.group === g.id && (!f || tx(s.title).toLowerCase().includes(f) || s.id.includes(f) || tx(g).toLowerCase().includes(f)));
     if (!items.length) return '';
     const activeHere = items.some((s) => s.id === state.section);
     const collapsed = !f && state.collapsedGroups.has(g.id);
@@ -355,6 +389,22 @@ function buildNav(filter = '') {
 function saveCollapsedGroups() {
   try { localStorage.setItem('ros-traffic-groups', JSON.stringify([...state.collapsedGroups])); } catch (e) { /* ignore */ }
 }
+/* Command+K / Ctrl+K：聚焦侧栏搜索，折叠时自动展开 */
+function focusNavSearch() {
+  const sb = $('sidebar'), inp = $('navSearch'), box = $('sideSearch');
+  if (!sb || !inp) return;
+  if (sb.classList.contains('collapsed')) {
+    sb.classList.remove('collapsed');
+    try { localStorage.setItem('ros-traffic-collapsed', '0'); } catch (e) { /* ignore */ }
+    setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats(); }, 200);
+  }
+  sb.classList.add('mobile-open');
+  inp.focus(); inp.select();
+  if (box) { box.classList.remove('shortcut-focus'); void box.offsetWidth; box.classList.add('shortcut-focus'); setTimeout(() => box.classList.remove('shortcut-focus'), 1000); }
+}
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); focusNavSearch(); }
+});
 /* 按分类 id 匹配图标，未命中时按名称关键字兜底 */
 const SECTION_ICONS = {
   dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link',
@@ -547,45 +597,88 @@ function applyData(d) {
   updateTopbar(d);
   if (state.section === 'dashboard') renderDashboard();
   else if (state.section === 'connections' || state.section === 'connections6') refreshRowsIfLoaded();
-  /* 统计页不随每秒实时帧整页重绘，但状态徽标必须即时更新（首屏不会再停留在 DEMO） */
+  /* 统计页不随每秒实时帧整页重绘，但 DEMO 徽标必须即时更新 */
   if (state.section === 'trafficStats') updateStatsBadge(d);
+  /* 设备管理页：WS 帧里的真实连接状态即时反映到列表（内部做了签名去重） */
+  if (state.section === 'connectionSettings' && typeof window.paintDeviceRows === 'function') window.paintDeviceRows();
 }
-/* 流量统计：独立轮询后端真实统计（后端每秒采样），局部刷新，不重建 DOM */
+/* 流量统计：独立轮询后端真实统计（后端每秒采样），局部刷新，不重建 DOM
+   seq 保证「切换范围 / 切换网口」后，只采用最后一次请求的结果，不会串到别的时间类型或别的网口 */
 async function refreshUsageData() {
-  if (state.usageLoading) return;
+  const seq = ++state.usageSeq;
   state.usageLoading = true;
   try {
     const q = '?range=' + encodeURIComponent(state.usageRange);
     const d = await api('/api/usage' + q);
+    if (seq !== state.usageSeq) return;
     state.usageData = d;
     if (state.section === 'trafficStats') paintTrafficStats(d);
   } catch (e) {
+    if (seq !== state.usageSeq) return;
     const cards = $('statCards');
     if (cards && !cards.querySelector('.card')) cards.innerHTML = `<div class="empty" style="grid-column:1/-1">${t('load_fail')}: ${esc(e.message)}</div>`;
   } finally { state.usageLoading = false; }
 }
+/* ================= 自动刷新：一个全局开关，驱动所有需要轮询的页面 =================
+   WS 实时帧属于推送流，不受开关影响；开关只控制「表格 / 设备状态 / 统计」的轮询刷新。 */
+function paintAutoRefresh() {
+  const chk = $('autoRefreshChk'), wrap = $('autoRefresh');
+  if (!chk || !wrap) return;
+  chk.checked = state.autoRefresh;
+  wrap.classList.toggle('on', state.autoRefresh);
+  wrap.title = t('auto_refresh') + ' · ' + (state.autoRefresh ? t('auto_on') : t('auto_off'));
+}
+function refreshCurrentPageNow() {
+  if (state.section === 'trafficStats') refreshUsageData();
+  else if (typeof window.autoRefreshPage === 'function') window.autoRefreshPage();
+}
+function setAutoRefresh(on, quiet) {
+  state.autoRefresh = !!on;
+  try { localStorage.setItem('ros-auto-refresh', state.autoRefresh ? '1' : '0'); } catch (e) { /* ignore */ }
+  paintAutoRefresh();
+  ensureAutoTimer();
+  ensureUsageTimer(state.section === 'trafficStats');
+  if (state.autoRefresh) refreshCurrentPageNow();
+  if (!quiet) toast(state.autoRefresh ? t('auto_on') : t('auto_off'), state.autoRefresh ? 'ok' : '');
+}
+function ensureAutoTimer() {
+  if (state.autoRefresh && !state.autoTimer) {
+    state.autoTimer = setInterval(() => {
+      if (!state.autoRefresh || document.hidden) return;
+      if (typeof window.autoRefreshPage === 'function') window.autoRefreshPage();
+    }, 5000);
+  } else if (!state.autoRefresh && state.autoTimer) {
+    clearInterval(state.autoTimer); state.autoTimer = null;
+  }
+}
 function ensureUsageTimer(on) {
-  if (on && !state.usageTimer) {
+  if (on && state.autoRefresh && !state.usageTimer) {
     state.usageTimer = setInterval(() => {
       if (state.section === 'trafficStats' && !document.hidden) refreshUsageData();
     }, 2000);
-  } else if (!on && state.usageTimer) { clearInterval(state.usageTimer); state.usageTimer = null; }
+  } else if ((!on || !state.autoRefresh) && state.usageTimer) { clearInterval(state.usageTimer); state.usageTimer = null; }
 }
+/* 仅 demo 模式提示 DEMO；实时 LIVE / OFFLINE 徽标全部移除 */
 function updateStatsBadge(d) {
   const el = $('statsBadge'); if (!el) return;
   const mode = (d && d.mode) || state.mode;
-  const real = !!(d && d.dataReal);
-  el.className = 'badge-live ' + (mode === 'live' && real ? 'live' : '');
-  el.innerHTML = '<span class="d"></span>' + esc(t(mode));
+  const demo = mode === 'demo' || !!(d && d.demo);
+  el.hidden = !demo;
+  el.innerHTML = '<span class="d"></span>' + esc(t('demo_only'));
 }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function updateTopbar(d) {
   const devDot = $('deviceDot'); if (devDot) devDot.classList.toggle('live', d.mode === 'live');
-  const pill = $('sideMode'); pill.textContent = t(state.mode);
+  const pill = $('sideMode');
+  if (pill) {
+    const demo = state.mode === 'demo';
+    pill.hidden = !demo;
+    pill.textContent = demo ? t('demo_only') : '';
+  }
   const streamEl = $('sideStream');
   if (streamEl) {
-    streamEl.hidden = d.mode !== 'live';
-    streamEl.textContent = d.streaming ? t('stream_on') : t('stream_off');
+    streamEl.hidden = d.mode !== 'live' || !d.streaming;
+    streamEl.textContent = t('stream_on');
     streamEl.classList.toggle('on', !!d.streaming);
   }
   $('sideDot').parentElement.classList.toggle('live', state.mode === 'live');
@@ -624,6 +717,7 @@ function applyLang() {
   document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
   $('langLabel').textContent = lang === 'zh' ? 'EN' : '中文';
   applyTheme(false); // 刷新主题下拉的语言标签
+  paintAutoRefresh();
   buildNav(); renderPage();
 }
 
@@ -671,6 +765,21 @@ async function boot() {
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   };
   $('navSearch').oninput = (e) => buildNav(e.target.value);
+  $('navSearch').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      const first = $('sideNav').querySelector('.nav-item');
+      if (first) { const id = first.dataset.section; e.target.value = ''; buildNav(''); navigate(id); }
+    } else if (e.key === 'Escape') { e.target.value = ''; buildNav(''); e.target.blur(); }
+  };
+  const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+  const kbdMod = $('kbdMod');
+  if (kbdMod) { kbdMod.textContent = isMac ? '⌘' : 'Ctrl'; kbdMod.classList.toggle('wide', !isMac); }
+  const kbdHint = $('searchKbd');
+  if (kbdHint) { kbdHint.title = (isMac ? '⌘' : 'Ctrl') + ' + K · ' + t('search_hint'); kbdHint.onclick = focusNavSearch; }
+  const arChk = $('autoRefreshChk');
+  if (arChk) arChk.onchange = (e) => setAutoRefresh(e.target.checked);
+  paintAutoRefresh();
+  ensureAutoTimer();
   $('foldAllBtn').onclick = () => {
     const allCollapsed = state.schema.groups.every((g) => state.collapsedGroups.has(g.id));
     state.collapsedGroups = allCollapsed ? new Set() : new Set(state.schema.groups.map((g) => g.id));
@@ -681,7 +790,8 @@ async function boot() {
   $('exportBtn').onclick = async () => {
     try {
       const d = await api('/api/status');
-      openModal(t('export_hint'), `<div class="modal-note"><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)}<br><b>${t('status') || 'Status'}:</b> ${t(d.mode)}<br><b>${t('system')}:</b> ${esc(d.user)}</div>
+      const statusText = d.mode === 'demo' ? t('demo_only') : (d.mode === 'live' ? t('device_online') : t('device_offline'));
+      openModal(t('export_hint'), `<div class="modal-note"><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)}<br><b>${L('状态', 'Status')}:</b> ${esc(statusText)}<br><b>${t('system')}:</b> ${esc(d.user)}</div>
         <pre class="code">${esc(JSON.stringify({ host: d.host, port: d.port, mode: d.mode, interval: d.interval, uptime: d.uptime }, null, 2))}</pre>`,
         `<button class="btn" data-close>${t('close')}</button>`, (m) => { m.querySelector('[data-close]').onclick = closeModal; });
     } catch (e) { toast(e.message, 'err'); }

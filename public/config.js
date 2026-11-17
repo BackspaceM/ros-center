@@ -7,13 +7,13 @@ async function loadRows(sec) {
   if (sec.id === 'connections') state.connRows = state.rows;
   return state.rows;
 }
-/* 配置页状态标签随实时帧更新，避免首屏停留在过期的 DEMO */
+/* 只保留 demo 提示；LIVE / OFFLINE 徽标不再显示 */
 function syncConfigTag() {
   const el = $('cfgModeTag') || $('sioModeTag'); if (!el) return;
-  const real = state.mode === 'live' && !state.configDemo && !state.configOffline;
-  const label = real ? 'LIVE' : state.configDemo ? 'DEMO' : (state.configOffline ? 'OFFLINE' : t('offline'));
-  el.textContent = label;
-  el.className = 'tag ' + (real ? 'green' : 'amber');
+  const demo = state.configDemo || state.mode === 'demo';
+  el.hidden = !demo;
+  el.textContent = t('demo_only');
+  el.className = 'badge-demo';
 }
 
 function renderConfigPage(sec) {
@@ -27,7 +27,6 @@ function renderConfigPage(sec) {
         ${writable && sec.runAction ? `<button class="btn" id="btnRun">▶ ${t('run_script')}</button>` : ''}
         ${writable && !sec.runAction && sec.toggle !== false ? `<button class="btn" id="btnEnable">${t('enable')}</button><button class="btn" id="btnDisable">${t('disable')}</button>` : ''}
         ${writable ? `<button class="btn ghost-danger" id="btnDelete">${t('delete')}</button>` : ''}
-        <button class="btn" id="btnRefresh">${t('refresh')}</button>
       </div>
     </div>
     ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
@@ -36,7 +35,7 @@ function renderConfigPage(sec) {
         <input type="search" id="rowSearch" placeholder="${t('search')}…" value="${esc(state.rowFilter)}">
         <span class="tag" id="rowCount">0 ${t('rows')}</span>
         <span class="spacer"></span>
-        <span class="tag" id="cfgModeTag">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span>
+        ${demoBadge('cfgModeTag')}
       </div>
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
@@ -47,7 +46,6 @@ function renderConfigPage(sec) {
       <div class="pager"><span id="pageInfo"></span><button id="prevPage">${t('prev')}</button><button id="nextPage">${t('next')}</button></div>
     </div>`;
 
-  $('btnRefresh').onclick = () => loadRows(sec).then(() => { renderConfigPage(sec); toast(t('refresh') + ' OK', 'ok'); }).catch((e) => toast(e.message, 'err'));
   if (writable) {
     $('btnAdd').onclick = () => openForm(sec, null);
     if (sec.runAction) {
@@ -86,28 +84,28 @@ function renderSingletonPage(sec) {
   $('content').innerHTML = `
     <div class="page-head"><div><h1>${esc(tx(sec.title))}</h1><p>${esc(sec.path || '')}</p></div>
       <div class="page-actions">
-        <button class="btn" id="sioRefresh">${t('refresh')}</button>
         ${writable ? `<button class="btn primary" id="sioEdit">${t('edit')}</button>` : ''}
       </div></div>
     ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
     <div class="panel"><div class="panel-head"><div><h2>${esc(tx(sec.title))}</h2><p class="sub">${t('singleton_hint')}</p></div>
-      <span class="tag ${state.mode === 'live' && !state.configDemo ? 'green' : 'amber'}" id="sioModeTag">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span></div>
+      ${demoBadge('sioModeTag')}</div>
       <div class="panel-body"><div class="kv-grid" id="sioBody"><div class="empty">${t('loading')}</div></div></div></div>`;
-  $('sioRefresh').onclick = () => renderSingletonPage(sec);
   const edit = $('sioEdit'); if (edit) edit.onclick = () => openForm(sec, state.rows[0] || null);
-  loadRows(sec).then(() => {
-    syncConfigTag();
-    const box = $('sioBody'); if (!box) return;
-    const row = state.rows[0] || {};
-    const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
-    box.innerHTML = fields.map((f) => {
-      const v = row[f.key];
-      let shown = v == null || v === '' ? '—' : String(v);
-      if (f.type === 'password' || /key/i.test(f.key)) shown = '••••••••';
-      else if (f.type === 'bool') shown = boolOn(v) ? t('enabled') : t('disabled');
-      return `<div class="kv-item"><div class="kv-label">${esc(tx(f.label))}</div><div class="kv-value" title="${esc(shown)}">${esc(shown)}</div></div>`;
-    }).join('');
-  }).catch((e) => { const box = $('sioBody'); if (box) box.innerHTML = `<div class="empty">${t('load_fail')}: ${esc(e.message)}</div>`; });
+  loadRows(sec).then(() => { syncConfigTag(); paintSingletonBody(sec); })
+    .catch((e) => { const box = $('sioBody'); if (box) box.innerHTML = `<div class="empty">${t('load_fail')}: ${esc(e.message)}</div>`; });
+}
+/* 自动刷新单例页时只重画键值区，不重建整页（不丢编辑焦点） */
+function paintSingletonBody(sec) {
+  const box = $('sioBody'); if (!box) return;
+  const row = state.rows[0] || {};
+  const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
+  box.innerHTML = fields.map((f) => {
+    const v = row[f.key];
+    let shown = v == null || v === '' ? '—' : String(v);
+    if (f.type === 'password' || /key/i.test(f.key)) shown = '••••••••';
+    else if (f.type === 'bool') shown = boolOn(v) ? t('enabled') : t('disabled');
+    return `<div class="kv-item"><div class="kv-label">${esc(tx(f.label))}</div><div class="kv-value" title="${esc(shown)}">${esc(shown)}</div></div>`;
+  }).join('');
 }
 
 function numCol(key, sec) { return /bytes|port|mtu|distance|priority|time$|count/i.test(key) && sec.fields.find((f) => f.key === key)?.type !== 'bool'; }
@@ -441,16 +439,21 @@ async function openWireguardQr(row, sec) {
 /* ================= 多设备管理 ================= */
 function deviceStatusTag(d) {
   const st = d.status || {};
-  const cls = st.connected || st.mode === 'live' ? 'green' : (d.demo ? 'amber' : 'red');
-  const label = st.connected || st.mode === 'live' ? t('live') : (d.demo ? t('demo') : t(st.mode || 'connecting'));
+  const online = !!(st.connected || st.mode === 'live');
+  const cls = online ? 'green' : (d.demo ? 'amber' : 'red');
+  let label;
+  if (online) label = t('device_online');
+  else if (d.demo) label = t('demo_only');
+  else if (st.mode === 'connecting') label = t('connecting');
+  else if (st.mode === 'reconnect') label = t('reconnect');
+  else label = t('device_offline');
   return `<span class="tag ${cls}">${esc(label)}</span>`;
 }
 function renderConnectionSettings() {
   $('content').innerHTML = `
     <div class="page-head"><div><h1>${t('devices')}</h1><p>${t('devices_sub')}</p></div>
       <div class="page-actions">
-        <button class="btn" id="devWebPort">${t('conn_web_port')}: ${esc(state.webPort || 10086)}</button>
-        <button class="btn" id="devRefresh">${t('refresh')}</button>
+        <span class="tag" id="devPortTag">${t('conn_web_port')}: ${esc(state.webPort || 10086)}</span>
         <button class="btn primary" id="devAdd">+ ${t('device_add')}</button>
       </div></div>
     <div class="note-card">${t('device_hint')} · ${t('device_count')}: <b id="devCount">${state.devices.length}</b></div>
@@ -483,8 +486,13 @@ function renderConnectionSettings() {
           </div>
         </div></div>
     </div>`;
-  const renderRows = () => {
+  const renderRows = (force) => {
     const tb = $('devBody'); if (!tb) return;
+    /* 状态签名去重：WS 每秒帧只在真正变化时重画，避免打断点击 */
+    const sig = state.devices.map((d) => [d.id, d.status && d.status.mode, d.status && d.status.connected, d.demo,
+      d.id === state.devicePrimary, d.id === state.deviceId].join(':')).join('|');
+    if (!force && tb.dataset.sig === sig) return;
+    tb.dataset.sig = sig;
     $('devCount').textContent = state.devices.length;
     tb.innerHTML = state.devices.map((d) => `<tr data-dev="${esc(d.id)}">
       <td><b>${esc(d.name)}</b>${d.id === state.devicePrimary ? ' <span class="tag blue">' + esc(t('device_current')) + '</span>' : ''}</td>
@@ -507,7 +515,8 @@ function renderConnectionSettings() {
         api('/api/devices/' + id, { method: 'DELETE' }).then(() => { if (state.deviceId === id) switchDevice(state.devices.find((x) => x.id !== id).id, true); refresh(); toast(t('deleted_ok'), 'ok'); }).catch((e) => toast(e.message, 'err')));
     });
   };
-  const refresh = async () => { await loadDevices(true); renderRows(); renderDevicePicker(); };
+  window.paintDeviceRows = renderRows;
+  const refresh = async () => { await loadDevices(true); renderRows(true); renderDevicePicker(); };
   async function setPrimary(id) {
     try { const d = await api('/api/devices/' + id + '/active', { method: 'POST' }); state.devicePrimary = d.activeId; await refresh(); toast(t('device_saved'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
@@ -546,17 +555,22 @@ function renderConnectionSettings() {
             else await api('/api/devices/' + dev.id + '/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
             closeModal(); await refresh(); if (!isNew && dev.id === state.deviceId) switchDevice(dev.id, true);
             toast(t('device_saved'), 'ok');
+            /* 新设备连上路由器需要几秒：保存后自动跟进状态，无需手动刷新 */
+            [1200, 3000, 6000].forEach((ms) => setTimeout(async () => {
+              if (state.section !== 'connectionSettings') return;
+              try { await loadDevices(true); if (window.paintDeviceRows) window.paintDeviceRows(true); renderDevicePicker(); }
+              catch (e) { /* 保留上次状态 */ }
+            }, ms));
           } catch (e) { toast(e.message, 'err'); }
         };
       });
   }
   $('devAdd').onclick = () => openDeviceForm(null);
-  $('devRefresh').onclick = refresh;
   $('devSavePort').onclick = async () => {
     try {
       const r = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webPort: Number($('cfgWebPort').value) }) });
       await loadDevices(true); toast(r.restartRequired ? t('conn_restart') : t('saved_ok'), r.restartRequired ? '' : 'ok');
-      $('devWebPort').textContent = t('conn_web_port') + ': ' + state.webPort;
+      const tag = $('devPortTag'); if (tag) tag.textContent = t('conn_web_port') + ': ' + state.webPort;
     } catch (e) { toast(e.message, 'err'); }
   };
   $('authSave').onclick = async () => {
@@ -580,8 +594,26 @@ function renderConnectionSettings() {
       toast(t('login_disabled'), 'ok'); renderConnectionSettings();
     } catch (e) { toast(e.message, 'err'); }
   });
-  renderRows();
+  renderRows(true);
 }
+
+/* ================= 全局自动刷新：按当前页面只更新数据区，不重建整页 ================= */
+window.autoRefreshPage = async function () {
+  const sec = state.schema && state.schema.sections.find((s) => s.id === state.section);
+  if (!sec) return;
+  if (state.section === 'connectionSettings') {
+    try { await loadDevices(true); if (window.paintDeviceRows) window.paintDeviceRows(true); renderDevicePicker(); }
+    catch (e) { /* 保留上次状态 */ }
+    return;
+  }
+  if (!sec.path || state.section === 'trafficStats' || state.section === 'dashboard' || state.section === 'systemTools') return;
+  try {
+    await loadRows(sec);
+    syncConfigTag();
+    if (sec.singleton) paintSingletonBody(sec);
+    else renderRows(sec);   /* 配置表格：只重画 tbody，搜索/排序/勾选状态不丢 */
+  } catch (e) { /* 静默保留上一次真实数据 */ }
+};
 
 /* 所有脚本就绪后启动 */
 boot();

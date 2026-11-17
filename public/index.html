@@ -14,14 +14,15 @@
       <div class="brand-name"><b data-i18n="brand">ROS</b><small data-i18n="brand_sub">Center</small></div>
       <button class="side-collapse" id="collapseBtn" type="button" title="收起 / Collapse">‹</button>
     </div>
-    <div class="side-search">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      <input id="navSearch" type="search" data-i18n-ph="search_menu" placeholder="搜索菜单…">
+    <div class="side-search" id="sideSearch">
+      <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <input id="navSearch" type="search" data-i18n-ph="search_menu" placeholder="搜索菜单…" autocomplete="off">
+      <span class="kbd-hint" id="searchKbd" title="Command + K / Ctrl + K"><kbd id="kbdMod">⌘</kbd><span class="kbd-plus">+</span><kbd>K</kbd></span>
     </div>
     <div class="nav-fold-bar"><span data-i18n="sidebar_hint">点击箭头折叠侧栏，拖动右侧边缘调整宽度</span><button id="foldAllBtn" type="button" title="收起/展开全部分组">−</button></div>
     <nav class="side-nav" id="sideNav"></nav>
     <div class="side-foot">
-      <div class="side-status"><span class="dot" id="sideDot"></span><b id="sideStream" class="side-stream" hidden></b><span id="sideMode">DEMO</span></div>
+      <div class="side-status"><span class="dot" id="sideDot"></span><b id="sideStream" class="side-stream" hidden></b><span id="sideMode" class="side-mode" hidden></span></div>
       <div class="side-foot-actions">
         <button class="side-logout" id="settingsShortcut" type="button" title="连接设置 / Connection settings">⚙</button>
         <button class="side-logout" id="exportBtn" type="button" title="获取配置快照 / Export snapshot" data-i18n-title="export_snapshot">⇩</button>
@@ -58,6 +59,10 @@
         </label>
         <button class="mode-toggle" id="modeBtn" type="button" aria-label="Light / dark mode" title="浅色 / 深色 / 跟随系统">☀</button>
         <button class="lang" id="langBtn" type="button"><span class="lang-globe"></span><span id="langLabel">EN</span></button>
+        <label class="auto-refresh" id="autoRefresh" title="自动刷新 / Auto refresh">
+          <span class="ar-icon" aria-hidden="true">⟳</span><span class="ar-label" data-i18n="auto_refresh">自动刷新</span>
+          <input type="checkbox" id="autoRefreshChk" checked><span class="ar-track" aria-hidden="true"><i></i></span>
+        </label>
         <div class="admin" id="adminBtn" title="连接设置 / Connection settings"><span class="avatar">B</span><span id="adminName">Backspace</span><span class="caret">▾</span></div>
       </div>
     </header>

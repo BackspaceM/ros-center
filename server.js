@@ -688,6 +688,11 @@ function activeDevice() { return devices.get(activeId) || devices.values().next(
 function deviceById(id) { return devices.get(id) || activeDevice(); }
 
 loadDeviceRegistry();
+/* 启动清理：删除已不存在设备的统计桶，避免残留历史占用并让「删除设备清历史」保持一致 */
+for (const id of Object.keys(usageStore.devices)) {
+  if (!devices.has(id)) { delete usageStore.devices[id]; usageDirty = true; }
+}
+if (usageDirty) saveUsage(true);
 
 /* ================= 演示数据（每设备独立） ================= */
 function demoPrint(dev, sectionId) { return (dev.demoDB[sectionId] || []).map((r) => ({ ...r })); }
@@ -1358,6 +1363,8 @@ const server = http.createServer(async (req, res) => {
       devices.delete(id);
       if (activeId === id) activeId = devices.keys().next().value;
       if (!saveDeviceRegistry()) throw new Error('写入 devices.json 失败');
+      /* 设备管理页承诺「历史数据一并清除」：同步移除该设备的统计桶 */
+      if (usageStore.devices[id]) { delete usageStore.devices[id]; usageDirty = true; saveUsage(true); }
       console.log(`[devices] removed ${dev.name} by=${req.socket.remoteAddress}`);
       return json(res, 200, { ok: true, devices: deviceList(), activeId });
     } catch (e) { return json(res, 400, { error: e.message }); }

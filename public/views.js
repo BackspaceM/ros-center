@@ -1,5 +1,10 @@
 'use strict';
 
+/* 只有演示模式才显示 DEMO 提示；实时状态不再挂 LIVE 徽标 */
+function demoBadge(id) {
+  return `<span class="badge-demo"${id ? ` id="${id}"` : ''}${state.mode === 'demo' ? '' : ' hidden'}><span class="d"></span>${esc(t('demo_only'))}</span>`;
+}
+
 /* ================= 概览仪表盘 ================= */
 function renderDashboard() {
   const d = state.latest || {};
@@ -15,11 +20,8 @@ function renderDashboard() {
 
   $('content').innerHTML = `
     <div class="page-head">
-      <div><h1>${t('overview_title') || '系统概览'}</h1><p>${esc(r['board-name'] || 'RouterOS')} · RouterOS ${esc(r.version || '')} · ${t('conn_sub')}</p></div>
-      <div class="page-actions">
-        <span class="badge-live ${state.mode === 'live' ? 'live' : ''}"><span class="d"></span>${t(state.mode)}</span>
-        <button class="btn" id="dashRefresh">${t('refresh')}</button>
-      </div>
+      <div><h1>${t('overview_title') || '系统概览'}</h1><p>${esc(r['board-name'] || 'RouterOS')} · RouterOS ${esc(r.version || '')} · ${t('uptime')} ${fmtUptime(d.uptime)}</p></div>
+      <div class="page-actions">${demoBadge()}</div>
     </div>
     <div class="cards">
       <div class="card rx"><div class="card-label">${t('total_rx')}</div><div class="card-value">${rx.v}<small>${rx.u}</small></div><div class="card-foot">${t('rx_hint')}</div></div>
@@ -39,20 +41,15 @@ function renderDashboard() {
       </div>
     </div>
     <div class="grid-32">
-      <div class="panel">
-        <div class="panel-head"><div><h2>${t('conn_title')}</h2><p class="sub">${t('conn_sub')}${d.connectionsReal === false ? ' · ' + L('演示 / 离线：非实时，显示上次真实值', 'Demo / offline: not live, showing last real values') : ''}</p></div></div>
-        <div class="stat-row">
-          ${statBox(t('conn_total') || L('连接总数', 'Total connections'), String((cn.total || 0).toLocaleString()))}
-          ${statBox('IPv4', String((cn.v4 || 0).toLocaleString()))}
-          ${statBox('IPv6', String((cn.v6 || 0).toLocaleString()))}
+      <div class="panel conn-panel">
+        <div class="panel-head"><div><h2>${t('conn_title')}</h2><p class="sub">${t('conn_sub')}${d.connectionsReal === false ? ' · ' + L('非实时，显示上次真实值', 'Not live, showing last real values') : ''}</p></div></div>
+        <div class="conn-total">
+          <div class="conn-total-main"><small>${t('conn_total_hint')}</small><b>${String((cn.total || 0).toLocaleString())}</b></div>
+          <div class="conn-split"><span><i class="v4"></i>IPv4 <b>${String((cn.v4 || 0).toLocaleString())}</b></span><span><i class="v6"></i>IPv6 <b>${String((cn.v6 || 0).toLocaleString())}</b></span></div>
         </div>
-        <div class="stat-row" style="padding-top:0">
-          ${statBox(L('TCP · IPv4', 'TCP · IPv4'), String((cn.tcp4 || 0).toLocaleString()))}
-          ${statBox(L('TCP · IPv6', 'TCP · IPv6'), String((cn.tcp6 || 0).toLocaleString()))}
-          ${statBox(L('UDP · IPv4', 'UDP · IPv4'), String((cn.udp4 || 0).toLocaleString()))}
-          ${statBox(L('UDP · IPv6', 'UDP · IPv6'), String((cn.udp6 || 0).toLocaleString()))}
-        </div>
-        <div class="panel-body" style="padding-top:0"><div id="connSpark" style="height:96px"></div></div>
+        ${connGroup('IPv4', cn.v4, cn.tcp4, cn.udp4, 'v4')}
+        ${connGroup('IPv6', cn.v6, cn.tcp6, cn.udp6, 'v6')}
+        <div class="panel-body" style="padding-top:2px"><div id="connSpark" style="height:84px"></div></div>
       </div>
       <div class="panel">
         <div class="panel-head"><div><h2>${t('ifdist_title') || L('接口类型分布', 'Interface types')}</h2><p class="sub">${t('ifdist_sub') || L('按实际接口类型统计', 'Counted by real interface type')}</p></div></div>
@@ -64,7 +61,6 @@ function renderDashboard() {
       ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), ['#', L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')])}
     </div>`;
 
-  $('dashRefresh').onclick = () => { renderDashboard(); toast(t('refresh') + ' OK', 'ok'); };
   drawLineChart('dashChart', 'dashTip', state.points, [
     { key: 'rx', color: cssVar('--blue', '#2563eb'), fill: themeFill('--blue', '#2563eb', .10), label: t('legend_rx') },
     { key: 'tx', color: cssVar('--violet', '#7c5cff'), fill: themeFill('--violet', '#7c5cff', .09), label: t('legend_tx') },
@@ -76,7 +72,16 @@ function renderDashboard() {
   drawConnSpark();
   renderTopTables(d);
 }
-function statBox(label, value) { return `<div class="stat-box"><small>${esc(label)}</small><b>${esc(value)}</b></div>`; }
+/* 连接状态：IPv4 / IPv6 各成一组，子项保持短小并可横向滑动 */
+function connGroup(name, total, tcp, udp, cls) {
+  const t4 = Number(tcp) || 0, u4 = Number(udp) || 0, all = Number(total) || 0;
+  const other = Math.max(0, all - t4 - u4);
+  const chip = (label, value, kind) => `<div class="conn-chip ${kind}"><small>${esc(label)}</small><b>${Number(value).toLocaleString()}</b></div>`;
+  return `<div class="conn-group">
+    <div class="conn-group-head"><span class="conn-badge ${cls}">${name}</span><b>${all.toLocaleString()}</b><span class="conn-scroll-hint">⇆</span></div>
+    <div class="conn-rail">${chip(t('conn_group_all'), all, 'all')}${chip(t('conn_tcp'), t4, 'tcp')}${chip(t('conn_udp'), u4, 'udp')}${chip(t('conn_other'), other, 'other')}</div>
+  </div>`;
+}
 function emptyRow(cols) { return `<tr><td colspan="${cols}" style="text-align:center;padding:36px;color:var(--muted)">${t('no_data')}</td></tr>`; }
 function topTablePanel(id, title, sub, heads) {
   return `<div class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2><p class="sub">${esc(sub)}</p></div></div>
@@ -147,49 +152,41 @@ function renderTrafficStats(range) {
   $('content').innerHTML = `
     <div class="page-head">
       <div><h1>${t('stats_title')}</h1><p>${t('stats_sub')}</p></div>
-      <div class="page-actions">
-        <span class="badge-live" id="statsBadge"><span class="d"></span>${esc(t(state.mode))}</span>
-        <button class="btn" id="statsRefresh">${t('refresh')}</button>
-      </div>
+      <div class="page-actions">${demoBadge('statsBadge')}</div>
     </div>
-    <div class="scope-bar" id="statsScope">
-      <span class="tag blue">${t('stats_scope')}</span>
-      <div class="iface-chips" id="statsIfaceChips"></div>
-      <span class="scope-spacer"></span>
-      <button class="btn btn-sm" id="statsCustomBtn">+ ${t('stats_custom_btn')}</button>
+    <div class="stats-toolbar">
+      <div class="stats-tool-row">
+        <div class="tabs stats-tabs" id="statsTabs">
+          ${Object.keys(STATS_RANGES).map((k) => `<button class="tab ${k === state.usageRange ? 'active' : ''}" data-range="${k}">${esc(STATS_RANGES[k].label())}</button>`).join('')}
+        </div>
+        <span class="stats-spacer"></span>
+        <button class="btn btn-sm" id="statsCustomBtn">+ ${t('stats_custom_btn')}</button>
+      </div>
+      <div class="stats-tool-row">
+        <span class="stats-label">${t('stats_scope')}</span>
+        <div class="iface-chips" id="statsIfaceChips"></div>
+      </div>
+      <div class="stats-hint" id="statsScopeHint"></div>
     </div>
     <div class="iface-custom" id="statsCustom" hidden>
       <input type="text" id="statsCustomInput" placeholder="pppoe-*, vlan??">
       <span class="form-hint">${t('stats_iface_manual_hint')}</span>
       <button class="btn btn-sm primary" id="statsCustomSave">${t('save')}</button>
     </div>
-    <div class="scope-hint" id="statsScopeHint"></div>
-    <div class="tabs stats-tabs" id="statsTabs">
-      ${Object.keys(STATS_RANGES).map((k) => `<button class="tab ${k === state.usageRange ? 'active' : ''}" data-range="${k}">${esc(STATS_RANGES[k].label())}</button>`).join('')}
-    </div>
     <div class="cards" id="statCards"></div>
     <div class="data-source" id="statsSource"></div>
     <div class="panel">
-      <div class="panel-head"><div><h2>${t('stats_chart')}</h2><p class="sub" id="statsRangeLabel"></p></div></div>
-      <div class="chart-wrap"><canvas id="statsChart"></canvas><div class="tooltip" id="statsTip" hidden></div></div>
-    </div>
-    <div class="panel" style="margin-top:14px">
-      <div class="panel-head"><div><h2>${t('stats_detail')}</h2><p class="sub" id="statsDetailLabel"></p></div></div>
-      <div class="table-scroll"><table><thead><tr><th>${t('stats_col_time')}</th><th>${t('stats_col_iface')}</th>
-        <th class="num">${t('legend_rx')}</th><th class="num">${t('legend_tx')}</th><th class="num">${t('stats_col_sum')}</th></tr></thead>
-        <tbody id="statsBody"></tbody></table></div>
-      <div class="pager"><span id="statsPageInfo"></span>
-        <button id="statsPrev">${t('stats_prev')}</button><button id="statsNext">${t('stats_next')}</button></div>
+      <div class="panel-head"><div><h2>${t('stats_chart')}</h2><p class="sub" id="statsRangeLabel"></p></div>
+        <div class="legend"><span><i style="background:var(--blue)"></i>${t('legend_rx')}</span><span><i style="background:var(--violet)"></i>${t('legend_tx')}</span></div></div>
+      <div class="chart-wrap stats-chart"><canvas id="statsChart"></canvas><div class="tooltip" id="statsTip" hidden></div></div>
     </div>`;
   $('statsTabs').querySelectorAll('.tab').forEach((b) => b.onclick = () => {
     if (state.usageRange === b.dataset.range) return;
-    state.usageRange = b.dataset.range; state.usageDetailPage = 1;
-    $('statsTabs').querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.range === state.usageRange));
+    state.usageRange = b.dataset.range;
+    b.parentElement.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.range === state.usageRange));
     $('statsRangeLabel').textContent = STATS_RANGES[state.usageRange].series();
-    $('statsDetailLabel').textContent = t('stats_detail_hint');
-    refreshUsageData();
+    refreshUsageData();   /* 按当前范围 + 当前网口重新取真实序列 */
   });
-  $('statsRefresh').onclick = () => { state.usageData = null; refreshUsageData(); };
   $('statsCustomBtn').onclick = () => { const c = $('statsCustom'); c.hidden = !c.hidden; if (!c.hidden) $('statsCustomInput').focus(); };
   $('statsCustomSave').onclick = () => {
     const raw = $('statsCustomInput').value || '';
@@ -199,10 +196,7 @@ function renderTrafficStats(range) {
     if (!names.length && !(state.usageData && state.usageData.scope === 'all')) { toast(t('stats_iface_need_one'), 'err'); return; }
     saveUsageInterfaces(names);
   };
-  $('statsPrev').onclick = () => { state.usageDetailPage--; paintUsageDetail(state.usageData); };
-  $('statsNext').onclick = () => { state.usageDetailPage++; paintUsageDetail(state.usageData); };
   $('statsRangeLabel').textContent = STATS_RANGES[state.usageRange].series();
-  $('statsDetailLabel').textContent = t('stats_detail_hint');
   if (state.usageData && state.usageData.detailRange === state.usageRange) paintTrafficStats(state.usageData);
   else $('statCards').innerHTML = `<div class="empty" style="grid-column:1/-1">${t('loading')}</div>`;
   refreshUsageData();
@@ -219,13 +213,13 @@ function paintTrafficStats(d) {
     const f = splitBytes(bytes);
     return `<div class="card ${cls}"><div class="card-label">${esc(label)}</div><div class="card-value">${f.v}<small>${f.u}</small></div><div class="card-foot">${esc(foot)}</div></div>`;
   };
-  const rr = fmtRate(rate.rx), rt = fmtRate(rate.tx);
+  const rr = fmtRate(rate.rx), rt = fmtRate(rate.tx), rsum = fmtRate(rate.rx + rate.tx);
   cards.innerHTML =
     card(STATS_RANGES[range].label() + ' · ' + t('stats_card_rx'), val.rx, 'rx', t('stats_from_router'))
     + card(STATS_RANGES[range].label() + ' · ' + t('stats_card_tx'), val.tx, 'tx', t('stats_from_router'))
     + card(t('stats_card_sum'), val.rx + val.tx, 'ok', t('stats_from_router'))
     + `<div class="card warn"><div class="card-label">${t('stats_card_rate')}</div>
-        <div class="card-value">${rate.real ? rr.v : '—'}<small>${rate.real ? rr.u : ''}</small></div>
+        <div class="card-value">${rate.real ? rsum.v : '—'}<small>${rate.real ? rsum.u : ''}</small></div>
         <div class="card-foot">${rate.real ? '↓ ' + rr.v + ' ' + rr.u + ' · ↑ ' + rt.v + ' ' + rt.u : esc(t('stats_source_fake'))}</div></div>`;
   const src = $('statsSource');
   if (src) {
@@ -238,30 +232,13 @@ function paintTrafficStats(d) {
       ${d.resets ? '<em>' + info('stats_reset_info', d.resets) + '</em>' : ''}
       ${d.gaps ? '<em>' + info('stats_gap_info', d.gaps) + '</em>' : ''}`;
   }
+  /* 趋势图严格取「当前范围」的序列；后端序列已按所选网口过滤 */
   const buckets = (d.series && d.series[range]) || [];
-  const sub = STATS_RANGES[range].series();
-  $('statsRangeLabel').textContent = sub;
+  const names = (d.interfaces || []).filter(Boolean);
+  const scopeText = d.scope === 'custom' && names.length ? names.join(' / ') : t('stats_iface_all_short');
+  $('statsRangeLabel').textContent = STATS_RANGES[range].series() + ' · ' + scopeText
+    + (d.scope === 'custom' ? ' · ' + (Number(d.matched) || 0) + ' ' + t('stats_iface_unit') : '');
   drawBarChart('statsChart', 'statsTip', buckets, fmtBytes);
-  paintUsageDetail(d);
-}
-/* 明细：每页 3 行；今日按小时、本周/本月按天、累计按月，逐网口列出真实用量 */
-function paintUsageDetail(d) {
-  const body = $('statsBody'); if (!body) return;
-  const rows = (d && d.detail) || [], perPage = 3;
-  const pages = Math.max(1, Math.ceil(rows.length / perPage));
-  state.usageDetailPage = Math.max(1, Math.min(pages, state.usageDetailPage || 1));
-  const pageRows = rows.slice((state.usageDetailPage - 1) * perPage, state.usageDetailPage * perPage);
-  body.innerHTML = pageRows.map((b) => {
-    const rx = splitBytes(b.rx), tx = splitBytes(b.tx);
-    const iface = b.iface ? esc(b.iface) : `<span class="tag blue">${esc(t('stats_detail_all'))}</span>`;
-    return `<tr${b.iface ? '' : ' class="sum-row"'}><td>${esc(b.label)}</td><td>${iface}</td>
-      <td class="num"><span class="rate rx">${rx.v}</span> <span class="tag">${rx.u}</span></td>
-      <td class="num"><span class="rate tx">${tx.v}</span> <span class="tag">${tx.u}</span></td>
-      <td class="num">${fmtBytes(b.rx + b.tx)}</td></tr>`;
-  }).join('') || `<tr><td colspan="5" class="empty">${esc(t('stats_detail_empty'))}</td></tr>`;
-  $('statsPageInfo').textContent = `${t('stats_page')} ${state.usageDetailPage} ${t('stats_of')} ${pages} ${t('stats_page_unit')} · ${rows.length} ${t('rows')}`;
-  $('statsPrev').disabled = state.usageDetailPage <= 1;
-  $('statsNext').disabled = state.usageDetailPage >= pages;
 }
 /* 统计网口多选：真实网口 + 自定义通配符，点击即时保存，无需弹窗 */
 function paintUsageChips(d) {
@@ -295,10 +272,12 @@ function paintUsageChips(d) {
     ${all ? '' : `<span class="tag">${esc(t('stats_iface_custom'))}</span>`}`;
 }
 async function saveUsageInterfaces(names) {
+  const seq = ++state.usageSeq;
   try {
     const r = await api('/api/usage', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ interfaces: names, range: state.usageRange }) });
-    state.usageData = r; state.usageDetailPage = 1;
+    if (seq !== state.usageSeq) return;
+    state.usageData = r;
     if (state.section === 'trafficStats') paintTrafficStats(r);
     const c = $('statsCustomInput'); if (c) c.value = '';
     toast(t('stats_iface_saved'), 'ok');
