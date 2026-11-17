@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROS Center · Sign in</title>
+<style>
+  :root{
+    --bg:#eef2f9; --card:#ffffff; --ink:#1a2340; --muted:#6b7690; --line:#dde4f0;
+    --accent:#3f6fea; --accent2:#2b55c8; --err:#d64b4b; --shadow:0 18px 50px rgba(23,42,90,.14);
+  }
+  *{box-sizing:border-box}
+  html[data-theme="dark"] , html[data-theme="glass"]:not([data-light]), html[data-theme="aurora"], html[data-theme="ocean"], html[data-theme="sakura"]{
+    --bg:#101728; --card:#18223a; --ink:#eaf0ff; --muted:#9aa7c4; --line:#2a3757;
+    --accent:#5b8cff; --accent2:#3f6fea; --shadow:0 18px 50px rgba(0,0,0,.4);
+  }
+  html[data-theme="porcelain"]{--bg:#f2f0ea;--card:#fffdf7;--ink:#28323a;--muted:#7a837f;--line:#e2ded2;--accent:#4b7f7a;--accent2:#37635f}
+  html[data-theme="mono"]{--bg:#f4f4f4;--card:#fff;--ink:#151515;--muted:#666;--line:#ddd;--accent:#222;--accent2:#000}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--ink);background:radial-gradient(1100px 700px at 12% -10%,rgba(63,111,234,.16),transparent 60%),
+    radial-gradient(900px 600px at 100% 110%,rgba(63,111,234,.12),transparent 55%),var(--bg)}
+  .login{width:100%;max-width:392px;background:var(--card);border:1px solid var(--line);border-radius:18px;
+    box-shadow:var(--shadow);padding:32px 30px 26px}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:grid;grid-template-columns:repeat(2,1fr);gap:3px;padding:9px;box-shadow:0 6px 16px rgba(63,111,234,.28)}
+  .logo span{background:rgba(255,255,255,.92);border-radius:2px}
+  .brand b{display:block;font-size:19px;letter-spacing:.3px}
+  .brand small{display:block;color:var(--muted);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;margin-top:-2px}
+  h1{margin:0 0 4px;font-size:20px}
+  .sub{margin:0 0 22px;color:var(--muted);font-size:12.5px}
+  label{display:block;font-size:12px;font-weight:600;margin:0 0 6px;color:var(--muted)}
+  .field{position:relative;margin-bottom:15px}
+  input{width:100%;height:42px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);
+    padding:0 13px;font:inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(63,111,234,.14)}
+  input[type=password]{padding-right:60px}
+  .eye{position:absolute;right:6px;top:6px;height:30px;padding:0 9px;border:0;border-radius:7px;background:transparent;
+    color:var(--muted);cursor:pointer;font-size:12px}
+  .eye:hover{background:rgba(127,140,180,.14);color:var(--ink)}
+  .btn{width:100%;height:43px;margin-top:6px;border:0;border-radius:10px;cursor:pointer;font:600 14px inherit;color:#fff;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 20px rgba(63,111,234,.24)}
+  .btn:disabled{opacity:.6;cursor:not-allowed}
+  .err{min-height:18px;margin-top:12px;color:var(--err);font-size:12px;text-align:center}
+  .foot{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;text-align:center}
+  .foot a{color:var(--accent);text-decoration:none;cursor:pointer}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;
+    border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  @media (max-width:420px){.login{padding:26px 20px 20px}}
+</style>
+</head>
+<body>
+<div class="login">
+  <div class="brand">
+    <div class="logo" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <div><b>ROS Center</b><small>sign in</small></div>
+  </div>
+  <h1 id="title">登录 ROS Center</h1>
+  <p class="sub" id="sub">请输入 WebUI 账号与密码</p>
+  <form id="form" autocomplete="on">
+    <div class="field"><label for="user" id="lUser">账号</label><input id="user" name="username" autocomplete="username" required autofocus></div>
+    <div class="field"><label for="pass" id="lPass">密码</label><input id="pass" name="password" type="password" autocomplete="current-password" required>
+      <button class="eye" id="eye" type="button">显示</button></div>
+    <button class="btn" id="go" type="submit">登 录</button>
+    <div class="err" id="err"></div>
+  </form>
+  <div class="foot" id="foot">登录状态会保存在本浏览器的安全 Cookie 中</div>
+</div>
+<script>
+(function(){
+  var zh = (localStorage.getItem('ros-traffic-lang') || (navigator.language||'').slice(0,2)) !== 'en';
+  var theme = localStorage.getItem('ros-traffic-theme') || 'system';
+  var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (theme === 'system' || theme === 'light' || theme === 'porcelain' || theme === 'mono') {
+    document.documentElement.dataset.theme = (theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme);
+  } else document.documentElement.dataset.theme = theme;
+  var next = new URLSearchParams(location.search).get('next') || '/';
+  if (!/^\/(?!\/)/.test(next)) next = '/';
+  var $ = function(id){ return document.getElementById(id); };
+  $('title').textContent = zh ? '登录 ROS Center' : 'Sign in to ROS Center';
+  $('sub').textContent = zh ? '请输入 WebUI 账号与密码' : 'Enter your WebUI username and password';
+  $('lUser').textContent = zh ? '账号' : 'Username';
+  $('lPass').textContent = zh ? '密码' : 'Password';
+  $('eye').textContent = zh ? '显示' : 'Show';
+  $('go').textContent = zh ? '登 录' : 'Sign in';
+  $('foot').textContent = zh ? '登录状态保存在本浏览器的安全 Cookie 中 · 7 天有效' : 'Session is kept in a secure HttpOnly cookie · valid for 7 days';
+
+  fetch('/api/auth').then(function(r){ return r.json(); }).then(function(d){
+    if (d && d.enabled === false) { location.replace(next); return; }
+  }).catch(function(){});
+
+  $('eye').onclick = function(){
+    var p = $('pass'); p.type = p.type === 'password' ? 'text' : 'password';
+    $('eye').textContent = p.type === 'password' ? (zh?'显示':'Show') : (zh?'隐藏':'Hide');
+  };
+  $('form').onsubmit = function(e){
+    e.preventDefault();
+    var err = $('err'), go = $('go');
+    err.textContent = '';
+    go.disabled = true;
+    go.innerHTML = '<span class="spin"></span>' + (zh ? '登录中…' : 'Signing in…');
+    fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ user: $('user').value.trim(), password: $('pass').value }) })
+      .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+      .then(function(x){
+        if (!x.ok || x.d.error) { err.textContent = x.d.error || (zh?'登录失败':'Login failed'); return; }
+        location.replace(next);
+      })
+      .catch(function(){ err.textContent = zh ? '无法连接服务，请稍后重试' : 'Connection failed. Try again.'; })
+      .finally(function(){
+        go.disabled = false;
+        go.textContent = zh ? '登 录' : 'Sign in';
+      });
+  };
+})();
+</script>
+</body>
+</html>

@@ -24,7 +24,8 @@
       <div class="side-status"><span class="dot" id="sideDot"></span><span id="sideMode">DEMO</span></div>
       <div class="side-foot-actions">
         <button class="side-logout" id="settingsShortcut" type="button" title="连接设置 / Connection settings">⚙</button>
-        <button class="side-logout" id="logoutBtn" type="button" title="获取配置快照 / Export snapshot" data-i18n-title="export_hint">⇩</button>
+        <button class="side-logout" id="exportBtn" type="button" title="获取配置快照 / Export snapshot" data-i18n-title="export_snapshot">⇩</button>
+        <button class="side-logout" id="authLogoutBtn" type="button" title="退出登录 / Sign out" data-i18n-title="logout" hidden>⎋</button>
       </div>
     </div>
     <div class="side-resize" id="sideResize" title="拖动调整宽度 / Drag to resize"></div>
@@ -80,6 +81,7 @@
 <script src="/app.js"></script>
 <script src="/views.js"></script>
 <script src="/qrcode.bundle.js"></script>
+<script src="/wgkey.js"></script>
 <script src="/config.js"></script>
 </body>
 </html>

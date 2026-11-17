@@ -31,7 +31,8 @@ function renderConfigPage(sec) {
       </div>
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
-        ${cols.map((c) => `<th${numCol(c, sec) ? ' class="num"' : ''}>${esc(fieldLabel(sec, c))}</th>`).join('')}
+        <th class="sortable" data-sort="#" style="width:52px" title="${t('sort_hint')}">#${sortMark('#')}</th>
+        ${cols.filter((c) => c !== '.id').map((c) => `<th class="sortable${numCol(c, sec) ? ' num' : ''}" data-sort="${esc(c)}" title="${t('sort_hint')}">${esc(fieldLabel(sec, c))}${sortMark(c)}</th>`).join('')}
         ${writable ? `<th style="width:${sec.id === 'wireguard' || sec.id === 'wgPeers' ? 142 : 110}px"></th>` : ''}
       </tr></thead><tbody id="tbody"></tbody></table></div>
       <div class="pager"><span id="pageInfo"></span><button id="prevPage">${t('prev')}</button><button id="nextPage">${t('next')}</button></div>
@@ -46,14 +47,49 @@ function renderConfigPage(sec) {
       () => bulk(sec, 'remove'));
   }
   $('rowSearch').oninput = (e) => { state.rowFilter = e.target.value; state.page = 1; renderRows(sec); };
+  $('content').querySelectorAll('th[data-sort]').forEach((th) => th.onclick = () => {
+    const key = th.dataset.sort;
+    if (state.sort && state.sort.key === key) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+    else state.sort = { key, dir: 'asc' };
+    state.page = 1; renderRows(sec);
+  });
   const ca = $('checkAll'); if (ca) ca.onchange = (e) => {
-    const rows = filteredRows(sec);
+    const rows = sortedRows(sec);
     rows.slice((state.page - 1) * state.pageSize, state.page * state.pageSize).forEach((r) => e.target.checked ? state.selectedIds.add(r['.id']) : state.selectedIds.delete(r['.id']));
     renderRows(sec);
   };
   $('prevPage').onclick = () => { if (state.page > 1) { state.page--; renderRows(sec); } };
-  $('nextPage').onclick = () => { if (state.page < Math.max(1, Math.ceil(filteredRows(sec).length / state.pageSize))) { state.page++; renderRows(sec); } };
+  $('nextPage').onclick = () => { if (state.page < Math.max(1, Math.ceil(sortedRows(sec).length / state.pageSize))) { state.page++; renderRows(sec); } };
   loadRows(sec).then(() => renderRows(sec)).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
+}
+
+/* 单例配置（DNS / 设备标识 / 时钟 / NTP）：只展示一组参数，避免误用新增/删除 */
+function renderSingletonPage(sec) {
+  const writable = sec.writable !== false;
+  $('content').innerHTML = `
+    <div class="page-head"><div><h1>${esc(tx(sec.title))}</h1><p>${esc(sec.path || '')}</p></div>
+      <div class="page-actions">
+        <button class="btn" id="sioRefresh">${t('refresh')}</button>
+        ${writable ? `<button class="btn primary" id="sioEdit">${t('edit')}</button>` : ''}
+      </div></div>
+    ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
+    <div class="panel"><div class="panel-head"><div><h2>${esc(tx(sec.title))}</h2><p class="sub">${t('singleton_hint')}</p></div>
+      <span class="tag ${state.mode === 'live' && !state.configDemo ? 'green' : 'amber'}">${state.mode === 'live' && !state.configDemo ? 'LIVE' : 'DEMO'}</span></div>
+      <div class="panel-body"><div class="kv-grid" id="sioBody"><div class="empty">${t('loading')}</div></div></div></div>`;
+  $('sioRefresh').onclick = () => renderSingletonPage(sec);
+  const edit = $('sioEdit'); if (edit) edit.onclick = () => openForm(sec, state.rows[0] || null);
+  loadRows(sec).then(() => {
+    const box = $('sioBody'); if (!box) return;
+    const row = state.rows[0] || {};
+    const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
+    box.innerHTML = fields.map((f) => {
+      const v = row[f.key];
+      let shown = v == null || v === '' ? '—' : String(v);
+      if (f.type === 'password' || /key/i.test(f.key)) shown = '••••••••';
+      else if (f.type === 'bool') shown = boolOn(v) ? t('enabled') : t('disabled');
+      return `<div class="kv-item"><div class="kv-label">${esc(tx(f.label))}</div><div class="kv-value" title="${esc(shown)}">${esc(shown)}</div></div>`;
+    }).join('');
+  }).catch((e) => { const box = $('sioBody'); if (box) box.innerHTML = `<div class="empty">${t('load_fail')}: ${esc(e.message)}</div>`; });
 }
 
 function numCol(key, sec) { return /bytes|port|mtu|distance|priority|time$|count/i.test(key) && sec.fields.find((f) => f.key === key)?.type !== 'bool'; }
@@ -68,10 +104,36 @@ function filteredRows(sec) {
   if (!f) return state.rows;
   return state.rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(f)));
 }
+/* RouterOS 的 .id 是十六进制（*1、*A…），展示为十进制序号更易读 */
+function idNum(v) {
+  const s = String(v == null ? '' : v).replace(/^\*/, '');
+  return /^[0-9a-fA-F]+$/.test(s) ? parseInt(s, 16) : NaN;
+}
+function cmpVal(a, b, key) {
+  if (key === '#') {
+    const x = idNum(a['.id']), y = idNum(b['.id']);
+    if (Number.isFinite(x) && Number.isFinite(y)) return x - y;
+    return String(a['.id'] || '').localeCompare(String(b['.id'] || ''), undefined, { numeric: true });
+  }
+  const sx = String(a[key] == null ? '' : a[key]), sy = String(b[key] == null ? '' : b[key]);
+  if (/^(true|false)$/.test(sx) || /^(true|false)$/.test(sy)) return Number(boolOn(sx)) - Number(boolOn(sy)) || sx.localeCompare(sy);
+  if (/^-?\d+(\.\d+)?$/.test(sx) && /^-?\d+(\.\d+)?$/.test(sy)) return Number(sx) - Number(sy);
+  return sx.localeCompare(sy, undefined, { numeric: true });
+}
+function sortedRows(sec) {
+  const rows = filteredRows(sec).slice();
+  const s = state.sort || { key: '#', dir: 'asc' };
+  rows.sort((a, b) => { const c = cmpVal(a, b, s.key); return s.dir === 'asc' ? c : -c; });
+  return rows;
+}
+function sortMark(key) {
+  const s = state.sort || {};
+  return s.key === key ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+}
 function renderRows(sec) {
-  const cols = sec.columns || sec.fields.map((f) => f.key);
+  const cols = (sec.columns || sec.fields.map((f) => f.key)).filter((c) => c !== '.id');
   const writable = sec.writable !== false;
-  const rows = filteredRows(sec);
+  const rows = sortedRows(sec);
   const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
   if (state.page > totalPages) state.page = totalPages;
   const pageRows = rows.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
@@ -79,8 +141,11 @@ function renderRows(sec) {
   $('pageInfo').textContent = `${t('page')} ${state.page} ${t('of')} ${totalPages}`;
   $('prevPage').disabled = state.page <= 1; $('nextPage').disabled = state.page >= totalPages;
   const tb = $('tbody'); if (!tb) return;
-  tb.innerHTML = pageRows.map((r) => `<tr data-id="${esc(r['.id'])}" class="${state.selectedIds.has(r['.id']) ? 'selected' : ''}">
+  tb.innerHTML = pageRows.map((r) => {
+    const nid = idNum(r['.id']);
+    return `<tr data-id="${esc(r['.id'])}" title="RouterOS .id: ${esc(r['.id'])}" class="${state.selectedIds.has(r['.id']) ? 'selected' : ''}">
     ${writable ? `<td><input type="checkbox" class="check rowcheck" data-id="${esc(r['.id'])}" ${state.selectedIds.has(r['.id']) ? 'checked' : ''}></td>` : ''}
+    <td class="num" style="color:var(--muted)">${Number.isFinite(nid) ? nid : esc(r['.id'] || '—')}</td>
     ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''}>${cellHtml(r, c, sec)}</td>`).join('')}
     ${writable ? `<td><div class="row-actions">
       ${sec.toggle !== false ? `<button class="icon-btn" data-act="toggle" title="${boolOn(r.disabled) ? t('enable') : t('disable')}">${boolOn(r.disabled) ? '○' : '●'}</button>` : ''}
@@ -88,7 +153,8 @@ function renderRows(sec) {
       <button class="icon-btn" data-act="edit" title="${t('edit')}">✎</button>
       <button class="icon-btn del" data-act="del" title="${t('delete')}">✕</button>
     </div></td>` : ''}
-  </tr>`).join('') || `<tr><td colspan="20" class="empty">${t('no_data')}</td></tr>`;
+  </tr>`;
+  }).join('') || `<tr><td colspan="20" class="empty">${t('no_data')}</td></tr>`;
   tb.querySelectorAll('.rowcheck').forEach((c) => c.onchange = () => { c.checked ? state.selectedIds.add(c.dataset.id) : state.selectedIds.delete(c.dataset.id); c.closest('tr').classList.toggle('selected', c.checked); });
   tb.querySelectorAll('[data-act]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
@@ -107,7 +173,7 @@ function cellHtml(row, key, sec) {
   if (key === 'disabled') return `<span class="tag ${boolOn(v) ? 'red' : 'green'}">${boolOn(v) ? t('disabled') : t('enabled')}</span>`;
   if (/\.id$/.test(key)) return `<span style="color:#9aa5bd">${esc(v)}</span>`;
   if (/bytes/i.test(key)) return fmtBytes(v);
-  if (key === 'password' || key === 'private-key' || /pre-shared-key/.test(key)) return '<span class="tag">••••••••</span>';
+  if (key === 'password' || key === 'private-key' || /pre-?shared-key/.test(key)) return '<span class="tag">••••••••</span>';
   const f = sec.fields.find((x) => x.key === key);
   if (f && f.type === 'bool') return boolOn(v) ? `<span class="tag blue">✓</span>` : '';
   if (key === 'chain') return `<span class="tag blue">${esc(v)}</span>`;
@@ -127,8 +193,9 @@ function openForm(sec, row) {
     if (f.type === 'bool') input = `<div class="form-check"><input type="checkbox" id="f_${f.key}" ${boolOn(val) || (!isEdit && f.key === 'disabled' && false) ? 'checked' : ''}><label for="f_${f.key}" style="padding:0">${t('enabled')}</label></div>`;
     else if (f.type === 'select') input = `<select id="f_${f.key}">${['<option value=""></option>', ...(f.options || []).map((o) => `<option value="${esc(o)}" ${String(val) === o ? 'selected' : ''}>${esc(o || '—')}</option>`)].join('')}</select>`;
     else if (f.type === 'textarea') input = `<textarea id="f_${f.key}" placeholder="${esc(f.placeholder || '')}">${esc(val)}</textarea>`;
-    else if (f.type === 'readonly') input = `<input type="text" value="${esc(val || '—')}" disabled>`;
+    else if (f.type === 'readonly') input = `<input type="text" id="f_${f.key}" value="${esc(val || '—')}" disabled>`;
     else if (f.type === 'interface') input = `<select id="f_${f.key}"><option value=""></option>${(opts.interfaces || []).map((n) => `<option value="${esc(n)}" ${val === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}${val && !(opts.interfaces || []).includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''}</select>`;
+    else if (f.key === 'private-key' || f.key === 'preshared-key') input = `<div style="display:flex;gap:6px"><input type="text" id="f_${f.key}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}"><button type="button" class="btn" data-keygen="${f.key}" style="width:auto;flex:0 0 auto;margin:0">${t('wg_auto')}</button></div>`;
     else input = `<input type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" id="f_${f.key}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" ${f.required ? 'data-required="1"' : ''}>`;
     return `<div class="form-row"><label>${label}</label><div>${input}${f.placeholder && f.type !== 'textarea' ? `<p class="form-hint">${esc(f.placeholder)}</p>` : ''}</div></div>`;
   }).join('');
@@ -136,6 +203,18 @@ function openForm(sec, row) {
     `<button class="btn" data-cancel>${t('cancel')}</button><button class="btn primary" data-save>${t('save')}</button>`,
     (m) => {
       m.querySelector('[data-cancel]').onclick = closeModal;
+      m.querySelectorAll('[data-keygen]').forEach((b) => b.onclick = () => {
+        if (!window.WGKey) { toast(L('密钥生成器未加载', 'Key generator unavailable'), 'err'); return; }
+        const kp = WGKey.keypair();
+        const target = m.querySelector('#f_' + b.dataset.keygen);
+        if (target) target.value = kp.privateKey;
+        const pub = m.querySelector('#f_public-key');
+        if (pub) pub.value = kp.publicKey;
+      });
+      if ((sec.id === 'wireguard' || sec.id === 'wgPeers') && window.WGKey) {
+        const pk = m.querySelector('#f_private-key');
+        if (pk) pk.oninput = () => { const pub = WGKey.publicFromPrivate(pk.value); if (pub) { const el = m.querySelector('#f_public-key'); if (el) el.value = pub; } };
+      }
       m.querySelector('[data-save]').onclick = async () => {
         const values = {};
         for (const f of fields) {
@@ -148,7 +227,7 @@ function openForm(sec, row) {
         }
         const payload = { section: sec.id, action: isEdit ? 'set' : 'add', values };
         if (isEdit) payload.ids = [row['.id']];
-        try { const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); closeModal(); toast(`${t('saved_ok')} (${r.changed || 1})`, 'ok'); await loadRows(sec); renderConfigPage(sec); }
+        try { const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); closeModal(); toast(`${t('saved_ok')} (${r.changed || 1})`, 'ok'); await loadRows(sec); if (sec.singleton) renderSingletonPage(sec); else renderConfigPage(sec); }
         catch (e) { toast(e.message, 'err'); }
       };
     });
@@ -211,13 +290,24 @@ function renderTools() {
   });
 }
 
-/* ================= WireGuard 扫码添加 ================= */
+/* ================= WireGuard 扫码添加 / 对端配置 ================= */
 const WG_FIELDS = [
-  ['wgAddr', 'wg_addr'], ['wgPriv', 'wg_priv'], ['wgDns', 'wg_dns'], ['wgPub', 'wg_pub'],
-  ['wgEndpoint', 'wg_endpoint'], ['wgAllowed', 'wg_allowed'], ['wgKeepalive', 'wg_keepalive'],
+  ['wgName', 'wg_name'], ['wgIface', 'wg_iface'], ['wgAddr', 'wg_addr_label'],
+  ['wgPriv', 'wg_priv'], ['wgClientPub', 'wg_client_pub'],
+  ['wgServerPub', 'wg_server_pub'], ['wgEndpoint', 'wg_endpoint'], ['wgEndpointPort', 'wg_endpoint_port'],
+  ['wgRoute', 'wg_route'], ['wgDns', 'wg_dns'], ['wgPsk', 'wg_psk'],
+  ['wgKeepalive', 'wg_keepalive'], ['wgResponder', 'wg_responder'],
 ];
 function wgConfigText(v) {
-  return `[Interface]\nAddress = ${v.wgAddr}\nPrivateKey = ${v.wgPriv}\nDNS = ${v.wgDns}\n\n[Peer]\nPublicKey = ${v.wgPub}\nAllowedIPs = ${v.wgAllowed}\nEndpoint = ${v.wgEndpoint}\nPersistentKeepalive = ${v.wgKeepalive}\n`;
+  let s = `[Interface]\nAddress = ${v.wgAddr}\nPrivateKey = ${v.wgPriv}\n`;
+  if (v.wgDns) s += `DNS = ${v.wgDns}\n`;
+  s += `\n[Peer]\nPublicKey = ${v.wgServerPub}\n`;
+  if (v.wgPsk) s += `PresharedKey = ${v.wgPsk}\n`;
+  s += `AllowedIPs = ${v.wgRoute || '0.0.0.0/0'}\n`;
+  s += `Endpoint = ${v.wgEndpoint}${v.wgEndpointPort ? ':' + v.wgEndpointPort : ''}\n`;
+  const ka = String(v.wgKeepalive || '').replace(/[^\d]/g, '');
+  if (ka) s += `PersistentKeepalive = ${ka}\n`;
+  return s;
 }
 async function openWireguardQr(row, sec) {
   let ifaces = [], peers = [];
@@ -226,36 +316,73 @@ async function openWireguardQr(row, sec) {
   const iface = ifaces.find((x) => x.name === (row && row.interface)) || ifaces[0] || {};
   const peer = (row && typeof row === 'object' ? row : null) || peers[0] || {};
   const host = (state.latest && state.latest.host) || '10.0.0.1';
+  const ifaceNames = ifaces.map((i) => i.name).filter(Boolean);
   const defaults = {
-    wgAddr: String(peer['allowed-address'] || '').split(',')[0] || '10.0.9.2/32',
-    wgPriv: peer['private-key'] || 'oE7tM2QwX9vK4pL6nR8sY1aB3cD5eF7gH0jKlMnOpQ=',
-    wgDns: '10.0.0.1',
-    wgPub: peer['public-key'] || iface['public-key'] || '',
-    wgEndpoint: peer.endpoint || host + ':' + (iface['listen-port'] || '13231'),
-    wgAllowed: '0.0.0.0/0', wgKeepalive: String(peer['persistent-keepalive'] || '25'),
+    wgName: peer.name || ('client-' + String(peer['.id'] || '').replace(/[^\d]/g, '') || 'client-1'),
+    wgIface: iface.name || ifaceNames[0] || 'wg1',
+    wgAddr: String(peer['client-address'] || '').split(',')[0] || String(peer['allowed-address'] || '').split(',')[0] || '10.0.9.2/32',
+    wgPriv: peer['private-key'] && peer['private-key'] !== 'auto' ? peer['private-key'] : '',
+    wgClientPub: peer['public-key'] || '',
+    wgServerPub: iface['public-key'] || '',
+    wgEndpoint: host, wgEndpointPort: String(iface['listen-port'] || '13231'),
+    wgRoute: '0.0.0.0/0', wgDns: '10.0.0.1',
+    wgPsk: peer['preshared-key'] && peer['preshared-key'] !== 'auto' ? peer['preshared-key'] : '',
+    wgKeepalive: String(peer['persistent-keepalive'] || '25'), wgResponder: boolOn(peer.responder),
   };
-  const form = WG_FIELDS.map(([id, key]) => `<div class="form-row"><label>${t(key)}</label><div><input type="text" id="${id}" value="${esc(defaults[id])}"></div></div>`).join('');
+  if (window.WGKey) {
+    if (!defaults.wgPriv) { const kp = WGKey.keypair(); defaults.wgPriv = kp.privateKey; defaults.wgClientPub = kp.publicKey; }
+    else if (!defaults.wgClientPub) defaults.wgClientPub = WGKey.publicFromPrivate(defaults.wgPriv);
+  }
+  const field = (label, input) => `<div class="form-row"><label>${label}</label><div>${input}</div></div>`;
+  const txt = (id, hint) => `<input type="text" id="${id}" value="${esc(defaults[id] || '')}" ${hint ? `placeholder="${esc(hint)}"` : ''}>`;
+  const form = `
+    <div class="wg-section">${t('wg_iface')}</div>
+    ${field(t('wg_name'), txt('wgName', 'client-1'))}
+    ${field(t('wg_iface'), `<select id="wgIface">${(ifaceNames.length ? ifaceNames : ['wg1']).map((n) => `<option value="${esc(n)}" ${n === defaults.wgIface ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`)}
+    ${field(t('wg_addr_label'), txt('wgAddr', '10.0.9.2/32'))}
+    ${field(t('wg_priv'), `<div style="display:flex;gap:6px">${txt('wgPriv', 'base64 / auto')}<button type="button" class="btn" id="wgAuto" style="width:auto;flex:0 0 auto;margin:0">${t('wg_auto')}</button></div>`)}
+    ${field(t('wg_client_pub'), txt('wgClientPub'))}
+    <div class="wg-section">${t('wg_qr_title')} · Peer</div>
+    ${field(t('wg_server_pub'), txt('wgServerPub'))}
+    ${field(t('wg_endpoint'), txt('wgEndpoint', host))}
+    ${field(t('wg_endpoint_port'), txt('wgEndpointPort', '13231'))}
+    ${field(t('wg_route'), txt('wgRoute', '0.0.0.0/0'))}
+    ${field(t('wg_dns'), txt('wgDns', '10.0.0.1'))}
+    ${field(t('wg_psk'), txt('wgPsk', L('可留空 / auto', 'optional / auto')))}
+    ${field(t('wg_keepalive'), txt('wgKeepalive', '25'))}
+    ${field(t('wg_responder'), `<div class="form-check"><input type="checkbox" id="wgResponder" ${defaults.wgResponder ? 'checked' : ''}></div>`)}`;
   openModal(t('wg_qr_title'),
     `<div class="modal-note" style="margin-bottom:14px">${t('wg_qr_sub')}</div>
-     <div class="wg-grid"><div>${form}</div>
+     <div class="wg-grid"><div class="wg-form">${form}</div>
        <div class="wg-qr-box"><canvas id="wgQrCanvas" width="220" height="220"></canvas>
          <div class="tag blue" style="margin-top:8px">WireGuard</div></div></div>
      <div class="modal-note" style="margin-top:8px;font-size:11px">${t('wg_qr_tip')}</div>
      <textarea id="wgConf" class="code" readonly style="width:100%;min-height:132px;margin-top:10px"></textarea>`,
-    `<button class="btn" data-close>${t('cancel')}</button><button class="btn" id="wgCopy">${t('wg_copy')}</button><button class="btn primary" id="wgDownload">${t('wg_download')}</button>`,
+    `<button class="btn" data-close>${t('cancel')}</button><button class="btn" id="wgSave">${t('wg_save_peer')}</button><button class="btn" id="wgCopy">${t('wg_copy')}</button><button class="btn primary" id="wgDownload">${t('wg_download')}</button>`,
     (m) => {
-      m.style.width = 'min(780px, 100%)';
-      m.querySelector('[data-close]').onclick = closeModal;
+      m.style.width = 'min(900px, 100%)';
       const qr = window.QRCode || window.ROSQR;
+      const val = (id) => { const el = m.querySelector('#' + id); return el ? (el.type === 'checkbox' ? el.checked : String(el.value).trim()) : ''; };
       const draw = () => {
-        const v = {}; WG_FIELDS.forEach(([id]) => { v[id] = m.querySelector('#' + id).value.trim(); });
+        const v = {}; WG_FIELDS.forEach(([id]) => { v[id] = val(id); });
         const text = wgConfigText(v);
         m.querySelector('#wgConf').value = text;
         const cv = m.querySelector('#wgQrCanvas');
         if (!qr) { cv.style.display = 'none'; return; }
         qr.toCanvas(cv, text, { width: 220, margin: 1, color: { dark: cssVar('--ink', '#1a2340'), light: '#ffffff' } }, (e) => { if (e) console.warn('[wg] qr', e.message); });
       };
-      WG_FIELDS.forEach(([id]) => { m.querySelector('#' + id).oninput = draw; });
+      WG_FIELDS.forEach(([id]) => { const el = m.querySelector('#' + id); if (el) el.oninput = draw; });
+      m.querySelector('#wgPriv').oninput = () => {
+        if (window.WGKey) { const pub = WGKey.publicFromPrivate(val('wgPriv')); if (pub) m.querySelector('#wgClientPub').value = pub; }
+        draw();
+      };
+      m.querySelector('#wgAuto').onclick = () => {
+        if (!window.WGKey) { toast(L('密钥生成器未加载', 'Key generator unavailable'), 'err'); return; }
+        const kp = WGKey.keypair();
+        m.querySelector('#wgPriv').value = kp.privateKey;
+        m.querySelector('#wgClientPub').value = kp.publicKey;
+        draw(); toast(t('wg_priv_auto') + ' OK', 'ok');
+      };
       draw();
       m.querySelector('#wgCopy').onclick = async () => {
         const text = m.querySelector('#wgConf').value;
@@ -264,8 +391,29 @@ async function openWireguardQr(row, sec) {
       };
       m.querySelector('#wgDownload').onclick = () => {
         const blob = new Blob([m.querySelector('#wgConf').value], { type: 'text/plain' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'wg-client.conf'; a.click();
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = (val('wgName') || 'wg-client') + '.conf'; a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      };
+      m.querySelector('#wgSave').onclick = async () => {
+        const values = {
+          name: val('wgName'), interface: val('wgIface'), 'private-key': val('wgPriv') || 'auto',
+          'public-key': val('wgClientPub'), endpoint: val('wgEndpoint'), 'endpoint-port': val('wgEndpointPort'),
+          'allowed-address': val('wgAddr'), 'persistent-keepalive': val('wgKeepalive'),
+          responder: val('wgResponder') ? 'true' : 'false', comment: val('wgName'),
+        };
+        if (val('wgPsk')) values['preshared-key'] = val('wgPsk');
+        if (!values.interface || !values['allowed-address'] || !values['private-key']) { toast(t('wg_required_wg'), 'err'); return; }
+        try {
+          const payload = { section: 'wgPeers', action: row && row['.id'] ? 'set' : 'add', values };
+          if (row && row['.id']) payload.ids = [row['.id']];
+          await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          toast(t('wg_peer_saved'), 'ok');
+          if (state.section === 'wgPeers' || state.section === 'wireguard') {
+            const peerSec = state.schema.sections.find((s) => s.id === 'wgPeers');
+            if (peerSec) { await loadRows(peerSec); if (state.section === 'wgPeers') renderConfigPage(peerSec); }
+          }
+        } catch (e) { toast(e.message, 'err'); }
       };
     });
 }
@@ -300,7 +448,20 @@ function renderConnectionSettings() {
         <div class="panel-body"><div class="note-card warn">${t('conn_security_tip')}</div>
           <div class="modal-note"><b>RouterOS CLI:</b><pre class="code">/user group add name=webui policy=read,api
 /user add name=webui group=webui password=${L('强密码', 'strong-password')}
-/ip service set api address=10.0.0.0/24</pre></div></div></div>
+/ip service set api address=10.0.0.0/24</pre></div>
+          <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+            <div style="font-weight:600;margin-bottom:6px">${t('login_title')}</div>
+            <div class="modal-note" style="font-size:11.5px;margin-bottom:10px">${t('login_hint')}</div>
+            ${state.authEnabled ? `<div class="modal-note" style="margin-bottom:8px">${t('login_current')}: <b>${esc(state.authUser)}</b></div>` : ''}
+            <div class="form-row"><label>${t('login_user')}</label><div><input id="authUser" value="${esc(state.authUser || 'admin')}" autocomplete="off"><p class="form-hint">${t('login_user_hint')}</p></div></div>
+            <div class="form-row"><label>${t('login_pass')}</label><div><input type="password" id="authPass" autocomplete="new-password" placeholder="••••••"><p class="form-hint">${t('login_pass_hint')}</p></div></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn primary" id="authSave">${t('login_enable')}</button>
+              ${state.authEnabled ? `<button class="btn ghost-danger" id="authDisable">${t('login_disable')}</button>` : ''}
+            </div>
+            <div id="authResult" style="margin-top:10px"></div>
+          </div>
+        </div></div>
     </div>`;
   const renderRows = () => {
     const tb = $('devBody'); if (!tb) return;
@@ -378,6 +539,27 @@ function renderConnectionSettings() {
       $('devWebPort').textContent = t('conn_web_port') + ': ' + state.webPort;
     } catch (e) { toast(e.message, 'err'); }
   };
+  $('authSave').onclick = async () => {
+    const user = $('authUser').value.trim(), password = $('authPass').value;
+    if (!user || password.length < 6) { toast(t('login_pass_hint'), 'err'); return; }
+    try {
+      await api('/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user, password }) });
+      state.authEnabled = true; state.authUser = user;
+      const al = $('authLogoutBtn'); if (al) al.hidden = false;
+      $('authResult').innerHTML = `<span class="tag green">✓ ${t('login_saved')}</span>`;
+      toast(t('login_saved'), 'ok');
+      renderConnectionSettings();
+    } catch (e) { $('authResult').innerHTML = `<span class="tag red">✕ ${esc(e.message)}</span>`; }
+  };
+  const authDis = $('authDisable');
+  if (authDis) authDis.onclick = () => confirmModal(t('login_disable'), t('login_hint'), true, async () => {
+    try {
+      await api('/api/auth/password', { method: 'DELETE' });
+      state.authEnabled = false; state.authUser = '';
+      const al = $('authLogoutBtn'); if (al) al.hidden = true;
+      toast(t('login_disabled'), 'ok'); renderConnectionSettings();
+    } catch (e) { toast(e.message, 'err'); }
+  });
   renderRows();
 }
 

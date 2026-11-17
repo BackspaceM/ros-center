@@ -337,7 +337,15 @@ async function rosWrite(dev, section, action, payload) {
   if (dev.forceDemo || !(dev.api && dev.api.connected)) {
     switch (action) {
       case 'add': return { changed: 1, row: demoAdd(dev, section.id, values) };
-      case 'set': { if (!ids[0]) throw new Error('缺少 .id'); return { changed: 1, row: demoSet(dev, section.id, ids[0], values) }; }
+      case 'set': {
+        if (section.singleton && !ids.length) {
+          const arr = dev.demoDB[section.id] || (dev.demoDB[section.id] = []);
+          if (!arr.length) arr.push({ '.id': '*1' });
+          return { changed: 1, row: demoSet(dev, section.id, arr[0]['.id'], values) };
+        }
+        if (!ids[0]) throw new Error('缺少 .id');
+        return { changed: 1, row: demoSet(dev, section.id, ids[0], values) };
+      }
       case 'enable': return { changed: demoToggle(dev, section.id, ids, true) };
       case 'disable': return { changed: demoToggle(dev, section.id, ids, false) };
       case 'remove': return { changed: demoRemove(dev, section.id, ids) };
@@ -347,7 +355,10 @@ async function rosWrite(dev, section, action, payload) {
   const cmds = []; const wv = wordsFromValues(section.fields, values);
   switch (action) {
     case 'add': cmds.push([`${section.path}/add`, ...wv]); break;
-    case 'set': if (!ids[0]) throw new Error('缺少 .id'); cmds.push([`${section.path}/set`, `=.id=${ids[0]}`, ...wv]); break;
+    case 'set':
+      if (section.singleton && !ids.length) { cmds.push([`${section.path}/set`, ...wv]); break; }
+      if (!ids[0]) throw new Error('缺少 .id');
+      cmds.push([`${section.path}/set`, `=.id=${ids[0]}`, ...wv]); break;
     case 'enable': case 'disable': for (const id of ids) cmds.push([`${section.path}/${action}`, `=.id=${id}`]); break;
     case 'remove': for (const id of ids) cmds.push([`${section.path}/remove`, `=.id=${id}`]); break;
     default: throw new Error('不支持的操作');
@@ -539,18 +550,110 @@ function readBody(req) {
     req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch (e) { reject(new Error('JSON 格式错误')); } });
   });
 }
-const WEB_USER = process.env.WEB_USER || '';
-const WEB_PASSWORD = process.env.WEB_PASSWORD || '';
-function authorized(req) {
-  if (!WEB_USER || !WEB_PASSWORD) return true;
-  const header = req.headers.authorization || '';
-  if (!/^Basic\s+/i.test(header)) return false;
-  try { return Buffer.from(header.replace(/^Basic\s+/i, ''), 'base64').toString('utf8') === WEB_USER + ':' + WEB_PASSWORD; }
-  catch (e) { return false; }
+/* ================= WebUI 登录：会话 Cookie（兼容原有 Basic Auth） ================= */
+const AUTH_FILE = path.join(DATA_DIR, 'auth.json');
+const SESSION_SECRET_FILE = path.join(DATA_DIR, 'session.secret');
+const SESSION_COOKIE = 'ros_session';
+const SESSION_MAX_AGE = 7 * 24 * 3600;
+
+function loadAuthConfig() {
+  try {
+    const a = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+    if (a && a.disabled === true) return null;                    // WebUI 明确关闭登录
+    if (a && a.user && a.salt && a.hash) return { user: String(a.user), salt: String(a.salt), hash: String(a.hash), source: 'webui' };
+  } catch (e) { /* 文件不存在或格式错误，回退到环境变量 */ }
+  const u = process.env.WEB_USER || '', p = process.env.WEB_PASSWORD || '';
+  if (!u || !p) return null;
+  const salt = crypto.createHash('sha256').update('env:' + u + ':' + p).digest('hex').slice(0, 32);
+  return { user: u, salt, hash: crypto.scryptSync(p, salt, 32).toString('hex'), source: 'env' };
 }
-function deny(res) {
-  res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="ROS Center"', 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('Unauthorized');
+let authCfg = loadAuthConfig();
+function authEnabled() { return !!authCfg; }
+function checkPassword(cfg, user, pass) {
+  if (!cfg || user !== cfg.user || typeof pass !== 'string') return false;
+  const h = crypto.scryptSync(pass, cfg.salt, 32), expect = Buffer.from(cfg.hash, 'hex');
+  return h.length === expect.length && crypto.timingSafeEqual(h, expect);
+}
+function saveAuthConfig(user, password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 32).toString('hex');
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(AUTH_FILE, JSON.stringify({ user, salt, hash }, null, 2) + '\n', { mode: 0o600 });
+  authCfg = { user, salt, hash, source: 'webui' };
+}
+function clearAuthConfig() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(AUTH_FILE, JSON.stringify({ disabled: true }, null, 2) + '\n', { mode: 0o600 });
+  authCfg = null;
+}
+function loadSessionSecret() {
+  try { const s = fs.readFileSync(SESSION_SECRET_FILE, 'utf8').trim(); if (s) return Buffer.from(s, 'hex'); } catch (e) { /* ignore */ }
+  const b = crypto.randomBytes(32);
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(SESSION_SECRET_FILE, b.toString('hex') + '\n', { mode: 0o600 }); } catch (e) { /* ignore */ }
+  return b;
+}
+const SESSION_SECRET = loadSessionSecret();
+function signSession(user) {
+  const body = Buffer.from(JSON.stringify({ u: user, exp: Date.now() + SESSION_MAX_AGE * 1000 })).toString('base64url');
+  return body + '.' + crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+}
+function verifySession(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.'); if (parts.length !== 2) return null;
+  const expect = crypto.createHmac('sha256', SESSION_SECRET).update(parts[0]).digest('base64url');
+  const a = Buffer.from(parts[1]), b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    return p.u && p.exp > Date.now() ? p : null;
+  } catch (e) { return null; }
+}
+function cookieOf(req, name) {
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+function sessionUser(req) {
+  const p = verifySession(cookieOf(req, SESSION_COOKIE));
+  return p && authCfg && p.u === authCfg.user ? p.u : null;
+}
+function authorized(req) {
+  if (!authEnabled()) return true;
+  if (sessionUser(req)) return true;
+  const header = req.headers.authorization || '';
+  if (/^Basic\s+/i.test(header)) {
+    try {
+      const plain = Buffer.from(header.replace(/^Basic\s+/i, ''), 'base64').toString('utf8');
+      const i = plain.indexOf(':');
+      if (i >= 0 && checkPassword(authCfg, plain.slice(0, i), plain.slice(i + 1))) return true;
+    } catch (e) { /* ignore */ }
+  }
+  return false;
+}
+function setSessionCookie(res, token) {
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`);
+}
+function deny(res, req, pathname) {
+  const nav = /text\/html/i.test(req.headers.accept || '') && !/^\/api\//.test(pathname) && !req.headers['x-requested-with'];
+  if (nav) {
+    res.writeHead(302, { Location: '/login.html?next=' + encodeURIComponent(req.url || '/'), 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+  res.writeHead(401, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({ error: 'Unauthorized', loginRequired: true }));
+}
+function serveStatic(req, res, pathname) {
+  let rel = decodeURIComponent(pathname);
+  if (rel === '/' || rel === '') rel = '/index.html';
+  const filePath = path.join(PUBLIC_DIR, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
+  if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  fs.readFile(filePath, (err, data) => {
+    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); return; }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.end(data);
+  });
 }
 function reqDevice(req, url, body) {
   const id = url.searchParams.get('device') || (body && body.device) || '';
@@ -561,9 +664,51 @@ function deviceList() {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (!authorized(req)) return deny(res);
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
+
+  /* ---- 登录：无需鉴权 ---- */
+  if (p === '/api/health') return json(res, 200, { ok: true, ts: Date.now() });
+  if (p === '/login' || p === '/login.html') return serveStatic(req, res, '/login.html');
+  if (p === '/api/auth' && req.method === 'GET') {
+    return json(res, 200, { enabled: authEnabled(), authenticated: !authEnabled() || !!sessionUser(req),
+      user: authCfg ? authCfg.user : '', source: authCfg ? authCfg.source : '' });
+  }
+  if (p === '/api/login' && req.method === 'POST') {
+    if (!authEnabled()) return json(res, 200, { ok: true, enabled: false });
+    try {
+      const b = await readBody(req);
+      if (!checkPassword(authCfg, b.user, b.password)) return json(res, 401, { error: '用户名或密码不正确 / Invalid username or password' });
+      setSessionCookie(res, signSession(authCfg.user));
+      console.log(`[auth] login ok user=${authCfg.user} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, user: authCfg.user });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/logout' && req.method === 'POST') {
+    setSessionCookie(res, '');
+    return json(res, 200, { ok: true });
+  }
+
+  if (!authorized(req)) return deny(res, req, p);
+
+  /* ---- WebUI 登录密码设置（需先登录） ---- */
+  if (p === '/api/auth/password' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      const user = String(b.user || '').trim(), password = String(b.password || '');
+      if (!/^[A-Za-z0-9_.\-]{1,32}$/.test(user)) throw new Error('用户名需为 1-32 位字母/数字/_/./- (invalid username)');
+      if (password.length < 6) throw new Error('密码至少 6 位 / password too short (min 6)');
+      saveAuthConfig(user, password);
+      setSessionCookie(res, signSession(user));
+      console.log(`[auth] password changed user=${user} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, enabled: true, user });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/auth/password' && req.method === 'DELETE') {
+    clearAuthConfig();
+    console.log(`[auth] login disabled by=${req.socket.remoteAddress}`);
+    return json(res, 200, { ok: true, enabled: false });
+  }
 
   if (p === '/api/schema') return json(res, 200, { groups: GROUPS, sections: SECTIONS });
 
@@ -702,7 +847,7 @@ const server = http.createServer(async (req, res) => {
       if (!section.writable) throw new Error('该分类为只读');
       if (!['add', 'set', 'enable', 'disable', 'remove'].includes(body.action)) throw new Error('不支持的操作');
       const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === 'string').slice(0, 200) : [];
-      if (['set', 'enable', 'disable', 'remove'].includes(body.action) && !ids.length) throw new Error('请至少选择一条记录');
+      if (['set', 'enable', 'disable', 'remove'].includes(body.action) && !ids.length && !(body.action === 'set' && section.singleton)) throw new Error('请至少选择一条记录');
       if (body.values && typeof body.values !== 'object') throw new Error('参数格式错误');
       const dev = reqDevice(req, url, body);
       const result = await rosWrite(dev, section, body.action, { ids, values: body.values || {} });
@@ -721,20 +866,12 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
 
-  let rel = decodeURIComponent(p);
-  if (rel === '/' || rel === '') rel = '/index.html';
-  const filePath = path.join(PUBLIC_DIR, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
-  if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
-    res.end(data);
-  });
+  return serveStatic(req, res, p);
 });
 
 server.on('upgrade', (req, socket) => {
   if (!authorized(req)) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="ROS Center"\r\nContent-Length: 0\r\n\r\n');
+    socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n');
     socket.destroy(); return;
   }
   const key = req.headers['sec-websocket-key'];

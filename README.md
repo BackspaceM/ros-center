@@ -21,12 +21,12 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 
 - **多设备管控**：顶栏下拉切换；设备增删改查、测试连接、设为主设备、重连；配置持久化到 `data/devices.json`
 - **实时流量**：总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口列表与迷你趋势、连接排行
-- **分类配置**：8 组 40+ 分类，接口、IP、DHCP、DNS、路由、防火墙（Filter/NAT/Mangle/地址列表/服务端口）、WiFi、PPP、WireGuard、队列、用户、系统服务、计划任务、脚本等，支持新增/编辑/启用/禁用/删除/搜索/分页
-- **WireGuard 扫码添加**：行内扫码按钮生成客户端配置二维码，可复制或下载 `.conf`
+- **分类配置**：9 组 44 个分类，接口、IP、DHCP、DNS、路由、防火墙 IPv4/IPv6（Filter/NAT/Mangle/地址列表/服务端口）、WiFi、PPP、WireGuard、队列、用户、系统服务、计划任务、脚本等，支持新增/编辑/启用/禁用/删除/搜索/表头排序/分页；RouterOS 的十六进制 `.id` 显示为十进制序号
+- **WireGuard 扫码添加**：行内扫码按钮打开 WinBox 风格对端表单（名称、接口、私钥可手填或一键生成、公钥、Endpoint/端口、允许地址、预共享密钥、持久保活、responder 等），实时生成客户端配置二维码，可保存回 RouterOS、复制或下载 `.conf`
 - **中英双语**：右上角一键切换，界面、表单、提示、错误全部双语
 - **10 套主题**：跟随系统、浅色、深色、毛玻璃、青花瓷、液态玻璃、极光、深海、樱粉、黑白极简；图表与 SVG 同步换色
 - **侧栏折叠**：分组整体折叠/展开、单个分组折叠、侧栏收窄为图标条、拖动调整宽度
-- **可选登录保护**：`WEB_USER` / `WEB_PASSWORD` 给 WebUI 加 Basic 认证
+- **WebUI 登录页**：会话 Cookie 登录页 + 侧栏退出按钮；也可在「系统管理 → 设备管理 → 安全建议」里直接设置账号密码（哈希存 `data/auth.json`）。原有 `WEB_USER` / `WEB_PASSWORD` Basic 认证继续兼容
 
 ### 页面展示
 
@@ -114,9 +114,9 @@ node server.js          # Node.js 18+，无需 npm install
 | `HISTORY_POINTS` | `180` | 图表保留点数 |
 | `DEMO_MODE` | `0` | `1` = 强制演示数据，不连路由器 |
 | `DOCKER_IMAGE` | `backspacem/ros-center:latest` | compose 使用的镜像名 |
-| `WEB_USER` / `WEB_PASSWORD` | 空 | 可选 WebUI Basic 登录 |
+| `WEB_USER` / `WEB_PASSWORD` | 空 | 可选 WebUI 登录账号密码（Basic Auth 兼容）；也可在网页「设备管理 → 安全建议」中设置，优先级更高 |
 
-网页里保存的配置优先级高于 `.env`。
+网页里保存的配置（`data/devices.json`、`data/auth.json`）优先级高于 `.env`。登录会话写在 `data/session.secret` 签名的 HttpOnly Cookie 中，7 天有效；侧栏 `⎋` 退出。关闭登录保护会写入 `{"disabled": true}` 到 `data/auth.json`。
 
 **RouterOS 侧准备**（建议用只读账号）：
 
@@ -130,13 +130,15 @@ node server.js          # Node.js 18+，无需 npm install
 ### 使用提示
 
 - 顶栏设备下拉切换当前查看的路由器；`?device=<ID>` 或 `?dev=<设备名>` 可深链直达指定设备
-- `?section=firewallFilter` 直跳分类；`?action=add` 打开新增表单；`?action=wgqr` 打开 WireGuard 扫码弹窗
+- `?section=firewallFilter` 直跳分类（`?section=firewall6Filter` 为 IPv6 过滤）；`?action=add` 打开新增表单；`?action=wgqr` 打开 WireGuard 扫码弹窗
+- 表格点任意表头切换升序/降序；`ID` 列显示 RouterOS 十六进制 `.id` 对应的十进制序号，鼠标悬停可看原始 `.id`
+- DNS/设备标识/时钟/NTP 为单例配置，以参数卡片展示，点「编辑」直接修改
 - `?lang=en` 英文；`?theme=liquid`、`?theme=dark` 等指定主题；`?collapse=1` 折叠侧栏
 - 写操作走「路径白名单 + 字段白名单」双重校验，危险操作需二次确认，所有写操作记录到日志
 
 ### 安全提醒
 
-默认 API（8728）是明文，只在可信内网使用，并用防火墙限制来源 IP；公网环境请启用 API-SSL（8729）并配置证书。若需要写配置，请单独建一个仅授权必要菜单的 RouterOS 用户，不要用 full 权限账号。WebUI 暴露到公网前请设置 `WEB_USER` / `WEB_PASSWORD` 或前置反向代理认证。
+默认 API（8728）是明文，只在可信内网使用，并用防火墙限制来源 IP；公网环境请启用 API-SSL（8729）并配置证书。若需要写配置，请单独建一个仅授权必要菜单的 RouterOS 用户，不要用 full 权限账号。WebUI 暴露到公网前请在「设备管理 → 安全建议」里启用登录密码（或设置 `WEB_USER` / `WEB_PASSWORD`），并前置 HTTPS 反向代理。
 
 ---
 
@@ -154,12 +156,12 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 
 - **Multi-router management**: switch devices from the top bar; add/edit/delete, test connection, set primary, reconnect; persisted in `data/devices.json`
 - **Live traffic**: download/upload/active ports/peak cards, dual-line charts, per-interface mini sparklines, connection ranking
-- **Categorized config**: 8 groups, 40+ sections — interfaces, IP, DHCP, DNS, routes, firewall (filter/NAT/mangle/address lists/service ports), WiFi, PPP, WireGuard, queues, users, services, schedules, scripts — with add/edit/enable/disable/delete/search/pagination
-- **WireGuard QR**: in-row scan button generates a client config QR code, with copy and `.conf` download
+- **Categorized config**: 9 groups, 44 sections — interfaces, IP, DHCP, DNS, routes, separate IPv4/IPv6 firewall (filter/NAT/mangle/address lists/service ports), WiFi, PPP, WireGuard, queues, users, services, schedules, scripts — with add/edit/enable/disable/delete/search/column sorting/pagination. RouterOS hex `.id` values are shown as decimal sequence numbers
+- **WireGuard QR**: in-row scan button opens a WinBox-style peer form (name, interface, private key with one-click generation, public key, endpoint/port, allowed address, preshared key, persistent keepalive, responder...), generates a client QR, saves back to RouterOS, and copies/downloads `.conf`
 - **Bilingual UI**: one-click Chinese/English switch across labels, forms, hints and errors
 - **10 themes**: system, light, dark, glass, porcelain, liquid glass, aurora, ocean, sakura, mono — charts and SVGs follow the theme
 - **Collapsible sidebar**: collapse groups or the whole sidebar, drag to resize
-- **Optional login**: Basic auth via `WEB_USER` / `WEB_PASSWORD`
+- **WebUI sign-in page**: session-cookie login page and sidebar sign-out; set credentials in "System → Devices → Security tip" (hashed in `data/auth.json`). Legacy `WEB_USER` / `WEB_PASSWORD` Basic auth still works
 
 ### Screenshots
 
@@ -224,7 +226,7 @@ node server.js      # Node.js 18+, no npm install needed
 | `HISTORY_POINTS` | `180` | Chart history points |
 | `DEMO_MODE` | `0` | `1` forces demo data |
 | `DOCKER_IMAGE` | `backspacem/ros-center:latest` | Image used by compose |
-| `WEB_USER` / `WEB_PASSWORD` | empty | Optional WebUI Basic auth |
+| `WEB_USER` / `WEB_PASSWORD` | empty | Optional WebUI sign-in (legacy Basic auth compatible); can also be set under "Devices → Security tip", which takes precedence |
 
 Settings saved in the Web UI take precedence over `.env`.
 
@@ -239,9 +241,11 @@ Settings saved in the Web UI take precedence over `.env`.
 
 ### Tips
 
-- Deep links: `?device=<ID>` / `?dev=<name>`, `?section=firewallFilter`, `?action=add`, `?action=wgqr`, `?lang=en`, `?theme=liquid`, `?collapse=1`
+- Deep links: `?device=<ID>` / `?dev=<name>`, `?section=firewallFilter` (or `firewall6Filter` for IPv6), `?action=add`, `?action=wgqr`, `?lang=en`, `?theme=liquid`, `?collapse=1`
+- Click any column header to toggle ascending/descending sort; the ID column shows the decimal form of RouterOS hex `.id` (hover for the raw value)
+- DNS / identity / clock / NTP are singleton settings shown as parameter cards — click Edit to change
 - Writes are constrained by path and field allowlists; destructive actions require confirmation and are logged.
 
 ### Security
 
-Plain API (8728) is unencrypted — restrict it to a trusted LAN with firewall rules, or enable API-SSL (8729) with a proper certificate. Use a dedicated least-privilege RouterOS user for writes. Put Basic auth or an authenticated reverse proxy in front of the WebUI before exposing it to the internet.
+Plain API (8728) is unencrypted — restrict it to a trusted LAN with firewall rules, or enable API-SSL (8729) with a proper certificate. Use a dedicated least-privilege RouterOS user for writes. Enable a WebUI login password under "Devices → Security tip" (or via `WEB_USER` / `WEB_PASSWORD`) and put an HTTPS reverse proxy in front before exposing it to the internet.

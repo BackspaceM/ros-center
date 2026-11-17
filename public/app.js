@@ -56,6 +56,17 @@ const I18N = {
     wg_addr: '客户端地址', wg_priv: '客户端私钥', wg_dns: 'DNS', wg_pub: '服务端公钥', wg_endpoint: '服务端地址',
     wg_allowed: '允许 IP', wg_keepalive: '持久保活(秒)', wg_copy: '复制配置', wg_download: '下载 .conf',
     wg_qr_tip: '二维码等同于配置文件，客户端私钥请勿泄露。真实模式下请填写客户端生成的私钥，并把对应公钥加到 RouterOS 对端。',
+    login: '登录', logout: '退出登录', export_snapshot: '导出配置快照',
+    login_title: 'WebUI 登录保护', login_user: '用户名', login_pass: '新密码',
+    login_hint: '启用后访问 WebUI 需要先登录。账号密码保存在容器 /app/data/auth.json（仅哈希），会话 Cookie 有效期 7 天。',
+    login_user_hint: '1-32 位字母、数字或 _ . -', login_pass_hint: '至少 6 位；修改后当前会话自动续期',
+    login_enable: '保存并启用', login_disable: '关闭登录保护',
+    login_saved: '登录密码已保存', login_disabled: '登录保护已关闭', login_current: '当前登录账号',
+    wg_name: '名称', wg_iface: 'WireGuard 接口', wg_priv_auto: '自动生成密钥对', wg_client_pub: '客户端公钥（写入对端）',
+    wg_server_pub: '服务端公钥', wg_endpoint_port: '服务端端口', wg_addr_label: '客户端隧道地址',
+    wg_route: '客户端 AllowedIPs', wg_psk: '预共享密钥', wg_responder: '仅响应 (responder)',
+    wg_save_peer: '保存到 RouterOS', wg_peer_saved: '对端已保存', wg_auto: '自动', wg_required_wg: '请填写接口、允许地址和私钥',
+    sort_hint: '点击排序（升序 / 降序）', singleton_hint: '该页面只有一组配置，点「编辑」直接修改',
   },
   en: {
     page_title: 'ROS Center', brand: 'ROS', brand_sub: 'Center', search_menu: 'Search menu…',
@@ -111,6 +122,17 @@ const I18N = {
     wg_addr: 'Client address', wg_priv: 'Client private key', wg_dns: 'DNS', wg_pub: 'Server public key', wg_endpoint: 'Server endpoint',
     wg_allowed: 'Allowed IPs', wg_keepalive: 'Persistent keepalive (s)', wg_copy: 'Copy config', wg_download: 'Download .conf',
     wg_qr_tip: 'The QR equals the config file - keep the client private key secret. In live mode, paste the private key generated on the client and add its public key to RouterOS.',
+    login: 'Sign in', logout: 'Sign out', export_snapshot: 'Export snapshot',
+    login_title: 'WebUI login', login_user: 'Username', login_pass: 'New password',
+    login_hint: 'When enabled, signing in is required. Stored as a hash in /app/data/auth.json; the session cookie lasts 7 days.',
+    login_user_hint: '1-32 letters, digits, _ . -', login_pass_hint: 'At least 6 characters; the current session is renewed on change',
+    login_enable: 'Save & enable', login_disable: 'Disable login',
+    login_saved: 'Login password saved', login_disabled: 'Login protection disabled', login_current: 'Signed in as',
+    wg_name: 'Name', wg_iface: 'WireGuard interface', wg_priv_auto: 'Generate keypair', wg_client_pub: 'Client public key (saved to peer)',
+    wg_server_pub: 'Server public key', wg_endpoint_port: 'Server port', wg_addr_label: 'Client tunnel address',
+    wg_route: 'Client AllowedIPs', wg_psk: 'Preshared key', wg_responder: 'Responder only',
+    wg_save_peer: 'Save to RouterOS', wg_peer_saved: 'Peer saved', wg_auto: 'Auto', wg_required_wg: 'Interface, allowed address and private key are required',
+    sort_hint: 'Click to sort (ascending / descending)', singleton_hint: 'A single settings block - use Edit to change values',
   },
 };
 const urlLang = new URLSearchParams(location.search).get('lang');
@@ -125,6 +147,7 @@ const state = {
   resourceHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
   hoverIndex: -1, selectedIface: '__all__', mode: 'demo', configDemo: false,
   collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
+  authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
 };
 try { JSON.parse(localStorage.getItem('ros-traffic-groups') || '[]').forEach((id) => state.collapsedGroups.add(id)); } catch (e) { /* ignore */ }
 const $ = (id) => document.getElementById(id);
@@ -186,8 +209,16 @@ async function api(path, opts) {
   }
   const r = await fetch(path, opts);
   let d; try { d = await r.json(); } catch (e) { throw new Error('HTTP ' + r.status); }
+  if (r.status === 401 && d.loginRequired) {
+    location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search);
+    throw new Error('Unauthorized');
+  }
   if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
   return d;
+}
+async function doLogout() {
+  try { await fetch('/api/logout', { method: 'POST' }); } catch (e) { /* ignore */ }
+  location.href = '/login.html';
 }
 
 /* ================= 弹窗 ================= */
@@ -195,7 +226,7 @@ function openModal(title, bodyHtml, footHtml, onMount) {
   $('modal').innerHTML = `<div class="modal-head"><h3>${esc(title)}</h3><button type="button" data-close>×</button></div>
     <div class="modal-body">${bodyHtml}</div><div class="modal-foot">${footHtml}</div>`;
   $('modalMask').hidden = false;
-  $('modal').querySelector('[data-close]').onclick = closeModal;
+  $('modal').querySelectorAll('[data-close]').forEach((b) => b.onclick = closeModal);
   if (onMount) onMount($('modal'));
 }
 function closeModal() { $('modalMask').hidden = true; $('modal').innerHTML = ''; }
@@ -247,6 +278,7 @@ const SECTION_ICONS = {
   dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dns: 'globe', dnsStatic: 'pin',
   routes: 'route', pools: 'database', neighbors: 'radar',
   firewallFilter: 'filter', firewallNat: 'nat', firewallMangle: 'tag', addressLists: 'addressBook', servicePorts: 'ports',
+  firewall6Filter: 'filter', firewall6Mangle: 'tag', addressLists6: 'addressBook', servicePorts6: 'ports',
   wifi: 'wifi', wirelessSec: 'lock',
   pppSecrets: 'key', pppProfiles: 'sliders', pppActive: 'userCheck', wireguard: 'tunnel', wgPeers: 'nodes',
   simpleQueues: 'speed', queueTree: 'tree',
@@ -274,6 +306,7 @@ function iconSvg(name) {
     grid: '<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>',
     network: '<rect x="1" y="2" width="5" height="4" rx="1"/><rect x="10" y="2" width="5" height="4" rx="1"/><rect x="5.5" y="10" width="5" height="4" rx="1"/><path d="M3.5 6v2h9V6M8 8v2"/>',
     shield: '<path d="M8 1.5 14 4v4c0 3.5-2.5 5.5-6 6.5C4.5 13.5 2 11.5 2 8V4z"/>',
+    shield6: '<path d="M8 1.5 14 4v4c0 3.5-2.5 5.5-6 6.5C4.5 13.5 2 11.5 2 8V4z"/><path d="M2.5 7h11M5 4.5h6"/>',
     wifi: '<path d="M1.5 5.5a10 10 0 0 1 13 0M4 8a6.5 6.5 0 0 1 8 0M6.5 10.5a3 3 0 0 1 3 0"/><circle cx="8" cy="13" r="1" fill="currentColor"/>',
     vpn: '<rect x="2" y="7" width="12" height="7" rx="2"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/>',
     queue: '<path d="M2 3h12M2 8h8M2 13h5"/>',
@@ -367,6 +400,7 @@ async function switchDevice(id, silent) {
 
 function navigate(id) {
   state.section = id; state.rows = []; state.selectedIds.clear(); state.rowFilter = ''; state.page = 1;
+  state.sort = { key: '#', dir: 'asc' };
   const sec = state.schema.sections.find((s) => s.id === id);
   if (sec) { state.collapsedGroups.delete(sec.group); saveCollapsedGroups(); }
   buildNav(); renderPage();
@@ -445,7 +479,7 @@ function renderPage() {
   if (sec.id === 'traffic') return renderTraffic();
   if (sec.id === 'systemTools') return renderTools();
   if (sec.id === 'connectionSettings') return renderConnectionSettings();
-  if (sec.path) return renderConfigPage(sec);
+  if (sec.path) return sec.singleton ? renderSingletonPage(sec) : renderConfigPage(sec);
 }
 async function refreshRowsIfLoaded() {
   const sec = state.schema.sections.find((s) => s.id === state.section);
@@ -506,7 +540,7 @@ async function boot() {
   };
   $('settingsShortcut').onclick = () => navigate('connectionSettings');
   $('deviceSelect').onchange = (e) => switchDevice(e.target.value);
-  $('logoutBtn').onclick = async () => {
+  $('exportBtn').onclick = async () => {
     try {
       const d = await api('/api/status');
       openModal(t('export_hint'), `<div class="modal-note"><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)}<br><b>${t('status') || 'Status'}:</b> ${t(d.mode)}<br><b>${t('system')}:</b> ${esc(d.user)}</div>
@@ -514,6 +548,16 @@ async function boot() {
         `<button class="btn" data-close>${t('close')}</button>`, (m) => { m.querySelector('[data-close]').onclick = closeModal; });
     } catch (e) { toast(e.message, 'err'); }
   };
+  const authLogout = $('authLogoutBtn');
+  if (authLogout) authLogout.onclick = doLogout;
+  try {
+    const au = await fetch('/api/auth').then((r) => r.json());
+    state.authEnabled = !!au.enabled; state.authUser = au.user || '';
+    if (au.enabled) {
+      if (!au.authenticated) { location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
+      if (authLogout) authLogout.hidden = false;
+    }
+  } catch (e) { /* ignore */ }
   $('adminBtn').onclick = () => navigate('connectionSettings');
   await loadDevices();
   const curDev = state.devices.find((d) => d.id === state.deviceId);
