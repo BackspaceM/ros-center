@@ -18,7 +18,6 @@ function renderConfigPage(sec) {
         ${writable ? `<button class="btn primary" id="btnAdd">+ ${t('add')}</button>` : ''}
         ${writable && sec.toggle !== false ? `<button class="btn" id="btnEnable">${t('enable')}</button><button class="btn" id="btnDisable">${t('disable')}</button>` : ''}
         ${writable ? `<button class="btn ghost-danger" id="btnDelete">${t('delete')}</button>` : ''}
-        ${sec.id === 'wireguard' || sec.id === 'wgPeers' ? `<button class="btn primary" id="btnWgQr">▣ ${t('wg_qr')}</button>` : ''}
         <button class="btn" id="btnRefresh">${t('refresh')}</button>
       </div>
     </div>
@@ -33,13 +32,12 @@ function renderConfigPage(sec) {
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
         ${cols.map((c) => `<th${numCol(c, sec) ? ' class="num"' : ''}>${esc(fieldLabel(sec, c))}</th>`).join('')}
-        ${writable ? '<th style="width:110px"></th>' : ''}
+        ${writable ? `<th style="width:${sec.id === 'wireguard' || sec.id === 'wgPeers' ? 142 : 110}px"></th>` : ''}
       </tr></thead><tbody id="tbody"></tbody></table></div>
       <div class="pager"><span id="pageInfo"></span><button id="prevPage">${t('prev')}</button><button id="nextPage">${t('next')}</button></div>
     </div>`;
 
   $('btnRefresh').onclick = () => loadRows(sec).then(() => { renderConfigPage(sec); toast(t('refresh') + ' OK', 'ok'); }).catch((e) => toast(e.message, 'err'));
-  const wgBtn = $('btnWgQr'); if (wgBtn) wgBtn.onclick = () => openWireguardQr();
   if (writable) {
     $('btnAdd').onclick = () => openForm(sec, null);
     $('btnEnable').onclick = () => bulk(sec, 'enable');
@@ -86,6 +84,7 @@ function renderRows(sec) {
     ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''}>${cellHtml(r, c, sec)}</td>`).join('')}
     ${writable ? `<td><div class="row-actions">
       ${sec.toggle !== false ? `<button class="icon-btn" data-act="toggle" title="${boolOn(r.disabled) ? t('enable') : t('disable')}">${boolOn(r.disabled) ? '○' : '●'}</button>` : ''}
+      ${sec.id === 'wireguard' || sec.id === 'wgPeers' ? `<button class="icon-btn qr" data-act="qr" title="${t('wg_qr')}">▣</button>` : ''}
       <button class="icon-btn" data-act="edit" title="${t('edit')}">✎</button>
       <button class="icon-btn del" data-act="del" title="${t('delete')}">✕</button>
     </div></td>` : ''}
@@ -96,6 +95,7 @@ function renderRows(sec) {
     const id = b.closest('tr').dataset.id;
     const act = b.dataset.act;
     if (act === 'edit') { const row = state.rows.find((x) => x['.id'] === id); openForm(sec, row); }
+    else if (act === 'qr') { const row = state.rows.find((x) => x['.id'] === id); openWireguardQr(row, sec); }
     else if (act === 'toggle') bulk(sec, boolOn((state.rows.find((x) => x['.id'] === id) || {}).disabled) ? 'enable' : 'disable', [id]);
     else if (act === 'del') confirmModal(t('confirm_delete'), t('confirm_delete_msg'), true, () => bulk(sec, 'remove', [id]));
   });
@@ -219,19 +219,20 @@ const WG_FIELDS = [
 function wgConfigText(v) {
   return `[Interface]\nAddress = ${v.wgAddr}\nPrivateKey = ${v.wgPriv}\nDNS = ${v.wgDns}\n\n[Peer]\nPublicKey = ${v.wgPub}\nAllowedIPs = ${v.wgAllowed}\nEndpoint = ${v.wgEndpoint}\nPersistentKeepalive = ${v.wgKeepalive}\n`;
 }
-async function openWireguardQr() {
+async function openWireguardQr(row, sec) {
   let ifaces = [], peers = [];
   try { ifaces = (await api('/api/config?section=wireguard')).rows || []; } catch (e) { /* ignore */ }
   try { peers = (await api('/api/config?section=wgPeers')).rows || []; } catch (e) { /* ignore */ }
-  const iface = ifaces[0] || {}, peer = peers[0] || {};
+  const iface = ifaces.find((x) => x.name === (row && row.interface)) || ifaces[0] || {};
+  const peer = (row && typeof row === 'object' ? row : null) || peers[0] || {};
   const host = (state.latest && state.latest.host) || '10.0.0.1';
   const defaults = {
-    wgAddr: peer['allowed-address'] || '10.0.9.2/32',
-    wgPriv: 'oE7tM2QwX9vK4pL6nR8sY1aB3cD5eF7gH0jKlMnOpQ=',
+    wgAddr: String(peer['allowed-address'] || '').split(',')[0] || '10.0.9.2/32',
+    wgPriv: peer['private-key'] || 'oE7tM2QwX9vK4pL6nR8sY1aB3cD5eF7gH0jKlMnOpQ=',
     wgDns: '10.0.0.1',
-    wgPub: peer['public-key'] || '',
-    wgEndpoint: host + ':' + (iface['listen-port'] || '13231'),
-    wgAllowed: '0.0.0.0/0', wgKeepalive: '25',
+    wgPub: peer['public-key'] || iface['public-key'] || '',
+    wgEndpoint: peer.endpoint || host + ':' + (iface['listen-port'] || '13231'),
+    wgAllowed: '0.0.0.0/0', wgKeepalive: String(peer['persistent-keepalive'] || '25'),
   };
   const form = WG_FIELDS.map(([id, key]) => `<div class="form-row"><label>${t(key)}</label><div><input type="text" id="${id}" value="${esc(defaults[id])}"></div></div>`).join('');
   openModal(t('wg_qr_title'),
