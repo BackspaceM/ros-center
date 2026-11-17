@@ -21,6 +21,8 @@ const { GROUPS, SECTIONS, SECTION_MAP, seed, makeLog } = require('./catalog');
 
 const HOST = process.env.HOST || '0.0.0.0';
 const INTERVAL = Math.max(500, Number(process.env.POLL_INTERVAL_MS || 1000));
+/* 连接表计数较重：独立低频采集（默认 5 秒），不跟随每秒的流量轮询 */
+const CONN_INTERVAL = Math.max(3000, Number(envNum('CONN_POLL_INTERVAL_MS', 5000)));
 const HISTORY = Math.max(30, Number(envNum('HISTORY_POINTS', 180)));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
@@ -174,6 +176,8 @@ class Device {
     this.ifaceMeta = new Map();   // name -> { type, comment, running, disabled }
     this.lastRates = new Map();   // name -> { rxBps, txBps, rxPps, txPps }
     this.lastResource = null;
+    this.connections = { v4: 0, v6: 0, total: 0, tcp: 0, udp: 0 };
+    this.lastConnPoll = 0;
     this.polling = false;
     this.mode = cfg.demo ? 'demo' : 'connecting';
     this.lastError = '';
@@ -488,6 +492,48 @@ async function collectResource(dev, client) {
   return r.re[0] || {};
 }
 
+/* ---- 连接表计数：RouterOS count-only，IPv4/IPv6 分开取 ---- */
+async function connCount(client, path, query) {
+  const words = [path, '=count-only='];
+  if (query) words.push(query);
+  try {
+    const r = await client.exec(words);
+    if (r.status.type === 'trap') return -1;
+    const n = Number(r.status.ret);
+    return Number.isFinite(n) ? n : -1;
+  } catch (e) { return -1; }
+}
+async function collectConnections(dev, client) {
+  const [v4, v6, tcp, udp] = await Promise.all([
+    connCount(client, '/ip/firewall/connection/print'),
+    connCount(client, '/ipv6/firewall/connection/print'),
+    connCount(client, '/ip/firewall/connection/print', '?protocol=tcp'),
+    connCount(client, '/ip/firewall/connection/print', '?protocol=udp'),
+  ]);
+  return {
+    v4: v4 >= 0 ? v4 : 0, v6: v6 >= 0 ? v6 : 0,
+    tcp: tcp >= 0 ? tcp : 0, udp: udp >= 0 ? udp : 0,
+    total: (v4 >= 0 ? v4 : 0) + (v6 >= 0 ? v6 : 0),
+  };
+}
+function demoConnections(dev) {
+  const t = Date.now() / 1000;
+  const v4 = Math.round(1180 + Math.sin(t / 13) * 260 + Math.sin(t / 4.7) * 70 + (Math.random() - 0.5) * 24);
+  const v6 = Math.round(96 + Math.sin(t / 19 + 1) * 34 + (Math.random() - 0.5) * 10);
+  return { v4: Math.max(0, v4), v6: Math.max(0, v6), total: Math.max(0, v4) + Math.max(0, v6), tcp: Math.round(v4 * 0.61), udp: Math.round(v4 * 0.33) };
+}
+async function refreshConnections(dev, wasLive) {
+  if (Date.now() - dev.lastConnPoll < CONN_INTERVAL) return;
+  dev.lastConnPoll = Date.now();
+  if (wasLive && dev.api && dev.api.connected) {
+    try {
+      const c = await collectConnections(dev, dev.api);
+      if (c.v4 || c.v6) { dev.connections = c; return; }
+    } catch (e) { /* 回退到演示/保留旧值 */ }
+  }
+  dev.connections = demoConnections(dev);
+}
+
 /* ---- 真·实时：RouterOS 原生 monitor-traffic 持续推送（每秒一次 !re） ---- */
 function ifacesFromCache(dev) {
   const out = [];
@@ -512,6 +558,7 @@ function emitStreamPacket(dev) {
     deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
     interval: INTERVAL, streaming: true, uptime: Math.floor((Date.now() - dev.startedAt) / 1000), error: dev.lastError,
     totalRx, totalTx, ifaces, resource: dev.lastResource || {}, resourceHistory: dev.resourceHistory,
+    connections: dev.connections,
   };
   dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
   if (dev.history.length > HISTORY) dev.history.shift();
@@ -568,12 +615,13 @@ async function pollDevice(dev) {
     if (!ifaces) { if (!dev.forceDemo) dev.ensureConnection(); ifaces = demoSnapshot(dev); }
     if (!resource) { resource = demoResource(dev); if (!dev.forceDemo && !(dev.api && dev.api.connected)) dev.mode = 'demo'; }
     if (!dev.forceDemo && !wasLive) dev.mode = 'demo';
+    await refreshConnections(dev, wasLive);
 
     const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
     const packet = {
       deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
       interval: INTERVAL, uptime: Math.floor((Date.now() - dev.startedAt) / 1000), error: dev.lastError,
-      totalRx, totalTx, ifaces, resource,
+      totalRx, totalTx, ifaces, resource, connections: dev.connections,
     };
     dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
     if (dev.history.length > HISTORY) dev.history.shift();

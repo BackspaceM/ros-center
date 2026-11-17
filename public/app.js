@@ -9,7 +9,7 @@ const I18N = {
     total_rx: '总下载', total_tx: '总上传', active_if: '活跃接口', peak_rx: '峰值下载',
     rx_hint: '所有接口接收速率之和', tx_hint: '所有接口发送速率之和', if_hint: '已启用并运行的接口',
     trend_title: '实时流量趋势', trend_sub: '最近 6 分钟 · 每秒采样', conn_title: '连接状态',
-    conn_sub: '当前活跃连接统计', health_title: '设备健康', health_sub: 'CPU 与内存占用',
+    conn_sub: '活跃连接数 · IPv4 / IPv6 分开统计', conn_total: '连接总数', health_title: '设备健康', health_sub: 'CPU 与内存占用',
     wlan_title: '终端概览', wlan_sub: '在线终端与接口分布', top_if: '接口流量排行 (TOP 10)',
     top_if_sub: '按累计流量排序', top_conn: '连接流量排行 (TOP 10)', top_conn_sub: '按连接字节数排序',
     all: '全部接口', legend_rx: '下载 RX', legend_tx: '上传 TX',
@@ -76,7 +76,7 @@ const I18N = {
     total_rx: 'Total download', total_tx: 'Total upload', active_if: 'Active ports', peak_rx: 'Peak download',
     rx_hint: 'Sum of receive rates', tx_hint: 'Sum of transmit rates', if_hint: 'Enabled and running interfaces',
     trend_title: 'Live traffic trend', trend_sub: 'Last 6 minutes · 1s sampling', conn_title: 'Connection status',
-    conn_sub: 'Active connection statistics', health_title: 'Device health', health_sub: 'CPU and memory usage',
+    conn_sub: 'Active connections · IPv4 / IPv6 counted separately', conn_total: 'Total connections', health_title: 'Device health', health_sub: 'CPU and memory usage',
     wlan_title: 'Client overview', wlan_sub: 'Online clients and interface distribution', top_if: 'Interface traffic (TOP 10)',
     top_if_sub: 'Sorted by total traffic', top_conn: 'Connection traffic (TOP 10)', top_conn_sub: 'Sorted by bytes',
     all: 'All interfaces', legend_rx: 'Download RX', legend_tx: 'Upload TX',
@@ -146,7 +146,7 @@ const L = (zh, en) => (lang === 'zh' ? zh : en);
 /* ================= 状态 ================= */
 const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
-  resourceHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
+  resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
   hoverIndex: -1, selectedIface: '__all__', mode: 'demo', configDemo: false,
   collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
   authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
@@ -440,6 +440,13 @@ function applyData(d) {
   if (d.deviceName) { const dev = state.devices.find((x) => x.id === (d.deviceId || state.deviceId)); if (dev) dev.status = dev.status || {}, dev.status.mode = d.mode; }
   state.latest = d; state.mode = d.mode === 'live' ? 'live' : 'demo';
   if (Array.isArray(d.resourceHistory) && d.resourceHistory.length) state.resourceHistory = d.resourceHistory.slice();
+  if (d.connections) {
+    const last = state.connHistory[state.connHistory.length - 1];
+    if (!last || last.ts !== d.ts) {
+      state.connHistory.push({ ts: d.ts, total: d.connections.total || 0, v4: d.connections.v4 || 0, v6: d.connections.v6 || 0 });
+      if (state.connHistory.length > 180) state.connHistory.shift();
+    }
+  }
   let rxSel = d.totalRx || 0, txSel = d.totalTx || 0;
   if (state.selectedIface !== '__all__') {
     const f = (d.ifaces || []).find((i) => i.name === state.selectedIface);

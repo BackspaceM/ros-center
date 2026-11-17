@@ -9,6 +9,7 @@ function renderDashboard() {
   const diskPct = r['total-hdd-space'] ? Math.round((1 - num(r['free-hdd-space']) / num(r['total-hdd-space'])) * 100) : 0;
   const active = (d.ifaces || []).filter((i) => i.running === 'true' && i.disabled !== 'true').length;
   const rx = fmtRate(d.totalRx || 0), tx = fmtRate(d.totalTx || 0);
+  const cn = d.connections || { v4: 0, v6: 0, total: 0, tcp: 0, udp: 0 };
   let peak = 0; for (const p of state.points) peak = Math.max(peak, p.rx || 0);
   const pk = fmtRate(peak);
 
@@ -41,10 +42,10 @@ function renderDashboard() {
       <div class="panel">
         <div class="panel-head"><div><h2>${t('conn_title')}</h2><p class="sub">${t('conn_sub')}</p></div></div>
         <div class="stat-row">
-          ${statBox(L('当前连接数', 'Connections'), String((d.ifaces || []).length * 37 + 12))}
-          ${statBox('TCP', String(Math.max(1, Math.round((d.ifaces || []).length * 11))))}
-          ${statBox('UDP', String(Math.max(1, Math.round((d.ifaces || []).length * 9))))}
-          ${statBox(L('在线终端', 'Clients'), String(Math.max(1, (d.ifaces || []).length - 2) * 4))}
+          ${statBox(t('conn_total') || L('连接总数', 'Total connections'), String(cn.total.toLocaleString()))}
+          ${statBox('IPv4', String(cn.v4.toLocaleString()))}
+          ${statBox('IPv6', String(cn.v6.toLocaleString()))}
+          ${statBox('TCP / UDP', (cn.tcp || cn.udp) ? (cn.tcp.toLocaleString() + ' / ' + cn.udp.toLocaleString()) : '—')}
         </div>
         <div class="panel-body" style="padding-top:0"><div id="connSpark" style="height:96px"></div></div>
       </div>
@@ -113,9 +114,13 @@ function renderTopTables(d) {
 function drawConnSpark() {
   const host = $('connSpark'); if (!host) return;
   host.innerHTML = '<canvas id="connCv" style="width:100%;height:100%"></canvas>';
-  const vals = state.points.slice(-60).map((_, i) => 20 + Math.round(Math.sin(i / 5) * 8 + Math.random() * 9));
-  drawLineChart('connCv', null, vals.map((v, i) => ({ ts: Date.now() - (vals.length - i) * 2000, v })),
-    [{ key: 'v', color: cssVar('--blue', '#2563eb'), fill: themeFill('--blue', '#2563eb', .12), label: L('连接数', 'Connections') }], (v) => String(Math.round(v)));
+  const hist = (state.connHistory || []).slice(-60);
+  drawLineChart('connCv', null, hist.map((p) => ({ ts: p.ts, total: p.total, v4: p.v4, v6: p.v6 })),
+    [
+      { key: 'total', color: cssVar('--blue', '#2563eb'), fill: themeFill('--blue', '#2563eb', .10), label: L('连接总数', 'Total') },
+      { key: 'v4', color: cssVar('--violet', '#7c5cff'), label: 'IPv4' },
+      { key: 'v6', color: cssVar('--green', '#12a37f'), label: 'IPv6' },
+    ], (v) => String(Math.round(v)));
 }
 
 /* ================= 实时流量页 ================= */
