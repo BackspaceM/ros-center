@@ -10,7 +10,7 @@ const I18N = {
     rx_hint: '所有接口接收速率之和', tx_hint: '所有接口发送速率之和', if_hint: '已启用并运行的接口',
     trend_title: '实时流量趋势', trend_sub: '最近 6 分钟 · 每秒采样', conn_title: '连接状态',
     conn_sub: '活跃连接数 · IPv4 / IPv6 分开统计', conn_total: '连接总数', health_title: '设备健康', health_sub: 'CPU 与内存占用',
-    wlan_title: '终端概览', wlan_sub: '在线终端与接口分布', top_if: '接口流量排行 (TOP 10)',
+    ifdist_title: '接口类型分布', ifdist_sub: '按实际接口类型统计，非估算', wlan_title: '终端概览', wlan_sub: '在线终端与接口分布', top_if: '接口流量排行 (TOP 10)',
     top_if_sub: '按累计流量排序', top_conn: '连接流量排行 (TOP 10)', top_conn_sub: '按连接字节数排序',
     all: '全部接口', legend_rx: '下载 RX', legend_tx: '上传 TX',
     live: '实时 LIVE', demo: '演示 DEMO', connecting: '连接中', reconnect: '重连中',
@@ -41,9 +41,11 @@ const I18N = {
     device_status: '状态', device_test: '测试连接', device_saved: '设备已保存', device_switch: '已切换到',
     device_current: '当前为主设备', device_count: '设备数量', device_hint: '点顶栏设备下拉即可切换；主设备决定默认显示哪台。',
     device_reconnect: '重新连接', device_no_password: '留空表示不修改', device_required: '请填写名称、地址、端口和账号',
-    theme_system: '跟随系统', theme_light: '浅色', theme_dark: '深色', theme_glass: '毛玻璃', theme_porcelain: '青花瓷',
-    theme_liquid: '液态玻璃', theme_aurora: '极光', theme_ocean: '深海', theme_sakura: '樱粉', theme_mono: '黑白极简',
-    theme_title: '界面风格', conn_settings: '连接设置', conn_settings_sub: '直接在网页里填写 RouterOS 地址与账号，无需编辑 .env 文件',
+    theme_default: '经典蓝', theme_glass: '毛玻璃', theme_porcelain: '青花瓷', theme_liquid: '液态玻璃',
+    theme_aurora: '极光', theme_ocean: '深海', theme_sakura: '樱粉', theme_mono: '黑白极简',
+    theme_forest: '森林绿', theme_amber: '琥珀金', theme_violet: '紫罗兰', theme_coffee: '咖啡棕', theme_mint: '薄荷绿',
+    mode_light: '浅色', mode_dark: '深色', mode_system: '跟随系统',
+    theme_title: '配色风格', mode_title: '深浅模式', conn_settings: '连接设置', conn_settings_sub: '直接在网页里填写 RouterOS 地址与账号，无需编辑 .env 文件',
     conn_host: 'RouterOS 地址', conn_port: 'API 端口', conn_user: '账号', conn_password: '密码',
     conn_tls: '使用 API-SSL (TLS)', conn_demo: '演示模式（不连接真实路由器）', conn_test: '测试连接',
     conn_save: '保存并连接', conn_saved: '连接设置已保存，正在重新连接', conn_test_ok: '连接成功', conn_test_fail: '连接失败',
@@ -68,6 +70,8 @@ const I18N = {
     wg_route: '客户端 AllowedIPs', wg_psk: '预共享密钥', wg_responder: '仅响应 (responder)',
     wg_save_peer: '保存到 RouterOS', wg_peer_saved: '对端已保存', wg_auto: '自动', wg_required_wg: '请填写接口、允许地址和私钥',
     sort_hint: '点击排序（升序 / 降序）', singleton_hint: '该页面只有一组配置，点「编辑」直接修改',
+    stats_title: '流量统计', stats_sub: '按日 / 周 / 月统计上下行流量，来自路由器接口累计字节',
+    stats_chart: '流量趋势', stats_detail: '明细', stats_from_router: '来自路由器真实计数',
   },
   en: {
     page_title: 'ROS Center', brand: 'ROS', brand_sub: 'Center', search_menu: 'Search menu…',
@@ -77,7 +81,7 @@ const I18N = {
     rx_hint: 'Sum of receive rates', tx_hint: 'Sum of transmit rates', if_hint: 'Enabled and running interfaces',
     trend_title: 'Live traffic trend', trend_sub: 'Last 6 minutes · 1s sampling', conn_title: 'Connection status',
     conn_sub: 'Active connections · IPv4 / IPv6 counted separately', conn_total: 'Total connections', health_title: 'Device health', health_sub: 'CPU and memory usage',
-    wlan_title: 'Client overview', wlan_sub: 'Online clients and interface distribution', top_if: 'Interface traffic (TOP 10)',
+    ifdist_title: 'Interface types', ifdist_sub: 'Counted by real interface type, not estimated', wlan_title: 'Client overview', wlan_sub: 'Online clients and interface distribution', top_if: 'Interface traffic (TOP 10)',
     top_if_sub: 'Sorted by total traffic', top_conn: 'Connection traffic (TOP 10)', top_conn_sub: 'Sorted by bytes',
     all: 'All interfaces', legend_rx: 'Download RX', legend_tx: 'Upload TX',
     live: 'LIVE', demo: 'DEMO', connecting: 'Connecting', reconnect: 'Reconnecting',
@@ -108,9 +112,11 @@ const I18N = {
     device_status: 'Status', device_test: 'Test connection', device_saved: 'Device saved', device_switch: 'Switched to',
     device_current: 'Primary device', device_count: 'Devices', device_hint: 'Use the device dropdown in the top bar to switch; the primary device is shown by default.',
     device_reconnect: 'Reconnect', device_no_password: 'Leave blank to keep', device_required: 'Name, host, port and user are required',
-    theme_system: 'System', theme_light: 'Light', theme_dark: 'Dark', theme_glass: 'Glass', theme_porcelain: 'Porcelain',
-    theme_liquid: 'Liquid glass', theme_aurora: 'Aurora', theme_ocean: 'Deep sea', theme_sakura: 'Sakura', theme_mono: 'Mono',
-    theme_title: 'Theme', conn_settings: 'Connection settings', conn_settings_sub: 'Set RouterOS address and credentials right in the web UI - no .env editing needed',
+    theme_default: 'Classic blue', theme_glass: 'Glass', theme_porcelain: 'Porcelain', theme_liquid: 'Liquid glass',
+    theme_aurora: 'Aurora', theme_ocean: 'Deep sea', theme_sakura: 'Sakura', theme_mono: 'Mono',
+    theme_forest: 'Forest', theme_amber: 'Amber', theme_violet: 'Violet', theme_coffee: 'Coffee', theme_mint: 'Mint',
+    mode_light: 'Light', mode_dark: 'Dark', mode_system: 'System',
+    theme_title: 'Color theme', mode_title: 'Light / dark mode', conn_settings: 'Connection settings', conn_settings_sub: 'Set RouterOS address and credentials right in the web UI - no .env editing needed',
     conn_host: 'RouterOS address', conn_port: 'API port', conn_user: 'Username', conn_password: 'Password',
     conn_tls: 'Use API-SSL (TLS)', conn_demo: 'Demo mode (do not connect to a real router)', conn_test: 'Test connection',
     conn_save: 'Save & connect', conn_saved: 'Settings saved, reconnecting', conn_test_ok: 'Connection successful', conn_test_fail: 'Connection failed',
@@ -135,6 +141,8 @@ const I18N = {
     wg_route: 'Client AllowedIPs', wg_psk: 'Preshared key', wg_responder: 'Responder only',
     wg_save_peer: 'Save to RouterOS', wg_peer_saved: 'Peer saved', wg_auto: 'Auto', wg_required_wg: 'Interface, allowed address and private key are required',
     sort_hint: 'Click to sort (ascending / descending)', singleton_hint: 'A single settings block - use Edit to change values',
+    stats_title: 'Traffic statistics', stats_sub: 'Up/down traffic by day, week and month, from router interface byte counters',
+    stats_chart: 'Traffic trend', stats_detail: 'Details', stats_from_router: 'Real router counters',
   },
 };
 const urlLang = new URLSearchParams(location.search).get('lang');
@@ -148,6 +156,7 @@ const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
   hoverIndex: -1, selectedIface: '__all__', mode: 'demo', configDemo: false,
+  usageRange: 'day', usageData: null,
   collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
   authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
 };
@@ -155,11 +164,20 @@ try { JSON.parse(localStorage.getItem('ros-traffic-groups') || '[]').forEach((id
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/* ================= 主题 ================= */
-const THEMES = ['system', 'light', 'dark', 'glass', 'porcelain', 'liquid', 'aurora', 'ocean', 'sakura', 'mono'];
-const urlTheme = new URLSearchParams(location.search).get('theme');
-let theme = THEMES.includes(urlTheme) ? urlTheme : (localStorage.getItem('ros-traffic-theme') || 'system');
-if (!THEMES.includes(theme)) theme = 'system';
+/* ================= 主题：配色风格 × 深浅模式 两套独立维度 =================
+   theme = 配色风格；mode = light / dark / system，可任意组合，例如「深色 + 樱粉」。 */
+const THEMES = ['default', 'ocean', 'aurora', 'sakura', 'forest', 'amber', 'violet', 'coffee', 'mint', 'mono', 'glass', 'porcelain', 'liquid'];
+const MODES = ['light', 'dark', 'system'];
+const MODE_ICON = { light: '☀', dark: '☾', system: '◐' };
+const qs = new URLSearchParams(location.search);
+const urlTheme = qs.get('theme'), urlMode = qs.get('mode');
+const legacyTheme = localStorage.getItem('ros-traffic-theme'); // 旧版本单一主题键
+let theme = THEMES.includes(urlTheme) ? urlTheme : (localStorage.getItem('ros-theme') || (legacyTheme && THEMES.includes(legacyTheme) ? legacyTheme : 'default'));
+let mode = MODES.includes(urlMode) ? urlMode : (MODES.includes(localStorage.getItem('ros-mode')) ? localStorage.getItem('ros-mode')
+  : (legacyTheme === 'dark' || legacyTheme === 'light' ? legacyTheme : 'system'));
+if (!THEMES.includes(theme)) theme = 'default';
+const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+function effectiveMode() { return mode === 'system' ? (systemDark && systemDark.matches ? 'dark' : 'light') : mode; }
 function cssVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
@@ -176,11 +194,26 @@ function themeFill(name, fallback, alpha) {
   return c;
 }
 function applyTheme(persist) {
-  document.documentElement.dataset.theme = theme;
-  const sel = $('themeSelect'); if (sel) sel.value = theme;
+  const root = document.documentElement;
+  root.dataset.theme = theme;
+  root.dataset.mode = mode;
+  root.dataset.scheme = effectiveMode(); // 实际生效的深浅，供 CSS 复用
+  const sel = $('themeSelect');
+  if (sel) {
+    const labels = THEMES.map((x) => esc(t('theme_' + x) || x)).join('|');
+    if (sel.dataset.labels !== labels) { sel.innerHTML = THEMES.map((x) => `<option value="${x}">${esc(t('theme_' + x) || x)}</option>`).join(''); sel.dataset.labels = labels; }
+    sel.value = theme;
+  }
+  const mb = $('modeBtn');
+  if (mb) {
+    mb.textContent = MODE_ICON[mode];
+    mb.title = MODE_ICON[mode] + ' ' + (t('mode_' + mode) || mode);
+    mb.dataset.mode = mode;
+  }
   if (persist === false) return;
-  try { localStorage.setItem('ros-traffic-theme', theme); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('ros-theme', theme); localStorage.setItem('ros-mode', mode); } catch (e) { /* ignore */ }
 }
+if (systemDark && systemDark.addEventListener) systemDark.addEventListener('change', () => { if (mode === 'system') { applyTheme(false); if (state.section === 'dashboard') renderDashboard(); } });
 
 /* ================= 工具 ================= */
 function fmtRate(bps) {
@@ -190,7 +223,7 @@ function fmtRate(bps) {
 }
 const fmtRateStr = (b) => { const r = fmtRate(b); return r.v + ' ' + r.u; };
 function fmtBytes(b) {
-  b = Number(b) || 0; let i = 0; const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  b = Number(b) || 0; let i = 0; const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
   return b.toFixed(b >= 100 ? 0 : b >= 10 ? 1 : 2) + ' ' + u[i];
 }
@@ -275,7 +308,7 @@ function saveCollapsedGroups() {
 }
 /* 按分类 id 匹配图标，未命中时按名称关键字兜底 */
 const SECTION_ICONS = {
-  dashboard: 'gauge', traffic: 'activity', systemTools: 'tools', connections: 'link',
+  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link',
   interfaces: 'ethernet', ipAddresses: 'ip', dhcpClients: 'monitor', dhcpServers: 'server',
   dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dns: 'globe', dnsStatic: 'pin',
   routes: 'route', pools: 'database', neighbors: 'radar',
@@ -316,6 +349,7 @@ function iconSvg(name) {
     log: '<rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 5h6M5 8h6M5 11h4"/>',
     gauge: '<path d="M2.5 12a5.5 5.5 0 1 1 11 0"/><path d="M8 11.5 11 7"/><circle cx="8" cy="11.5" r="1" fill="currentColor"/>',
     activity: '<path d="M1 8h3l2-5 3 10 2-5h4"/>',
+    chart: '<path d="M2 14V8M6 14V4M10 14v-4M14 14V6" stroke="currentColor" stroke-width="2" fill="none"/>',
     tools: '<path d="M13.2 2.8a3.5 3.5 0 0 0-4.6 4.5L3.4 12.5a1.3 1.3 0 0 0 1.8 1.8l5.2-5.2a3.5 3.5 0 0 0 4.6-4.6l-2.4 2.4-2-.5-.6-1.8z"/>',
     link: '<path d="M6 10l4-4"/><path d="M7.5 4.5 9 3a3 3 0 0 1 4.2 4.2l-1.7 1.7"/><path d="M8.5 11.5 7 13a3 3 0 0 1-4.2-4.2l1.7-1.7"/>',
     ethernet: '<rect x="2" y="5" width="12" height="7" rx="1"/><path d="M5 2v3M8 2v3M11 2v3M5 12v2M8 12v2M11 12v2"/>',
@@ -385,8 +419,8 @@ async function switchDevice(id, silent) {
   if (!id || id === state.deviceId || !state.devices.some((d) => d.id === id)) return;
   state.deviceId = id;
   try { localStorage.setItem('ros-traffic-device', id); } catch (e) { /* ignore */ }
-  state.points = []; state.resourceHistory = []; state.ifHistory.clear(); state.selectedIface = '__all__';
-  state.latest = null; state.connRows = [];
+  state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); state.selectedIface = '__all__';
+  state.latest = null; state.connRows = []; state.usageData = null;
   renderDevicePicker();
   const nowDev = state.devices.find((x) => x.id === id);
   if (nowDev && $('adminName')) $('adminName').textContent = nowDev.user || 'admin';
@@ -443,7 +477,8 @@ function applyData(d) {
   if (d.connections) {
     const last = state.connHistory[state.connHistory.length - 1];
     if (!last || last.ts !== d.ts) {
-      state.connHistory.push({ ts: d.ts, total: d.connections.total || 0, v4: d.connections.v4 || 0, v6: d.connections.v6 || 0 });
+      state.connHistory.push({ ts: d.ts, total: d.connections.total || 0, v4: d.connections.v4 || 0, v6: d.connections.v6 || 0,
+        tcp4: d.connections.tcp4 || 0, tcp6: d.connections.tcp6 || 0, udp4: d.connections.udp4 || 0, udp6: d.connections.udp6 || 0 });
       if (state.connHistory.length > 180) state.connHistory.shift();
     }
   }
@@ -461,8 +496,8 @@ function applyData(d) {
   }
   updateTopbar(d);
   if (state.section === 'dashboard') renderDashboard();
-  else if (state.section === 'traffic') renderTraffic();
-  else if (state.section === 'connections') refreshRowsIfLoaded();
+  else if (state.section === 'connections' || state.section === 'connections6') refreshRowsIfLoaded();
+  /* 实时数据不重绘流量统计页：统计是低频历史数据，避免每秒抖屏 */
 }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function updateTopbar(d) {
@@ -491,7 +526,7 @@ function renderPage() {
   const g = state.schema.groups.find((x) => x.id === sec.group);
   $('crumbGroup').textContent = g ? tx(g) : ''; $('crumbSection').textContent = tx(sec.title);
   if (sec.id === 'dashboard') return renderDashboard();
-  if (sec.id === 'traffic') return renderTraffic();
+  if (sec.id === 'trafficStats') return renderTrafficStats();
   if (sec.id === 'systemTools') return renderTools();
   if (sec.id === 'connectionSettings') return renderConnectionSettings();
   if (sec.path) return sec.singleton ? renderSingletonPage(sec) : renderConfigPage(sec);
@@ -507,6 +542,7 @@ function applyLang() {
   document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
   $('langLabel').textContent = lang === 'zh' ? 'EN' : '中文';
+  applyTheme(false); // 刷新主题下拉的语言标签
   buildNav(); renderPage();
 }
 
@@ -517,8 +553,14 @@ async function boot() {
     localStorage.setItem('ros-traffic-lang', lang);
     applyLang();
   };
-  applyTheme(!urlTheme);
+  applyTheme(!(urlTheme || urlMode));
   $('themeSelect').onchange = (e) => { theme = e.target.value; applyTheme(); toast(t('theme_title') + ': ' + e.target.selectedOptions[0].textContent, 'ok'); };
+  $('modeBtn').onclick = () => {
+    mode = mode === 'light' ? 'dark' : mode === 'dark' ? 'system' : 'light';
+    applyTheme();
+    toast(t('mode_title') + ': ' + (t('mode_' + mode) || mode), 'ok');
+    if (state.section === 'dashboard') renderDashboard();
+  };
   const urlCollapse = new URLSearchParams(location.search).get('collapse');
   const collapsed = urlCollapse === '1' || (urlCollapse !== '0' && localStorage.getItem('ros-traffic-collapsed') === '1');
   $('sidebar').classList.toggle('collapsed', collapsed);
@@ -528,7 +570,7 @@ async function boot() {
   $('collapseBtn').onclick = () => {
     const c = $('sidebar').classList.toggle('collapsed');
     try { localStorage.setItem('ros-traffic-collapsed', c ? '1' : '0'); } catch (e) { /* ignore */ }
-    setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'traffic') renderTraffic(); }, 200);
+    setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats(); }, 200);
   };
   $('menuToggle').onclick = () => $('sidebar').classList.toggle('mobile-open');
   const rz = $('sideResize');
@@ -543,7 +585,7 @@ async function boot() {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
       const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 216;
       try { localStorage.setItem('ros-traffic-sidebar-w', String(w)); } catch (e) { /* ignore */ }
-      if (state.section === 'dashboard') renderDashboard(); if (state.section === 'traffic') renderTraffic();
+      if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats();
     };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   };

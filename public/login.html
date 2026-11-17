@@ -10,12 +10,21 @@
     --accent:#3f6fea; --accent2:#2b55c8; --err:#d64b4b; --shadow:0 18px 50px rgba(23,42,90,.14);
   }
   *{box-sizing:border-box}
-  html[data-theme="dark"] , html[data-theme="glass"]:not([data-light]), html[data-theme="aurora"], html[data-theme="ocean"], html[data-theme="sakura"]{
+  html[data-scheme="dark"]{
     --bg:#101728; --card:#18223a; --ink:#eaf0ff; --muted:#9aa7c4; --line:#2a3757;
     --accent:#5b8cff; --accent2:#3f6fea; --shadow:0 18px 50px rgba(0,0,0,.4);
   }
-  html[data-theme="porcelain"]{--bg:#f2f0ea;--card:#fffdf7;--ink:#28323a;--muted:#7a837f;--line:#e2ded2;--accent:#4b7f7a;--accent2:#37635f}
-  html[data-theme="mono"]{--bg:#f4f4f4;--card:#fff;--ink:#151515;--muted:#666;--line:#ddd;--accent:#222;--accent2:#000}
+  html[data-scheme="light"][data-theme="porcelain"]{--bg:#f2f0ea;--card:#fffdf7;--ink:#28323a;--muted:#7a837f;--line:#e2ded2;--accent:#4b7f7a;--accent2:#37635f}
+  html[data-scheme="light"][data-theme="sakura"]{--bg:#fdf3f5;--card:#fffafb;--ink:#4a2b3b;--muted:#a17c8d;--line:#f1dce4;--accent:#d9668f;--accent2:#b34e75}
+  html[data-scheme="light"][data-theme="forest"]{--accent:#2f8f5b;--accent2:#216a43}
+  html[data-scheme="light"][data-theme="violet"]{--accent:#6d5ce0;--accent2:#5343bd}
+  html[data-scheme="light"][data-theme="amber"]{--accent:#d9851c;--accent2:#b56a10}
+  html[data-scheme="light"][data-theme="mint"]{--accent:#1f9e8f;--accent2:#157a6e}
+  html[data-scheme="light"][data-theme="coffee"]{--accent:#a9773f;--accent2:#865c2d}
+  html[data-scheme="light"][data-theme="mono"]{--bg:#f4f4f4;--card:#fff;--ink:#151515;--muted:#666;--line:#ddd;--accent:#222;--accent2:#000}
+  html[data-scheme="dark"][data-theme="sakura"]{--accent:#e88bb0;--accent2:#c66a92}
+  html[data-scheme="dark"][data-theme="forest"]{--accent:#5fc98f;--accent2:#3ea573}
+  html[data-scheme="dark"][data-theme="violet"]{--accent:#a794ff;--accent2:#836fe6}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
     color:var(--ink);background:radial-gradient(1100px 700px at 12% -10%,rgba(63,111,234,.16),transparent 60%),
@@ -71,11 +80,14 @@
 <script>
 (function(){
   var zh = (localStorage.getItem('ros-traffic-lang') || (navigator.language||'').slice(0,2)) !== 'en';
-  var theme = localStorage.getItem('ros-traffic-theme') || 'system';
+  var legacy = localStorage.getItem('ros-traffic-theme');
+  var mode = localStorage.getItem('ros-mode') || (legacy === 'dark' ? 'dark' : legacy === 'light' ? 'light' : 'system');
+  var theme = localStorage.getItem('ros-theme') || 'default';
   var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (theme === 'system' || theme === 'light' || theme === 'porcelain' || theme === 'mono') {
-    document.documentElement.dataset.theme = (theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme);
-  } else document.documentElement.dataset.theme = theme;
+  var scheme = mode === 'system' ? (prefersDark ? 'dark' : 'light') : mode;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.scheme = scheme;
+  document.documentElement.dataset.themeDark = (scheme === 'dark' ? '1' : '0');
   var next = new URLSearchParams(location.search).get('next') || '/';
   if (!/^\/(?!\/)/.test(next)) next = '/';
   var $ = function(id){ return document.getElementById(id); };

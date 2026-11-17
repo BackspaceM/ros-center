@@ -27,6 +27,7 @@ const HISTORY = Math.max(30, Number(envNum('HISTORY_POINTS', 180)));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
+const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
 const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
 let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
@@ -155,6 +156,98 @@ function fmtDuration(s) {
   s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
   return (d ? d + 'd' : '') + (h ? h + 'h' : '') + (m ? m + 'm' : '') + sec + 's';
 }
+/* 把 RouterOS 的 uptime 字符串（如 "1d00:00:00" / "2w3d4h" / "00:05:13"）解析成秒 */
+function parseRouterUptime(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+  if (/^\d+$/.test(s)) return Number(s);
+  let total = 0, matched = false;
+  const w = s.match(/(\d+)\s*w/i); if (w) { total += Number(w[1]) * 604800; matched = true; }
+  const d = s.match(/(\d+)\s*d/i); if (d) { total += Number(d[1]) * 86400; matched = true; }
+  const colon = s.match(/(\d{1,3}):(\d{1,2}):(\d{1,2})/);
+  if (colon) { total += Number(colon[1]) * 3600 + Number(colon[2]) * 60 + Number(colon[3]); matched = true; }
+  else {
+    const h = s.match(/(\d+)\s*h/i); if (h) { total += Number(h[1]) * 3600; matched = true; }
+    const m = s.match(/(\d+)\s*m(?!s)/i); if (m) { total += Number(m[1]) * 60; matched = true; }
+    const sec = s.match(/(\d+)\s*s/i); if (sec) { total += Number(sec[1]); matched = true; }
+  }
+  return matched ? total : null;
+}
+
+/* ================= 流量统计（按日/周/月的上下行累计，持久化到 data/usage.json） =================
+   记录的是各接口累计字节计数器的“日增量”：每个采样周期把当前总量与上次总量做差，
+   写入当天桶。计数器回绕/接口重置（差值为负或异常巨大）时忽略该次差值，避免了重启后虚高。 */
+const USAGE_KEEP_DAYS = 400;
+let usageStore = loadUsage();
+let usageDirty = false;
+function loadUsage() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8'));
+    return raw && typeof raw === 'object' && raw.devices && typeof raw.devices === 'object' ? raw : { devices: {} };
+  } catch (e) { return { devices: {} }; }
+}
+function saveUsage(force) {
+  if (!usageDirty && !force) return;
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(USAGE_FILE, JSON.stringify(usageStore) + '\n', { mode: 0o600 });
+    usageDirty = false;
+  } catch (e) { /* ignore */ }
+}
+function usageBucket(dev) {
+  const id = dev.id;
+  if (!usageStore.devices[id]) usageStore.devices[id] = { last: null, days: {} };
+  return usageStore.devices[id];
+}
+function localDayKey(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+/* 记录一次累计字节采样：rxTotal/txTotal 为全部接口 rx-byte/tx-byte 之和 */
+function recordUsage(dev, rxTotal, txTotal) {
+  if (!Number.isFinite(rxTotal) || !Number.isFinite(txTotal)) return;
+  const b = usageBucket(dev);
+  const now = Date.now();
+  if (!b.last || rxTotal < b.last.rx - 1e6 || txTotal < b.last.tx - 1e6 || now - b.last.ts > 6 * 3600 * 1000) {
+    // 首次采样 / 计数器回绕或接口重置 / 超过 6 小时间隔：只重置基线，不计增量
+    b.last = { rx: rxTotal, tx: txTotal, ts: now }; usageDirty = true; return;
+  }
+  const dRx = rxTotal - b.last.rx, dTx = txTotal - b.last.tx;
+  b.last = { rx: rxTotal, tx: txTotal, ts: now };
+  // 单次增量超过 100TB 视为异常，忽略
+  if (dRx < 0 || dTx < 0 || dRx > 1e14 || dTx > 1e14) { usageDirty = true; return; }
+  const key = localDayKey(now);
+  const day = b.days[key] || (b.days[key] = { rx: 0, tx: 0 });
+  day.rx += dRx; day.tx += dTx; usageDirty = true;
+  // 保留最近 N 天
+  const keys = Object.keys(b.days).sort();
+  while (keys.length > USAGE_KEEP_DAYS) { delete b.days[keys.shift()]; }
+}
+/* 汇总指定设备的流量统计：day=今日, week=近7天, month=近30天, total=全部记录 */
+function usageSummary(dev) {
+  const b = usageStore.devices[dev.id] || { days: {} };
+  const days = b.days || {};
+  const sum = (list) => list.reduce((a, k) => ({ rx: a.rx + (days[k] ? days[k].rx : 0), tx: a.tx + (days[k] ? days[k].tx : 0) }), { rx: 0, tx: 0 });
+  const all = Object.keys(days).sort();
+  const now = new Date(), today = localDayKey(now.getTime());
+  // 本周：以周一为起点；本月：以 1 号为起点
+  const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const inRange = (from) => all.filter((k) => k >= from && k <= today);
+  const daily = all.slice(-400).map((k) => ({ day: k, rx: Math.round(days[k].rx || 0), tx: Math.round(days[k].tx || 0) }));
+  return {
+    deviceId: dev.id, demo: dev.forceDemo, today: sum(inRange(today)),
+    week: sum(inRange(localDayKey(monday.getTime()))), month: sum(inRange(localDayKey(monthStart.getTime()))),
+    total: sum(all), daily, days: all.length,
+  };
+}
+
+/* 取设备真实运行时间（秒）：优先解析 RouterOS 的 resource.uptime，失败回退到本进程运行时长 */
+function packetUptime(dev) {
+  const real = parseRouterUptime(dev.lastResource && dev.lastResource.uptime);
+  return real != null ? real : Math.floor((Date.now() - dev.startedAt) / 1000);
+}
 
 /* ================= 设备注册表 ================= */
 function freshDemoDB() {
@@ -176,7 +269,7 @@ class Device {
     this.ifaceMeta = new Map();   // name -> { type, comment, running, disabled }
     this.lastRates = new Map();   // name -> { rxBps, txBps, rxPps, txPps }
     this.lastResource = null;
-    this.connections = { v4: 0, v6: 0, total: 0, tcp: 0, udp: 0 };
+    this.connections = { v4: 0, v6: 0, total: 0, tcp4: 0, udp4: 0, tcp6: 0, udp6: 0, tcp: 0, udp: 0 };
     this.lastConnPoll = 0;
     this.polling = false;
     this.mode = cfg.demo ? 'demo' : 'connecting';
@@ -504,23 +597,27 @@ async function connCount(client, path, query) {
   } catch (e) { return -1; }
 }
 async function collectConnections(dev, client) {
-  const [v4, v6, tcp, udp] = await Promise.all([
-    connCount(client, '/ip/firewall/connection/print'),
-    connCount(client, '/ipv6/firewall/connection/print'),
-    connCount(client, '/ip/firewall/connection/print', '?protocol=tcp'),
-    connCount(client, '/ip/firewall/connection/print', '?protocol=udp'),
+  const P4 = '/ip/firewall/connection/print', P6 = '/ipv6/firewall/connection/print';
+  const [v4, v6, tcp4, udp4, tcp6, udp6] = await Promise.all([
+    connCount(client, P4), connCount(client, P6),
+    connCount(client, P4, '?protocol=tcp'), connCount(client, P4, '?protocol=udp'),
+    connCount(client, P6, '?protocol=tcp'), connCount(client, P6, '?protocol=udp'),
   ]);
+  const n = (x) => (x >= 0 ? x : 0);
   return {
-    v4: v4 >= 0 ? v4 : 0, v6: v6 >= 0 ? v6 : 0,
-    tcp: tcp >= 0 ? tcp : 0, udp: udp >= 0 ? udp : 0,
-    total: (v4 >= 0 ? v4 : 0) + (v6 >= 0 ? v6 : 0),
+    v4: n(v4), v6: n(v6), total: n(v4) + n(v6),
+    tcp4: n(tcp4), udp4: n(udp4), tcp6: n(tcp6), udp6: n(udp6),
+    tcp: n(tcp4) + n(tcp6), udp: n(udp4) + n(udp6),
   };
 }
 function demoConnections(dev) {
   const t = Date.now() / 1000;
   const v4 = Math.round(1180 + Math.sin(t / 13) * 260 + Math.sin(t / 4.7) * 70 + (Math.random() - 0.5) * 24);
   const v6 = Math.round(96 + Math.sin(t / 19 + 1) * 34 + (Math.random() - 0.5) * 10);
-  return { v4: Math.max(0, v4), v6: Math.max(0, v6), total: Math.max(0, v4) + Math.max(0, v6), tcp: Math.round(v4 * 0.61), udp: Math.round(v4 * 0.33) };
+  const tcp4 = Math.round(v4 * 0.61), udp4 = Math.round(v4 * 0.33);
+  const tcp6 = Math.round(v6 * 0.58), udp6 = Math.round(v6 * 0.36);
+  return { v4: Math.max(0, v4), v6: Math.max(0, v6), total: Math.max(0, v4) + Math.max(0, v6),
+    tcp4, udp4, tcp6, udp6, tcp: tcp4 + tcp6, udp: udp4 + udp6 };
 }
 async function refreshConnections(dev, wasLive) {
   if (Date.now() - dev.lastConnPoll < CONN_INTERVAL) return;
@@ -556,7 +653,7 @@ function emitStreamPacket(dev) {
   const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
   const packet = {
     deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
-    interval: INTERVAL, streaming: true, uptime: Math.floor((Date.now() - dev.startedAt) / 1000), error: dev.lastError,
+    interval: INTERVAL, streaming: true, uptime: packetUptime(dev), error: dev.lastError,
     totalRx, totalTx, ifaces, resource: dev.lastResource || {}, resourceHistory: dev.resourceHistory,
     connections: dev.connections,
   };
@@ -618,9 +715,12 @@ async function pollDevice(dev) {
     await refreshConnections(dev, wasLive);
 
     const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
+    const totalRxBytes = ifaces.reduce((s, i) => s + (num(i.rxBytes) || 0), 0);
+    const totalTxBytes = ifaces.reduce((s, i) => s + (num(i.txBytes) || 0), 0);
+    recordUsage(dev, totalRxBytes, totalTxBytes);
     const packet = {
       deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
-      interval: INTERVAL, uptime: Math.floor((Date.now() - dev.startedAt) / 1000), error: dev.lastError,
+      interval: INTERVAL, uptime: packetUptime(dev), error: dev.lastError,
       totalRx, totalTx, ifaces, resource, connections: dev.connections,
     };
     dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
@@ -949,6 +1049,10 @@ const server = http.createServer(async (req, res) => {
       deviceCount: devices.size, deviceName: dev && dev.name });
   }
   if (p === '/api/snapshot') return json(res, 200, snapshotOf(reqDevice(req, url)));
+  if (p === '/api/usage') {
+    const dev = reqDevice(req, url);
+    return json(res, 200, dev ? usageSummary(dev) : { deviceId: '', demo: true, today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 }, month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 }, daily: [], days: 0 });
+  }
   if (p === '/api/history') {
     const dev = reqDevice(req, url);
     return json(res, 200, { points: dev ? dev.history : [], resource: dev ? dev.resourceHistory : [] });
@@ -1042,4 +1146,6 @@ server.listen(PORT, HOST, () => {
 });
 for (const dev of devices.values()) { dev.ensureConnection(); pollDevice(dev); }
 setInterval(() => { for (const dev of devices.values()) pollDevice(dev); }, INTERVAL);
-process.on('SIGINT', () => { for (const d of devices.values()) if (d.api) d.api.close(); server.close(() => process.exit(0)); });
+setInterval(() => { saveUsage(); }, 15000); // 每 15 秒把流量统计落盘
+process.on('SIGINT', () => { saveUsage(true); for (const d of devices.values()) if (d.api) d.api.close(); server.close(() => process.exit(0)); });
+process.on('SIGTERM', () => { saveUsage(true); process.exit(0); });

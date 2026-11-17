@@ -27,7 +27,7 @@ const GROUPS = [
 const SECTIONS = [
   /* ---------- 概览 ---------- */
   S('dashboard', 'overview', '仪表盘', 'Dashboard', null, [], { virtual: true, toggle: false, writable: false }),
-  S('traffic', 'overview', '实时流量', 'Live traffic', null, [], { virtual: true, toggle: false, writable: false }),
+  S('trafficStats', 'overview', '流量统计', 'Traffic stats', null, [], { virtual: true, toggle: false, writable: false }),
   S('systemTools', 'overview', '运维工具', 'Tools', null, [], { virtual: true, toggle: false, writable: false }),
   S('connections', 'overview', '连接状态 IPv4', 'Connections IPv4', '/ip/firewall/connection',
     [F('.id', 'ID', 'ID', 'id'), F('src-address', '源地址', 'Source', 'readonly'), F('dst-address', '目标地址', 'Destination', 'readonly'),
