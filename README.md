@@ -22,13 +22,13 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 - **多设备管控**：顶栏下拉切换；设备增删改查、测试连接、设为主设备、重连；配置持久化到 `data/devices.json`
 - **仪表盘**：实时流量来自 RouterOS 原生 `monitor-traffic` 流式监听（设备每秒主动推送，无需反复查询）；总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口类型分布（按真实接口类型统计，无编造数据）、接口与连接排行。运行时间取自路由器 `/system/resource` 的真实 uptime
 - **连接状态**：真实读取 RouterOS 连接表，分别统计 IPv4 / IPv6 / 汇总，且 TCP、UDP 各自再分 IPv4/IPv6（每 5 秒刷新），趋势图展示总数与双栈历史；另设 IPv4、IPv6 两个连接明细分类
-- **流量统计**：按日 / 周 / 月统计上下行流量（自动换算 MB/GB/TB/PB），基于 RouterOS 接口累计字节计数器的日增量，数据持久化在 `data/usage.json`；今日/本周/本月/累计卡片 + 柱状趋势图 + 明细表。路由器重启或计数回绕自动识别，不产生虚高
+- **流量统计**：按日 / 周 / 月统计上下行流量（自动换算 MB/GB/TB/PB），基于 RouterOS 接口累计字节计数器的日增量，数据持久化在 `data/usage.json`；今日/本周/本月/累计卡片 + 柱状趋势图 + 明细表。路由器重启或计数回绕自动识别，不产生虚高。**统计接口可自定义**：在统计页点「设置统计接口」，可统计全部接口、勾选路由器真实接口，或手动填写接口名 / 通配符（如 `pppoe-*`、`vlan??`）；建议只选 WAN 外网口，否则 LAN 与 WAN 会被重复计入、统计值大约翻倍。按接口逐个差分累计，切换范围会重建计数基线，历史数据保留
 
 流式监听不可用时（旧版 RouterOS 或网络限制）自动回退到轮询，并每 10 秒重试一次恢复流式。可用 `TRAFFIC_STREAM=0` 强制只用轮询。
 - **分类配置**：9 组 44 个分类，接口、IP、DHCP、DNS、路由、防火墙 IPv4/IPv6（Filter/NAT/Mangle/地址列表/服务端口）、WiFi、PPP、WireGuard、队列、用户、系统服务、计划任务、脚本等，支持新增/编辑/启用/禁用/删除/搜索/表头排序/分页；RouterOS 的十六进制 `.id` 显示为十进制序号
 - **WireGuard 扫码添加**：行内扫码按钮打开 WinBox 风格对端表单（名称、接口、私钥可手填或一键生成、公钥、Endpoint/端口、允许地址、预共享密钥、持久保活、responder 等），实时生成客户端配置二维码，可保存回 RouterOS、复制或下载 `.conf`
 - **中英双语**：右上角一键切换，界面、表单、提示、错误全部双语
-- **配色 × 深浅 双轴主题**：13 套配色（经典蓝、深海、极光、樱粉、森林绿、琥珀金、紫罗兰、咖啡棕、薄荷绿、黑白极简、毛玻璃、青花瓷、液态玻璃）与浅色/深色/跟随系统三种明暗**可任意组合**（例如「深色 + 樱粉」）；深浅模式用顶栏 ☀/☾/◐ 日月图标一键切换，配色下拉独立选择；图表与 SVG 同步换色
+- **配色 × 深浅 双轴主题**：13 套配色（经典蓝、深海、极光、樱粉、森林绿、琥珀金、紫罗兰、咖啡棕、薄荷绿、黑白极简、毛玻璃、青花瓷、液态玻璃）与浅色/深色/跟随系统三种明暗**可任意组合**（例如「深色 + 樱粉」）；深浅模式用顶栏 ☀/☾/◐ 日月图标一键切换，配色下拉独立选择。**主题完整覆盖侧边栏**：底色、hover、选中高亮、图标、logo、侧栏纹样都随配色与深浅一起变化；图表与 SVG 同步换色。青花瓷主题改为白瓷地 + 钴蓝团花/缠枝纹（浅色）与夜蓝釉（深色），卡片与顶栏带青花描边，登录页同步
 - **侧栏折叠**：分组整体折叠/展开、单个分组折叠、侧栏收窄为图标条、拖动调整宽度
 - **WebUI 登录页**：会话 Cookie 登录页 + 侧栏退出按钮；也可在「系统管理 → 设备管理 → 安全建议」里直接设置账号密码（哈希存 `data/auth.json`）。原有 `WEB_USER` / `WEB_PASSWORD` Basic 认证继续兼容
 
@@ -142,6 +142,7 @@ node server.js          # Node.js 18+，无需 npm install
 - DNS/设备标识/时钟/NTP 为单例配置，以参数卡片展示，点「编辑」直接修改
 - `?lang=en` 英文；`?theme=liquid` 指定配色、`?mode=dark` 指定深浅（light/dark/system）；`?collapse=1` 折叠侧栏
 - 流量统计为低频历史数据，切换分类或设备时才刷新，不会每秒抖屏；`'实时流量'` 独立页已并入仪表盘，不再单独列出
+- 统计接口可在页面里设置，也可用 HTTP 接口：`GET /api/usage` 读取汇总与可选接口清单、`POST /api/usage` 带 `{"interfaces":["ether1","pppoe-*"]}` 保存（空数组 = 全部接口），可用 `?device=<ID>` 指定设备；每台设备的选择独立持久化在 `data/usage.json`
 - 写操作走「路径白名单 + 字段白名单」双重校验，危险操作需二次确认，所有写操作记录到日志
 
 ### 安全提醒
@@ -165,13 +166,13 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 - **Multi-router management**: switch devices from the top bar; add/edit/delete, test connection, set primary, reconnect; persisted in `data/devices.json`
 - **Dashboard**: live traffic from RouterOS native `monitor-traffic` streaming (the device pushes a fresh sample every second, no repeated polling); download/upload/active ports/peak cards, dual-line charts, interface-type distribution (from real interface types, no invented numbers), interface & connection rankings. Uptime comes from the router's real `/system/resource` uptime
 - **Connection status**: reads the real RouterOS connection table and reports IPv4 / IPv6 / total, with TCP and UDP each further split by IPv4/IPv6 (refreshed every 5s), plus a dual-stack history chart; separate IPv4 and IPv6 connection detail sections
-- **Traffic statistics**: download/upload totals by day, week and month (auto-scaled MB/GB/TB/PB), derived from daily deltas of RouterOS interface byte counters and persisted in `data/usage.json`; today/week/month/all-time cards plus a bar-chart trend and detail table. Router reboots / counter resets are detected and never inflate totals
+- **Traffic statistics**: download/upload totals by day, week and month (auto-scaled MB/GB/TB/PB), derived from daily deltas of RouterOS interface byte counters and persisted in `data/usage.json`; today/week/month/all-time cards plus a bar-chart trend and detail table. Router reboots / counter resets are detected and never inflate totals. **Interfaces are configurable**: click "Configure interfaces" on the statistics page to count all interfaces, tick real router interfaces, or enter names / wildcards manually (`pppoe-*`, `vlan??`). Select only the WAN uplink — counting LAN and WAN together double-counts traffic. Counters are differenced per interface; changing the scope rebuilds the baseline while history is kept
 
 If streaming is unavailable (older RouterOS or restricted networks), the app falls back to polling and retries streaming every 10 seconds. Set `TRAFFIC_STREAM=0` to force polling.
 - **Categorized config**: 9 groups, 44 sections — interfaces, IP, DHCP, DNS, routes, separate IPv4/IPv6 firewall (filter/NAT/mangle/address lists/service ports), WiFi, PPP, WireGuard, queues, users, services, schedules, scripts — with add/edit/enable/disable/delete/search/column sorting/pagination. RouterOS hex `.id` values are shown as decimal sequence numbers
 - **WireGuard QR**: in-row scan button opens a WinBox-style peer form (name, interface, private key with one-click generation, public key, endpoint/port, allowed address, preshared key, persistent keepalive, responder...), generates a client QR, saves back to RouterOS, and copies/downloads `.conf`
 - **Bilingual UI**: one-click Chinese/English switch across labels, forms, hints and errors
-- **Dual-axis color × lightness themes**: 13 color schemes (classic blue, deep sea, aurora, sakura, forest, amber, violet, coffee, mint, mono, glass, porcelain, liquid glass) combined freely with light / dark / system lightness (e.g. "dark + sakura"); light/dark is a one-click sun/moon icon in the top bar, color scheme is a separate dropdown; charts and SVGs follow the theme
+- **Dual-axis color × lightness themes**: 13 color schemes (classic blue, deep sea, aurora, sakura, forest, amber, violet, coffee, mint, mono, glass, porcelain, liquid glass) combined freely with light / dark / system lightness (e.g. "dark + sakura"); light/dark is a one-click sun/moon icon in the top bar, color scheme is a separate dropdown. **Themes fully cover the sidebar** — background, hover, active highlight, icons, logo and sidebar texture all follow the chosen color scheme and lightness; charts and SVGs follow as well. The porcelain theme is now white porcelain with cobalt-blue floral / vine patterns (a night-blue glaze in dark mode), with blue trim on cards and the top bar; the sign-in page matches
 - **Collapsible sidebar**: collapse groups or the whole sidebar, drag to resize
 - **WebUI sign-in page**: session-cookie login page and sidebar sign-out; set credentials in "System → Devices → Security tip" (hashed in `data/auth.json`). Legacy `WEB_USER` / `WEB_PASSWORD` Basic auth still works
 
@@ -258,6 +259,7 @@ Settings saved in the Web UI take precedence over `.env`.
 
 - Deep links: `?device=<ID>` / `?dev=<name>`, `?section=firewallFilter` (or `firewall6Filter` for IPv6), `?action=add`, `?action=wgqr`, `?lang=en`, `?theme=liquid` (color scheme), `?mode=dark` (light/dark/system), `?collapse=1`
 - Traffic statistics is low-frequency history data, refreshed only on section/device switch; the separate "Live traffic" page has been merged into the Dashboard
+- Interfaces can be configured in the UI or via HTTP: `GET /api/usage` returns totals plus available interfaces, `POST /api/usage` with `{"interfaces":["ether1","pppoe-*"]}` saves the selection (empty array = all interfaces); add `?device=<ID>` to target a router. Each device keeps its own selection in `data/usage.json`
 - Click any column header to toggle ascending/descending sort; the ID column shows the decimal form of RouterOS hex `.id` (hover for the raw value)
 - DNS / identity / clock / NTP are singleton settings shown as parameter cards — click Edit to change
 - Writes are constrained by path and field allowlists; destructive actions require confirmation and are logged.

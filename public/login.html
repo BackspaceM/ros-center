@@ -14,7 +14,16 @@
     --bg:#101728; --card:#18223a; --ink:#eaf0ff; --muted:#9aa7c4; --line:#2a3757;
     --accent:#5b8cff; --accent2:#3f6fea; --shadow:0 18px 50px rgba(0,0,0,.4);
   }
-  html[data-scheme="light"][data-theme="porcelain"]{--bg:#f2f0ea;--card:#fffdf7;--ink:#28323a;--muted:#7a837f;--line:#e2ded2;--accent:#4b7f7a;--accent2:#37635f}
+  /* 青花瓷：白瓷地 + 钴蓝团花纹，与主页保持同一套视觉 */
+  html[data-scheme="light"][data-theme="porcelain"]{--bg:#eef4fb;--card:#fdfefe;--ink:#17345e;--muted:#6f86a8;--line:#d9e6f4;--accent:#1a4f9c;--accent2:#123c78;--shadow:0 18px 50px rgba(26,79,156,.16)}
+  html[data-scheme="dark"][data-theme="porcelain"]{--bg:#091527;--card:#102340;--ink:#dce9fb;--muted:#8aa3c3;--line:#25406a;--accent:#5b96e0;--accent2:#2f6bb5;--shadow:0 18px 50px rgba(0,0,0,.45)}
+  html[data-theme="porcelain"] body{background-color:var(--bg);background-size:104px 104px,auto,auto;
+    background-image:radial-gradient(circle at 50% 50%,transparent 0 10px,rgba(26,79,156,.11) 10px 11px,transparent 11px 15px,rgba(26,79,156,.08) 15px 16px,transparent 16px 24px),
+      radial-gradient(1000px 700px at 12% -10%,rgba(26,79,156,.12),transparent 60%),
+      radial-gradient(900px 600px at 100% 110%,rgba(26,79,156,.10),transparent 55%)}
+  html[data-theme="porcelain"] .login{position:relative;border-width:2px}
+  html[data-theme="porcelain"] .login::before{content:"";position:absolute;left:20px;right:20px;top:0;height:2px;opacity:.65;
+    background:linear-gradient(90deg,transparent,var(--accent) 12%,transparent 28%,transparent 72%,var(--accent) 88%,transparent)}
   html[data-scheme="light"][data-theme="sakura"]{--bg:#fdf3f5;--card:#fffafb;--ink:#4a2b3b;--muted:#a17c8d;--line:#f1dce4;--accent:#d9668f;--accent2:#b34e75}
   html[data-scheme="light"][data-theme="forest"]{--accent:#2f8f5b;--accent2:#216a43}
   html[data-scheme="light"][data-theme="violet"]{--accent:#6d5ce0;--accent2:#5343bd}

@@ -175,8 +175,9 @@ function parseRouterUptime(v) {
 }
 
 /* ================= 流量统计（按日/周/月的上下行累计，持久化到 data/usage.json） =================
-   记录的是各接口累计字节计数器的“日增量”：每个采样周期把当前总量与上次总量做差，
-   写入当天桶。计数器回绕/接口重置（差值为负或异常巨大）时忽略该次差值，避免了重启后虚高。 */
+   每台设备可以自定义参与统计的接口（空数组 = 全部接口，支持 * / ? 通配符）。
+   每个采样周期按「接口」逐个做累计字节计数器差分再求和，接口增删、计数器回绕、
+   路由器重启都只会影响单个接口，不会让总量虚高；切换统计范围时重置基线。 */
 const USAGE_KEEP_DAYS = 400;
 let usageStore = loadUsage();
 let usageDirty = false;
@@ -196,27 +197,57 @@ function saveUsage(force) {
 }
 function usageBucket(dev) {
   const id = dev.id;
-  if (!usageStore.devices[id]) usageStore.devices[id] = { last: null, days: {} };
-  return usageStore.devices[id];
+  if (!usageStore.devices[id]) usageStore.devices[id] = { last: null, perIface: null, interfaces: [], days: {} };
+  const b = usageStore.devices[id];
+  if (!Array.isArray(b.interfaces)) b.interfaces = [];
+  if (!b.days || typeof b.days !== 'object') b.days = {};
+  return b;
 }
 function localDayKey(ts) {
   const d = new Date(ts);
   const p = (n) => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
-/* 记录一次累计字节采样：rxTotal/txTotal 为全部接口 rx-byte/tx-byte 之和 */
-function recordUsage(dev, rxTotal, txTotal) {
-  if (!Number.isFinite(rxTotal) || !Number.isFinite(txTotal)) return;
-  const b = usageBucket(dev);
-  const now = Date.now();
-  if (!b.last || rxTotal < b.last.rx - 1e6 || txTotal < b.last.tx - 1e6 || now - b.last.ts > 6 * 3600 * 1000) {
-    // 首次采样 / 计数器回绕或接口重置 / 超过 6 小时间隔：只重置基线，不计增量
-    b.last = { rx: rxTotal, tx: txTotal, ts: now }; usageDirty = true; return;
+/* 接口名匹配：精确匹配 + * / ? 通配符（RouterOS 接口名如 ether1、vlan-20、pppoe-out1） */
+function matchIface(name, pattern) {
+  if (name === pattern) return true;
+  if (!/[*?]/.test(pattern)) return false;
+  const src = '^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+  try { return new RegExp(src, 'i').test(name); } catch (e) { return false; }
+}
+function ifaceSelected(name, patterns) {
+  return !patterns.length || patterns.some((p) => matchIface(name, p));
+}
+/* 取当前采样中参与统计接口的累计字节 */
+function usageCounters(ifaces, patterns) {
+  const out = {};
+  for (const i of ifaces || []) {
+    if (!i || !i.name || !ifaceSelected(i.name, patterns)) continue;
+    out[i.name] = { rx: num(i.rxBytes), tx: num(i.txBytes) };
   }
-  const dRx = rxTotal - b.last.rx, dTx = txTotal - b.last.tx;
-  b.last = { rx: rxTotal, tx: txTotal, ts: now };
-  // 单次增量超过 100TB 视为异常，忽略
-  if (dRx < 0 || dTx < 0 || dRx > 1e14 || dTx > 1e14) { usageDirty = true; return; }
+  return out;
+}
+/* 记录一次采样：ifaces 为当前接口快照（含 rxBytes / txBytes） */
+function recordUsage(dev, ifaces) {
+  const b = usageBucket(dev);
+  const seen = usageCounters(ifaces, b.interfaces);
+  if (!Object.keys(seen).length) { usageDirty = true; return; } // 未匹配到任何接口：保留基线，避免总量跳变
+  const now = Date.now();
+  const prev = b.perIface;
+  b.perIface = seen;
+  if (!prev || !b.last || now - b.last.ts > 6 * 3600 * 1000) {
+    // 首次采样 / 切换统计范围 / 超过 6 小时间隔：只重建基线，不计增量
+    b.last = { ts: now }; usageDirty = true; return;
+  }
+  b.last = { ts: now };
+  let dRx = 0, dTx = 0;
+  for (const [name, cur] of Object.entries(seen)) {
+    const p = prev[name]; if (!p) continue;              // 新出现的接口下一次才计入
+    const dx = cur.rx - p.rx, dy = cur.tx - p.tx;
+    // 单次单接口增量超过 100TB、或计数回绕（负值）时忽略该接口
+    if (dx >= 0 && dy >= 0 && dx < 1e14 && dy < 1e14) { dRx += dx; dTx += dy; }
+  }
+  if (dRx <= 0 && dTx <= 0) { usageDirty = true; return; }
   const key = localDayKey(now);
   const day = b.days[key] || (b.days[key] = { rx: 0, tx: 0 });
   day.rx += dRx; day.tx += dTx; usageDirty = true;
@@ -224,10 +255,18 @@ function recordUsage(dev, rxTotal, txTotal) {
   const keys = Object.keys(b.days).sort();
   while (keys.length > USAGE_KEEP_DAYS) { delete b.days[keys.shift()]; }
 }
+/* 可选接口清单：优先用最近一次真实/演示快照，其次用接口元数据缓存 */
+function usageAvailable(dev) {
+  let src = dev.lastPacket && dev.lastPacket.ifaces;
+  if (!src || !src.length) src = ifacesFromCache(dev);
+  if (!src || !src.length) src = demoSnapshot(dev);
+  return src.map((i) => ({ name: i.name, type: i.type || '', comment: i.comment || '', running: i.running === 'true' }));
+}
 /* 汇总指定设备的流量统计：day=今日, week=近7天, month=近30天, total=全部记录 */
 function usageSummary(dev) {
-  const b = usageStore.devices[dev.id] || { days: {} };
+  const b = usageStore.devices[dev.id] || { days: {}, interfaces: [] };
   const days = b.days || {};
+  const sel = Array.isArray(b.interfaces) ? b.interfaces.slice() : [];
   const sum = (list) => list.reduce((a, k) => ({ rx: a.rx + (days[k] ? days[k].rx : 0), tx: a.tx + (days[k] ? days[k].tx : 0) }), { rx: 0, tx: 0 });
   const all = Object.keys(days).sort();
   const now = new Date(), today = localDayKey(now.getTime());
@@ -236,10 +275,13 @@ function usageSummary(dev) {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const inRange = (from) => all.filter((k) => k >= from && k <= today);
   const daily = all.slice(-400).map((k) => ({ day: k, rx: Math.round(days[k].rx || 0), tx: Math.round(days[k].tx || 0) }));
+  const available = usageAvailable(dev);
   return {
     deviceId: dev.id, demo: dev.forceDemo, today: sum(inRange(today)),
     week: sum(inRange(localDayKey(monday.getTime()))), month: sum(inRange(localDayKey(monthStart.getTime()))),
     total: sum(all), daily, days: all.length,
+    interfaces: sel, scope: sel.length ? 'custom' : 'all', available,
+    matched: available.filter((i) => ifaceSelected(i.name, sel)).length,
   };
 }
 
@@ -715,9 +757,7 @@ async function pollDevice(dev) {
     await refreshConnections(dev, wasLive);
 
     const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
-    const totalRxBytes = ifaces.reduce((s, i) => s + (num(i.rxBytes) || 0), 0);
-    const totalTxBytes = ifaces.reduce((s, i) => s + (num(i.txBytes) || 0), 0);
-    recordUsage(dev, totalRxBytes, totalTxBytes);
+    recordUsage(dev, ifaces);
     const packet = {
       deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
       interval: INTERVAL, uptime: packetUptime(dev), error: dev.lastError,
@@ -1049,9 +1089,26 @@ const server = http.createServer(async (req, res) => {
       deviceCount: devices.size, deviceName: dev && dev.name });
   }
   if (p === '/api/snapshot') return json(res, 200, snapshotOf(reqDevice(req, url)));
-  if (p === '/api/usage') {
+  if (p === '/api/usage' && req.method === 'GET') {
     const dev = reqDevice(req, url);
-    return json(res, 200, dev ? usageSummary(dev) : { deviceId: '', demo: true, today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 }, month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 }, daily: [], days: 0 });
+    return json(res, 200, dev ? usageSummary(dev) : { deviceId: '', demo: true, today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 }, month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 }, daily: [], days: 0, interfaces: [], scope: 'all', available: [], matched: 0 });
+  }
+  /* 自定义参与流量统计的接口：interfaces=[] 表示全部接口，元素支持 * / ? 通配符 */
+  if (p === '/api/usage' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const dev = reqDevice(req, url, body);
+      if (!dev) throw new Error('没有可用设备');
+      if (!Array.isArray(body.interfaces)) throw new Error('接口列表格式错误');
+      const cleaned = [...new Set(body.interfaces.map((x) => String(x == null ? '' : x).trim()).filter(Boolean))]
+        .filter((x) => x.length <= 64 && !/[\x00-\x1f]/.test(x)).slice(0, 64);
+      const bucket = usageBucket(dev);
+      bucket.interfaces = cleaned;
+      bucket.perIface = null; bucket.last = null; // 切换范围后重建基线，避免总量突变
+      usageDirty = true; saveUsage(true);
+      console.log(`[usage] ${dev.name} interfaces=${cleaned.length ? cleaned.join(',') : 'ALL'} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, ...usageSummary(dev) });
+    } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/history') {
     const dev = reqDevice(req, url);

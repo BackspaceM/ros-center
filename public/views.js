@@ -149,6 +149,8 @@ function renderTrafficStats(range) {
         <button class="btn" id="statsRefresh">${t('refresh')}</button>
       </div>
     </div>
+    <div class="scope-bar" id="statsScope"><span class="tag blue">${t('stats_scope') || L('统计范围', 'Scope')}</span>
+      <span class="scope-text">${t('stats_scope_wait') || L('读取统计配置…', 'Loading statistics settings…')}</span></div>
     <div class="cards" id="statCards"></div>
     <div class="panel" style="margin-top:14px">
       <div class="panel-head"><div><h2>${t('stats_chart') || L('流量趋势', 'Traffic trend')}</h2><p class="sub" id="statsRangeLabel"></p></div>
@@ -171,7 +173,8 @@ function renderTrafficStats(range) {
 }
 function paintTrafficStats(d) {
   const cards = $('statCards'); if (!cards) return;
-  const card = (label, obj, key, cls) => { const f = fmtBytes(obj ? obj[key] : 0); return `<div class="card ${cls}"><div class="card-label">${esc(label)}</div><div class="card-value">${f.v}<small>${f.u}</small></div><div class="card-foot">${t('stats_from_router') || L('路由器真实计数', 'Real router counters')}</div></div>`; };
+  paintUsageScope(d);
+  const card = (label, obj, key, cls) => { const f = splitBytes(obj ? obj[key] : 0); return `<div class="card ${cls}"><div class="card-label">${esc(label)}</div><div class="card-value">${f.v}<small>${f.u}</small></div><div class="card-foot">${t('stats_from_router') || L('路由器真实计数', 'Real router counters')}</div></div>`; };
   cards.innerHTML = card(L('今日下载', "Today's download"), d.today, 'rx', 'rx') + card(L('今日上传', "Today's upload"), d.today, 'tx', 'tx')
     + card(L('本周下载', "This week's download"), d.week, 'rx', 'rx') + card(L('本周上传', "This week's upload"), d.week, 'tx', 'tx')
     + card(L('本月下载', "This month's download"), d.month, 'rx', 'rx') + card(L('本月上传', "This month's upload"), d.month, 'tx', 'tx')
@@ -181,8 +184,84 @@ function paintTrafficStats(d) {
   const buckets = aggregateUsage(daily, range);
   $('statsRangeLabel').textContent = TRAFFIC_RANGE[range].label();
   drawBarChart('statsChart', 'statsTip', buckets, fmtBytes);
-  $('statsBody').innerHTML = buckets.slice().reverse().map((b) => `<tr><td>${esc(b.label)}</td><td class="num"><span class="rate rx">${fmtBytes(b.rx).v}</span> <span class="tag">${fmtBytes(b.rx).u}</span></td>
-    <td class="num"><span class="rate tx">${fmtBytes(b.tx).v}</span> <span class="tag">${fmtBytes(b.tx).u}</span></td><td class="num">${fmtBytes(b.rx + b.tx)}</td></tr>`).join('') || emptyRow(4);
+  $('statsBody').innerHTML = buckets.slice().reverse().map((b) => {
+    const rx = splitBytes(b.rx), tx = splitBytes(b.tx);
+    return `<tr><td>${esc(b.label)}</td><td class="num"><span class="rate rx">${rx.v}</span> <span class="tag">${rx.u}</span></td>
+    <td class="num"><span class="rate tx">${tx.v}</span> <span class="tag">${tx.u}</span></td><td class="num">${fmtBytes(b.rx + b.tx)}</td></tr>`;
+  }).join('') || emptyRow(4);
+}
+/* 统计范围条：显示当前参与统计的接口，并提供设置入口 */
+function paintUsageScope(d) {
+  const box = $('statsScope'); if (!box) return;
+  const custom = d.scope === 'custom';
+  const names = (d.interfaces || []);
+  const matched = Number(d.matched) || 0;
+  const label = custom ? names.map((n) => esc(n)).join(' · ') : (t('stats_scope_all') || L('全部接口', 'All interfaces'));
+  box.innerHTML = `<span class="tag blue">${t('stats_scope') || L('统计范围', 'Scope')}</span>
+    <span class="scope-text"><b title="${esc(names.join(', '))}">${label || (t('stats_scope_custom') || L('自定义接口', 'Custom interfaces'))}</b>
+      <span class="scope-meta">${t('stats_iface_matched') || L('已匹配', 'Matched')} ${matched} ${t('stats_iface_unit') || L('个接口', 'interfaces')}${custom && !matched ? ' · ' + (t('stats_iface_none') || L('没有匹配到任何接口', 'No interfaces matched')) : ''}</span></span>
+    <span class="scope-spacer"></span>
+    <button class="btn btn-sm" id="statsIfaceBtn">⚙ ${t('stats_iface_btn') || L('设置统计接口', 'Configure interfaces')}</button>`;
+  $('statsIfaceBtn').onclick = () => openUsageInterfaces(d);
+}
+/* 自定义参与统计的接口：全部 / 勾选真实接口 + 手动输入通配符 */
+function openUsageInterfaces(d) {
+  const custom = d.scope === 'custom';
+  const sel = d.interfaces || [];
+  const avail = d.available || [];
+  const known = new Set(avail.map((i) => i.name));
+  const manual = sel.filter((x) => /[*?]/.test(x) || !known.has(x));
+  const listHtml = avail.length ? avail.map((i) =>
+    `<label class="iface-opt" data-name="${esc(i.name.toLowerCase())}" title="${esc(i.comment || i.name)}">
+      <input type="checkbox" class="iface-cb" value="${esc(i.name)}" ${sel.includes(i.name) ? 'checked' : ''}>
+      <span class="iface-name">${esc(i.name)}</span><span class="tag">${esc(i.type || '-')}</span></label>`).join('')
+    : `<div class="empty">${t('stats_iface_no_list') || L('暂时没有读取到接口，请手动填写', 'No interfaces available yet')}</div>`;
+  openModal(t('stats_iface_title') || L('流量统计接口', 'Traffic statistics interfaces'), `
+    <div class="note-card">${t('stats_iface_tip') || L('建议只选 WAN 口，避免内外网重复计入', 'Select only WAN interfaces to avoid double counting')}</div>
+    <div class="form-row"><label>${t('stats_scope') || L('统计范围', 'Scope')}</label><div>
+      <label class="form-check"><input type="radio" name="usageScope" value="all" ${custom ? '' : 'checked'}> ${t('stats_iface_all') || L('统计全部接口', 'Count all interfaces')}</label>
+      <label class="form-check"><input type="radio" name="usageScope" value="custom" ${custom ? 'checked' : ''}> ${t('stats_iface_custom') || L('仅统计指定接口', 'Count only selected interfaces')}</label>
+    </div></div>
+    <div id="usageCustom" ${custom ? '' : 'hidden'}>
+      <div class="form-row"><label>${t('stats_iface_list') || L('从路由器接口中选择', 'Pick from router interfaces')}</label><div>
+        <input type="search" id="usageIfaceSearch" class="usage-search" placeholder="${t('stats_iface_search') || L('搜索接口…', 'Search interfaces…')}">
+        <div class="iface-picker" id="usageIfaceList">${listHtml}</div></div></div>
+      <div class="form-row"><label>${t('stats_iface_manual') || L('手动填写接口名 / 通配符', 'Manual names / wildcards')}</label><div>
+        <textarea id="usageManual" placeholder="pppoe-*">${esc(manual.join('\n'))}</textarea>
+        <p class="form-hint">${t('stats_iface_manual_hint') || L('支持 * 和 ? 通配符', 'Wildcards * and ? are supported')}</p></div></div>
+    </div>
+    <div class="modal-note">${t('stats_iface_reset') || L('切换范围会重建计数基线，历史数据保留。', 'Changing the scope resets the counter baseline; history is kept.')}</div>`,
+    `<button class="btn" data-close>${t('cancel')}</button><button class="btn primary" data-ok>${t('save')}</button>`,
+    (m) => {
+      const customBox = m.querySelector('#usageCustom');
+      const sync = () => { customBox.hidden = m.querySelector('input[name="usageScope"]:checked').value !== 'custom'; };
+      m.querySelectorAll('input[name="usageScope"]').forEach((r) => { r.onchange = sync; });
+      sync();
+      const search = m.querySelector('#usageIfaceSearch');
+      if (search) search.oninput = (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        m.querySelectorAll('.iface-opt').forEach((el) => { el.hidden = !!(q && !el.dataset.name.includes(q)); });
+      };
+      const ok = m.querySelector('[data-ok]');
+      ok.onclick = async () => {
+        const scope = m.querySelector('input[name="usageScope"]:checked').value;
+        let names = [];
+        if (scope === 'custom') {
+          m.querySelectorAll('.iface-cb:checked').forEach((cb) => names.push(cb.value));
+          (m.querySelector('#usageManual').value || '').split(/[\n,，;；]+/).forEach((x) => { const v = x.trim(); if (v) names.push(v); });
+          names = [...new Set(names)];
+          if (!names.length) { toast(t('stats_iface_need_one') || L('请至少选择一个接口', 'Select at least one interface'), 'err'); return; }
+        }
+        ok.disabled = true;
+        try {
+          const r = await api('/api/usage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interfaces: names }) });
+          closeModal();
+          state.usageData = r;
+          if (state.section === 'trafficStats') renderTrafficStats();
+          toast(t('stats_iface_saved') || L('统计接口已保存', 'Interfaces saved'), 'ok');
+        } catch (e) { toast(e.message, 'err'); ok.disabled = false; }
+      };
+    });
 }
 function aggregateUsage(daily, range) {
   if (range === 'day') return daily.slice(-30).map((x) => ({ label: x.day, rx: x.rx, tx: x.tx }));

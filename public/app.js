@@ -72,6 +72,19 @@ const I18N = {
     sort_hint: '点击排序（升序 / 降序）', singleton_hint: '该页面只有一组配置，点「编辑」直接修改',
     stats_title: '流量统计', stats_sub: '按日 / 周 / 月统计上下行流量，来自路由器接口累计字节',
     stats_chart: '流量趋势', stats_detail: '明细', stats_from_router: '来自路由器真实计数',
+    stats_scope: '统计范围', stats_scope_all: '全部接口', stats_scope_custom: '自定义接口',
+    stats_scope_wait: '读取统计配置…', stats_iface_btn: '设置统计接口',
+    stats_iface_title: '流量统计接口', stats_iface_tip: '默认统计所有接口。若只想统计上网流量，请只勾选 WAN / 外网口（如 pppoe-out1、ether1），否则 LAN 与 WAN 会被重复计入，统计数据大约翻倍。',
+    stats_iface_all: '统计全部接口', stats_iface_custom: '仅统计指定接口',
+    stats_iface_list: '从路由器接口中选择', stats_iface_manual: '手动填写接口名 / 通配符',
+    stats_iface_manual_hint: '每行或用逗号分隔一个名称，支持 * 和 ? 通配符，例如 ether1、pppoe-*、vlan??。可填写当前列表中不存在的接口。',
+    stats_iface_no_list: '暂时没有读取到接口，请手动填写',
+    stats_iface_saved: '统计接口已保存，从现在起按新范围累计',
+    stats_iface_need_one: '请至少选择一个接口或填写一个接口名',
+    stats_iface_reset: '切换范围会重建计数基线，历史数据保留。',
+    stats_iface_matched: '已匹配', stats_iface_unit: '个接口',
+    stats_iface_none: '当前没有匹配到任何接口，请检查名称',
+    stats_iface_search: '搜索接口…',
   },
   en: {
     page_title: 'ROS Center', brand: 'ROS', brand_sub: 'Center', search_menu: 'Search menu…',
@@ -143,6 +156,19 @@ const I18N = {
     sort_hint: 'Click to sort (ascending / descending)', singleton_hint: 'A single settings block - use Edit to change values',
     stats_title: 'Traffic statistics', stats_sub: 'Up/down traffic by day, week and month, from router interface byte counters',
     stats_chart: 'Traffic trend', stats_detail: 'Details', stats_from_router: 'Real router counters',
+    stats_scope: 'Scope', stats_scope_all: 'All interfaces', stats_scope_custom: 'Custom interfaces',
+    stats_scope_wait: 'Loading statistics settings…', stats_iface_btn: 'Configure interfaces',
+    stats_iface_title: 'Traffic statistics interfaces', stats_iface_tip: 'All interfaces are counted by default. To measure internet usage, select only the WAN / uplink interface (e.g. pppoe-out1, ether1); counting LAN and WAN together double-counts traffic.',
+    stats_iface_all: 'Count all interfaces', stats_iface_custom: 'Count only selected interfaces',
+    stats_iface_list: 'Pick from router interfaces', stats_iface_manual: 'Manual names / wildcards',
+    stats_iface_manual_hint: 'One name per line or comma-separated. Wildcards * and ? are supported, e.g. ether1, pppoe-*, vlan??. Names not present in the list are allowed.',
+    stats_iface_no_list: 'No interfaces available yet - enter names manually',
+    stats_iface_saved: 'Interfaces saved. New scope applies from now on',
+    stats_iface_need_one: 'Select at least one interface or enter a name',
+    stats_iface_reset: 'Changing the scope resets the counter baseline; history is kept.',
+    stats_iface_matched: 'Matched', stats_iface_unit: 'interfaces',
+    stats_iface_none: 'No interface matches the current selection - check the names',
+    stats_iface_search: 'Search interfaces…',
   },
 };
 const urlLang = new URLSearchParams(location.search).get('lang');
@@ -222,11 +248,12 @@ function fmtRate(bps) {
   return { v: v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2), u: u[i] };
 }
 const fmtRateStr = (b) => { const r = fmtRate(b); return r.v + ' ' + r.u; };
-function fmtBytes(b) {
+function splitBytes(b) {
   b = Number(b) || 0; let i = 0; const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-  return b.toFixed(b >= 100 ? 0 : b >= 10 ? 1 : 2) + ' ' + u[i];
+  return { v: b.toFixed(b >= 100 ? 0 : b >= 10 ? 1 : 2), u: u[i] };
 }
+function fmtBytes(b) { const p = splitBytes(b); return p.v + ' ' + p.u; }
 function fmtUptime(s) {
   s = Number(s) || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return lang === 'zh' ? (d ? d + '天' : '') + (h ? h + '时' : '') + m + '分' : (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm';
@@ -239,7 +266,7 @@ function toast(msg, kind = '') {
 }
 async function api(path, opts) {
   /* 所有配置类接口自动带上当前设备；设备管理/目录接口除外 */
-  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status)(\?|$)/.test(path)) {
+  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status|usage)(\?|$)/.test(path)) {
     path += (path.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(state.deviceId);
   }
   const r = await fetch(path, opts);
