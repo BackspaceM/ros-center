@@ -44,7 +44,6 @@ jobs:
           HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
-          AUTH_B64=$(printf '%s:%s' "$HUB_USER" "$HUB_TOKEN" | base64 -w0)
           python3 - <<'PY' > /tmp/hub-meta.json
           import json
           print(json.dumps({
@@ -52,21 +51,21 @@ jobs:
             "full_description": open("README.md", encoding="utf-8").read()
           }))
           PY
-          OK=0
-          for SERVICE in hub.docker.com registry.docker.io; do
-            JWT=$(curl -fsS -H "Authorization: Basic $AUTH_B64" \
-              "https://auth.docker.io/token?service=$SERVICE&scope=repository:$HUB_USER/ros-center:push,pull" \
-              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token", ""))') || continue
-            [ -z "$JWT" ] && continue
-            for SCHEME in Bearer JWT; do
-              CODE=$(curl -sS -o /tmp/hub-overview-resp -w '%{http_code}' -X PATCH \
-                -H "Authorization: $SCHEME $JWT" -H 'Content-Type: application/json' \
-                --data-binary @/tmp/hub-meta.json \
-                "https://hub.docker.com/v2/repositories/$HUB_USER/ros-center/")
-              echo "$SERVICE / $SCHEME -> HTTP $CODE"
-              head -c 200 /tmp/hub-overview-resp || true
-              echo
-              if [ "$CODE" = "200" ]; then OK=1; break 2; fi
-            done
-          done
-          if [ "$OK" != "1" ]; then echo "Failed to update Docker Hub overview" >&2; exit 1; fi
+          CODE=$(curl -sS -o /tmp/hub-login.json -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$HUB_USER\",\"password\":\"$HUB_TOKEN\"}" \
+            https://hub.docker.com/v2/users/login/)
+          if [ "$CODE" != "200" ]; then
+            echo "Docker Hub login failed: $CODE" >&2
+            cat /tmp/hub-login.json >&2
+            exit 1
+          fi
+          JWT=$(python3 -c 'import json; print(json.load(open("/tmp/hub-login.json"))["token"])')
+          CODE=$(curl -sS -o /tmp/hub-overview-resp -w '%{http_code}' -X PATCH \
+            -H "Authorization: JWT $JWT" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/hub-meta.json \
+            "https://hub.docker.com/v2/repositories/$HUB_USER/ros-center/")
+          echo "Hub overview PATCH -> HTTP $CODE"
+          if [ "$CODE" != "200" ]; then cat /tmp/hub-overview-resp >&2; exit 1; fi
+          curl -fsS -H "Authorization: JWT $JWT" "https://hub.docker.com/v2/repositories/$HUB_USER/ros-center/" \
+            | python3 -c 'import sys,json; d=json.load(sys.stdin); print("Hub description:", d.get("description")); print("Overview length:", len(d.get("full_description") or ""))'
