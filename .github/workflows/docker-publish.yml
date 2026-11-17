@@ -37,3 +37,36 @@ jobs:
           tags: |
             ${{ vars.DOCKERHUB_USERNAME }}/ros-center:latest
             ${{ vars.DOCKERHUB_USERNAME }}/ros-center:${{ github.sha }}
+
+      - name: Update Docker Hub overview
+        env:
+          HUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH_B64=$(printf '%s:%s' "$HUB_USER" "$HUB_TOKEN" | base64 -w0)
+          python3 - <<'PY' > /tmp/hub-meta.json
+          import json
+          print(json.dumps({
+            "description": "ROS Center - multi-router RouterOS control center: live traffic, config, bilingual UI and 10 themes",
+            "full_description": open("README.md", encoding="utf-8").read()
+          }))
+          PY
+          OK=0
+          for SERVICE in hub.docker.com registry.docker.io; do
+            JWT=$(curl -fsS -H "Authorization: Basic $AUTH_B64" \
+              "https://auth.docker.io/token?service=$SERVICE&scope=repository:$HUB_USER/ros-center:push,pull" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token", ""))') || continue
+            [ -z "$JWT" ] && continue
+            for SCHEME in Bearer JWT; do
+              CODE=$(curl -sS -o /tmp/hub-overview-resp -w '%{http_code}' -X PATCH \
+                -H "Authorization: $SCHEME $JWT" -H 'Content-Type: application/json' \
+                --data-binary @/tmp/hub-meta.json \
+                "https://hub.docker.com/v2/repositories/$HUB_USER/ros-center/")
+              echo "$SERVICE / $SCHEME -> HTTP $CODE"
+              head -c 200 /tmp/hub-overview-resp || true
+              echo
+              if [ "$CODE" = "200" ]; then OK=1; break 2; fi
+            done
+          done
+          if [ "$OK" != "1" ]; then echo "Failed to update Docker Hub overview" >&2; exit 1; fi
