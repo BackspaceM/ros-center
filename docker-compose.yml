@@ -5,7 +5,7 @@ services:
     container_name: ros-center
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-3000}:${CONTAINER_PORT:-10086}"
+      - "${WEB_PORT:-10086}:${CONTAINER_PORT:-10086}"
     volumes:
       - ./data:/app/data
     environment:

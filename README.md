@@ -65,12 +65,12 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 ```bash
 mkdir -p ros-center && cd ros-center
 docker run -d --name ros-center --restart unless-stopped \
-  -p 3000:10086 \
+  -p 10086:10086 \
   -v "$PWD/data:/app/data" \
   backspacem/ros-center:latest
 ```
 
-打开 `http://小主机IP:3000`，进入 **系统管理 → 设备管理**，添加 RouterOS 即可。无需写 `.env`。
+打开 `http://小主机IP:10086`，进入 **系统管理 → 设备管理**，添加 RouterOS 即可。无需写 `.env`。
 
 #### 方式二：Docker Compose
 
@@ -78,7 +78,7 @@ docker run -d --name ros-center --restart unless-stopped \
 git clone https://github.com/BackspaceM/ros-center.git
 cd ros-center
 cp .env.example .env
-# 如需改端口：WEB_PORT=8080 CONTAINER_PORT=10086
+# 如需改端口：WEB_PORT=8080 CONTAINER_PORT=10086（默认两者均为 10086）
 # 默认直接拉取 Docker Hub 官方镜像 backspacem/ros-center:latest：
 docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
@@ -104,7 +104,7 @@ node server.js          # Node.js 18+，无需 npm install
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `WEB_PORT` | `3000` | 宿主机访问端口 |
+| `WEB_PORT` | `10086` | 宿主机访问端口 |
 | `CONTAINER_PORT` | `10086` | 容器内监听端口，改完需同步修改 compose 端口映射并重启 |
 | `ROS_HOST` | `192.168.88.1` | 第一台 RouterOS 地址 |
 | `ROS_PORT` | `8728` | API 端口；API-SSL 用 `8729` |
@@ -180,12 +180,12 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 ```bash
 mkdir -p ros-center && cd ros-center
 docker run -d --name ros-center --restart unless-stopped \
-  -p 3000:10086 \
+  -p 10086:10086 \
   -v "$PWD/data:/app/data" \
   backspacem/ros-center:latest
 ```
 
-Then open `http://<host-ip>:3000` and go to **System → Devices** to add your RouterOS. No `.env` editing required.
+Then open `http://<host-ip>:10086` and go to **System → Devices** to add your RouterOS. No `.env` editing required.
 
 **Docker Compose:**
 
@@ -214,7 +214,7 @@ node server.js      # Node.js 18+, no npm install needed
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `WEB_PORT` | `3000` | Host-side port |
+| `WEB_PORT` | `10086` | Host-side port |
 | `CONTAINER_PORT` | `10086` | Container listen port; update the compose port mapping and restart to apply |
 | `ROS_HOST` | `192.168.88.1` | First RouterOS address |
 | `ROS_PORT` | `8728` | API port; use `8729` for API-SSL |
