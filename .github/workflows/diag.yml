@@ -1,0 +1,14 @@
+name: Diagnose Docker Hub
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe hub usernames
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          for u in BackspaceM backspacem backspace BackSpaceM lys backspace_m; do
+            code=$(curl -s -o /tmp/hubresp -w "%{http_code}" -u "$u:$TOKEN" https://hub.docker.com/v2/user/ || true)
+            echo "PROBE $u -> $code $(head -c 100 /tmp/hubresp)"
+          done
