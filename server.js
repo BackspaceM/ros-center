@@ -32,6 +32,64 @@ const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
 let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
 
+/* ================= 设备凭据加密（AES-256-GCM） =================
+   落盘的 devices.json 只保存密文；密钥来自 ROS_CENTER_KEY（环境变量，推荐在容器部署时设置），
+   否则使用 data/secret.key（首次启动随机生成，权限 0600）。
+   内存中的 Device.cfg 保留明文供 RouterOS 登录使用，不写磁盘、不通过任何 API 返回。 */
+const SECRET_KEY_FILE = path.join(DATA_DIR, 'secret.key');
+const CRED_AAD = Buffer.from('ros-center-device-credentials-v1', 'utf8');
+let CRED_KEY = null;
+function credentialKey() {
+  if (CRED_KEY) return CRED_KEY;
+  const env = String(process.env.ROS_CENTER_KEY || '').trim();
+  if (env) {
+    CRED_KEY = /^[0-9a-fA-F]{64}$/.test(env) ? Buffer.from(env, 'hex')
+      : crypto.scryptSync(env, 'ros-center-credential-key-v1', 32);
+  } else {
+    let raw = '';
+    try { raw = fs.readFileSync(SECRET_KEY_FILE, 'utf8').trim(); } catch (e) { /* 首次启动 */ }
+    if (/^[0-9a-fA-F]{64}$/.test(raw)) CRED_KEY = Buffer.from(raw, 'hex');
+    else {
+      CRED_KEY = crypto.randomBytes(32);
+      try {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(SECRET_KEY_FILE, CRED_KEY.toString('hex') + '\n', { mode: 0o600 });
+      } catch (e) { console.warn('[credentials] cannot persist key file - set ROS_CENTER_KEY to keep credentials decryptable after a volume reset'); }
+    }
+  }
+  return CRED_KEY;
+}
+function encryptCredential(text) {
+  const s = String(text == null ? '' : text);
+  if (!s) return '';
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', credentialKey(), iv);
+  c.setAAD(CRED_AAD);
+  const enc = Buffer.concat([c.update(s, 'utf8'), c.final()]);
+  return 'enc:v1:' + iv.toString('base64url') + ':' + c.getAuthTag().toString('base64url') + ':' + enc.toString('base64url');
+}
+function decryptCredential(value) {
+  if (typeof value !== 'string' || !value) return '';
+  if (!value.startsWith('enc:v1:')) return value;   // 兼容旧版明文，启动时自动迁移为密文
+  try {
+    const parts = value.split(':');
+    const iv = parts[2], tag = parts[3], data = parts[4];
+    const d = crypto.createDecipheriv('aes-256-gcm', credentialKey(), Buffer.from(iv, 'base64url'));
+    d.setAAD(CRED_AAD); d.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([d.update(Buffer.from(data, 'base64url')), d.final()]).toString('utf8');
+  } catch (e) { console.warn('[credentials] failed to decrypt a device field - please re-enter the password in the UI'); return ''; }
+}
+function scrubLegacySettings() {
+  try {
+    const s = JSON.parse(fs.readFileSync(LEGACY_SETTINGS, 'utf8'));
+    if (s && typeof s === 'object' && 'password' in s && s.password) {
+      delete s.password;
+      fs.writeFileSync(LEGACY_SETTINGS, JSON.stringify(s, null, 2) + '\n', { mode: 0o600 });
+      console.log('[credentials] removed plaintext password from legacy settings.json');
+    }
+  } catch (e) { /* 文件不存在或格式错误 */ }
+}
+
 /* ================= RouterOS binary API ================= */
 function encodeLength(n) {
   if (n < 0x80) return Buffer.from([n]);
@@ -174,18 +232,29 @@ function parseRouterUptime(v) {
   return matched ? total : null;
 }
 
-/* ================= 流量统计（按日/周/月的上下行累计，持久化到 data/usage.json） =================
-   每台设备可以自定义参与统计的接口（空数组 = 全部接口，支持 * / ? 通配符）。
-   每个采样周期按「接口」逐个做累计字节计数器差分再求和，接口增删、计数器回绕、
-   路由器重启都只会影响单个接口，不会让总量虚高；切换统计范围时重置基线。 */
-const USAGE_KEEP_DAYS = 400;
+/* ================= 流量统计 =================
+   唯一数据源：RouterOS /interface/print 的 rx-byte / tx-byte 真实累计字节计数器。
+   每秒采样一次，对「每个接口分别」求差分（本次值 - 上次值），写入「接口 × 小时」桶。
+   不使用速率积分、随机数、演示数据或任何估算；只有真实在线采样才写入历史。
+   因为历史按接口独立保存，切换统计范围 / 单独查看某个接口时可以精确重算，
+   不会混入其他接口的流量，也不必丢弃历史或重建基线。 */
+const USAGE_VERSION = 2;
+const USAGE_KEEP_HOURS = 24 * 400;
+let usageResetNotice = false;
 let usageStore = loadUsage();
 let usageDirty = false;
+function emptyUsageStore() { return { version: USAGE_VERSION, devices: {} }; }
 function loadUsage() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8'));
-    return raw && typeof raw === 'object' && raw.devices && typeof raw.devices === 'object' ? raw : { devices: {} };
-  } catch (e) { return { devices: {} }; }
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8')); } catch (e) { return emptyUsageStore(); }
+  if (!raw || typeof raw !== 'object' || !raw.devices || typeof raw.devices !== 'object') return emptyUsageStore();
+  /* v1 把全部接口混在同一个日桶里，无法按接口拆分；不把它冒充成真实数据，直接清空重新记录 */
+  if (raw.version !== USAGE_VERSION) {
+    usageResetNotice = true;
+    console.warn('[usage] old mixed-interface history detected - resetting; new history is recorded per interface from now on');
+    return emptyUsageStore();
+  }
+  return raw;
 }
 function saveUsage(force) {
   if (!usageDirty && !force) return;
@@ -193,21 +262,22 @@ function saveUsage(force) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(USAGE_FILE, JSON.stringify(usageStore) + '\n', { mode: 0o600 });
     usageDirty = false;
+    usageResetNotice = false;
   } catch (e) { /* ignore */ }
 }
 function usageBucket(dev) {
-  const id = dev.id;
-  if (!usageStore.devices[id]) usageStore.devices[id] = { last: null, perIface: null, interfaces: [], days: {} };
-  const b = usageStore.devices[id];
+  if (!usageStore.devices[dev.id]) usageStore.devices[dev.id] = { interfaces: [], perIface: {}, lastTs: 0, hours: {}, minutes: {}, resets: 0 };
+  const b = usageStore.devices[dev.id];
   if (!Array.isArray(b.interfaces)) b.interfaces = [];
-  if (!b.days || typeof b.days !== 'object') b.days = {};
+  if (!b.hours || typeof b.hours !== 'object') b.hours = {};
+  if (!b.minutes || typeof b.minutes !== 'object') b.minutes = {};
+  if (!b.perIface || typeof b.perIface !== 'object') b.perIface = {};
   return b;
 }
-function localDayKey(ts) {
-  const d = new Date(ts);
-  const p = (n) => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
-}
+const pad2 = (n) => String(n).padStart(2, '0');
+function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+function hourKey(ts) { const d = new Date(ts); return dayKey(ts) + 'T' + pad2(d.getHours()); }
+function minuteKey(ts) { const d = new Date(ts); return hourKey(ts) + ':' + pad2(d.getMinutes()); }
 /* 接口名匹配：精确匹配 + * / ? 通配符（RouterOS 接口名如 ether1、vlan-20、pppoe-out1） */
 function matchIface(name, pattern) {
   if (name === pattern) return true;
@@ -218,77 +288,154 @@ function matchIface(name, pattern) {
 function ifaceSelected(name, patterns) {
   return !patterns.length || patterns.some((p) => matchIface(name, p));
 }
-/* 取当前采样中参与统计接口的累计字节 */
-function usageCounters(ifaces, patterns) {
-  const out = {};
-  for (const i of ifaces || []) {
-    if (!i || !i.name || !ifaceSelected(i.name, patterns)) continue;
-    out[i.name] = { rx: num(i.rxBytes), tx: num(i.txBytes) };
-  }
-  return out;
-}
-/* 记录一次采样：ifaces 为当前接口快照（含 rxBytes / txBytes） */
-function recordUsage(dev, ifaces) {
+/* 记录一次真实采样。real=false（演示模式 / 离线 / 采不到计数器）时绝不写历史 */
+function recordUsage(dev, ifaces, real) {
   const b = usageBucket(dev);
-  const seen = usageCounters(ifaces, b.interfaces);
-  if (!Object.keys(seen).length) { usageDirty = true; return; } // 未匹配到任何接口：保留基线，避免总量跳变
-  const now = Date.now();
-  const prev = b.perIface;
-  b.perIface = seen;
-  if (!prev || !b.last || now - b.last.ts > 6 * 3600 * 1000) {
-    // 首次采样 / 切换统计范围 / 超过 6 小时间隔：只重建基线，不计增量
-    b.last = { ts: now }; usageDirty = true; return;
+  if (!real || !Array.isArray(ifaces) || !ifaces.length) return;
+  const now = Date.now(), prevTs = b.lastTs || 0, prev = b.perIface || {};
+  const cur = {};
+  for (const i of ifaces) {
+    if (!i || !i.name || i.rxBytes == null || i.txBytes == null) continue;
+    const rx = Number(i.rxBytes), tx = Number(i.txBytes);
+    if (!Number.isFinite(rx) || !Number.isFinite(tx) || rx < 0 || tx < 0) continue;
+    cur[i.name] = { rx, tx };
   }
-  b.last = { ts: now };
-  let dRx = 0, dTx = 0;
-  for (const [name, cur] of Object.entries(seen)) {
-    const p = prev[name]; if (!p) continue;              // 新出现的接口下一次才计入
-    const dx = cur.rx - p.rx, dy = cur.tx - p.tx;
-    // 单次单接口增量超过 100TB、或计数回绕（负值）时忽略该接口
-    if (dx >= 0 && dy >= 0 && dx < 1e14 && dy < 1e14) { dRx += dx; dTx += dy; }
+  b.perIface = cur; b.lastTs = now; usageDirty = true;
+  if (!prevTs || !Object.keys(prev).length || now - prevTs > 24 * 3600 * 1000) return; // 只重建基线
+  const key = hourKey(now), hour = b.hours[key] || (b.hours[key] = {});
+  const mkey = minuteKey(now), minute = b.minutes[mkey] || (b.minutes[mkey] = {});
+  for (const [name, c] of Object.entries(cur)) {
+    const p = prev[name]; if (!p) continue;                       // 新出现的接口下一次采样才计入
+    let drx = c.rx - p.rx, dtx = c.tx - p.tx;
+    // 32 位计数器回绕修正（部分 RouterOS 平台的 rx-byte 为 32-bit）
+    if (drx < 0 && p.rx > 0xFF000000 && c.rx < 0x10000000) drx += 0x100000000;
+    if (dtx < 0 && p.tx > 0xFF000000 && c.tx < 0x10000000) dtx += 0x100000000;
+    if (drx < 0 || dtx < 0) { b.resets = (b.resets || 0) + 1; continue; }  // 计数器重置：跳过该接口该次
+    if (drx > 1e12 || dtx > 1e12) continue;                                // 明显异常值：跳过
+    if (!drx && !dtx) continue;
+    const slot = hour[name] || (hour[name] = { rx: 0, tx: 0 });
+    slot.rx += drx; slot.tx += dtx;
+    const mslot = minute[name] || (minute[name] = { rx: 0, tx: 0 });
+    mslot.rx += drx; mslot.tx += dtx;
   }
-  if (dRx <= 0 && dTx <= 0) { usageDirty = true; return; }
-  const key = localDayKey(now);
-  const day = b.days[key] || (b.days[key] = { rx: 0, tx: 0 });
-  day.rx += dRx; day.tx += dTx; usageDirty = true;
-  // 保留最近 N 天
-  const keys = Object.keys(b.days).sort();
-  while (keys.length > USAGE_KEEP_DAYS) { delete b.days[keys.shift()]; }
+  const keys = Object.keys(b.hours).sort();
+  while (keys.length > USAGE_KEEP_HOURS) { delete b.hours[keys.shift()]; }
+  // 分钟桶只保留最近 26 小时，供「今日」实时趋势用
+  const mkeys = Object.keys(b.minutes).sort();
+  while (mkeys.length > 26 * 60) { delete b.minutes[mkeys.shift()]; }
 }
-/* 可选接口清单：优先用最近一次真实/演示快照，其次用接口元数据缓存 */
+/* 可选接口清单：只取真实接口元数据；仅显式演示模式才用演示接口 */
 function usageAvailable(dev) {
   let src = dev.lastPacket && dev.lastPacket.ifaces;
-  if (!src || !src.length) src = ifacesFromCache(dev);
-  if (!src || !src.length) src = demoSnapshot(dev);
-  return src.map((i) => ({ name: i.name, type: i.type || '', comment: i.comment || '', running: i.running === 'true' }));
+  if (!src || !src.length) src = dev.ifaceMeta.size ? ifacesFromCache(dev) : [];
+  if ((!src || !src.length) && dev.forceDemo) src = demoSnapshot(dev);
+  return (src || []).map((i) => ({ name: i.name, type: i.type || '', comment: i.comment || '', running: i.running === 'true' }));
 }
-/* 汇总指定设备的流量统计：day=今日, week=近7天, month=近30天, total=全部记录 */
-function usageSummary(dev) {
-  const b = usageStore.devices[dev.id] || { days: {}, interfaces: [] };
-  const days = b.days || {};
+function emptyUsageResponse() {
+  return { deviceId: '', ts: Date.now(), mode: 'offline', demo: false, dataReal: false, source: '', interval: INTERVAL,
+    sampleTs: 0, resets: 0, resetNotice: false, today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 },
+    month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 }, rate: { rx: 0, tx: 0, real: false },
+    series: { today: [], week: [], month: [], total: [] }, interfaces: [], scope: 'all', viewIface: '',
+    available: [], matched: 0, hours: 0 };
+}
+/* 汇总：patterns 为空 = 全部接口；opts.iface 指定时只统计/查看该接口 */
+function usageSummary(dev, opts = {}) {
+  const b = usageStore.devices[dev.id] || { hours: {}, interfaces: [] };
+  const hours = b.hours || {};
   const sel = Array.isArray(b.interfaces) ? b.interfaces.slice() : [];
-  const sum = (list) => list.reduce((a, k) => ({ rx: a.rx + (days[k] ? days[k].rx : 0), tx: a.tx + (days[k] ? days[k].tx : 0) }), { rx: 0, tx: 0 });
-  const all = Object.keys(days).sort();
-  const now = new Date(), today = localDayKey(now.getTime());
-  // 本周：以周一为起点；本月：以 1 号为起点
-  const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const inRange = (from) => all.filter((k) => k >= from && k <= today);
-  const daily = all.slice(-400).map((k) => ({ day: k, rx: Math.round(days[k].rx || 0), tx: Math.round(days[k].tx || 0) }));
+  const viewIface = String(opts.iface || '').trim().slice(0, 64);
+  const patterns = viewIface ? [viewIface] : sel;
   const available = usageAvailable(dev);
+  const now = new Date();
+  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1); monthStart.setHours(0, 0, 0, 0);
+  const hourTs = (hk) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(hk);
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4]).getTime() : NaN;
+  };
+  const addSlots = (slots, acc) => {
+    for (const [name, v] of Object.entries(slots || {})) {
+      if (!ifaceSelected(name, patterns)) continue;
+      acc.rx += num(v.rx); acc.tx += num(v.tx);
+    }
+  };
+  const sumRange = (fromMs) => {
+    const acc = { rx: 0, tx: 0 };
+    for (const [hk, slots] of Object.entries(hours)) {
+      const ts = hourTs(hk);
+      if (!(ts >= fromMs && ts <= now.getTime())) continue;
+      addSlots(slots, acc);
+    }
+    return { rx: Math.round(acc.rx), tx: Math.round(acc.tx) };
+  };
+  const today = sumRange(todayStart.getTime()), week = sumRange(monday.getTime());
+  const month = sumRange(monthStart.getTime()), total = sumRange(0);
+  /* 图表序列：今日按分钟（最近 60 分钟，只列真实采样区间）/ 本周按天 / 本月按天 / 累计按月 */
+  const series = { today: [], week: [], month: [], total: [] };
+  const perDay = new Map();
+  for (const [hk, slots] of Object.entries(hours)) {
+    const acc = { rx: 0, tx: 0 }; addSlots(slots, acc);
+    const d = hk.slice(0, 10), c = perDay.get(d) || { rx: 0, tx: 0 };
+    c.rx += acc.rx; c.tx += acc.tx; perDay.set(d, c);
+  }
+  const minuteAcc = new Map();
+  for (const [mk, slots] of Object.entries(b.minutes || {})) {
+    const acc = { rx: 0, tx: 0 }; addSlots(slots, acc);
+    minuteAcc.set(mk, acc);
+  }
+  const labelKeys = [];
+  for (let i = 59; i >= 0; i--) labelKeys.push(minuteKey(now.getTime() - i * 60000));
+  const first = labelKeys.findIndex((k) => minuteAcc.has(k));
+  const minuteKeys = first >= 0 ? labelKeys.slice(first) : [minuteKey(now.getTime())];
+  series.today = minuteKeys.map((k) => {
+    const v = minuteAcc.get(k) || { rx: 0, tx: 0 };
+    return { label: k.slice(11), rx: Math.round(v.rx), tx: Math.round(v.tx) };
+  });
+  const daySeries = (from, count) => {
+    const out = [], base = new Date(from); base.setHours(0, 0, 0, 0);
+    for (let i = 0; i < count; i++) {
+      const d = new Date(base); d.setDate(base.getDate() + i);
+      if (d.getTime() > now.getTime()) break;
+      const v = perDay.get(dayKey(d.getTime())) || { rx: 0, tx: 0 };
+      out.push({ label: dayKey(d.getTime()).slice(5), rx: Math.round(v.rx), tx: Math.round(v.tx) });
+    }
+    return out;
+  };
+  series.week = daySeries(monday, Math.max(1, Math.min(7, Math.floor((now - monday) / 86400000) + 1)));
+  series.month = daySeries(monthStart, Math.max(1, Math.floor((now - monthStart) / 86400000) + 1));
+  const perMonth = new Map();
+  for (const [d, v] of perDay) {
+    const k = d.slice(0, 7), c = perMonth.get(k) || { rx: 0, tx: 0 };
+    c.rx += v.rx; c.tx += v.tx; perMonth.set(k, c);
+  }
+  series.total = [...perMonth.entries()].sort().slice(-24)
+    .map(([k, v]) => ({ label: k, rx: Math.round(v.rx), tx: Math.round(v.tx) }));
+  /* 当前速率：monitor-traffic 的真实 bps，不做任何推算 */
+  let rate = { rx: 0, tx: 0, real: false };
+  if (!dev.forceDemo && dev.mode === 'live' && dev.lastRates && dev.lastRates.size) {
+    const acc = { rx: 0, tx: 0 }; let found = false;
+    for (const [name, r] of dev.lastRates) {
+      if (!ifaceSelected(name, patterns)) continue;
+      acc.rx += num(r.rxBps); acc.tx += num(r.txBps); found = true;
+    }
+    if (found) rate = { rx: Math.round(acc.rx), tx: Math.round(acc.tx), real: true };
+  }
   return {
-    deviceId: dev.id, demo: dev.forceDemo, today: sum(inRange(today)),
-    week: sum(inRange(localDayKey(monday.getTime()))), month: sum(inRange(localDayKey(monthStart.getTime()))),
-    total: sum(all), daily, days: all.length,
-    interfaces: sel, scope: sel.length ? 'custom' : 'all', available,
-    matched: available.filter((i) => ifaceSelected(i.name, sel)).length,
+    deviceId: dev.id, ts: Date.now(), mode: dev.mode, demo: dev.forceDemo,
+    dataReal: !dev.forceDemo && dev.mode === 'live',
+    source: 'RouterOS /interface/print: rx-byte / tx-byte cumulative counters, per-interface deltas',
+    interval: INTERVAL, sampleTs: b.lastTs || 0, resets: b.resets || 0,
+    resetNotice: usageResetNotice, today, week, month, total, series, rate,
+    interfaces: sel, scope: sel.length ? 'custom' : 'all', viewIface, available,
+    matched: available.filter((i) => ifaceSelected(i.name, patterns)).length,
+    hours: Object.keys(hours).length,
   };
 }
 
-/* 取设备真实运行时间（秒）：优先解析 RouterOS 的 resource.uptime，失败回退到本进程运行时长 */
+/* 运行时间只取 RouterOS /system/resource/print 的 uptime；取不到就返回 null（显示未知），绝不拿进程时间冒充 */
 function packetUptime(dev) {
-  const real = parseRouterUptime(dev.lastResource && dev.lastResource.uptime);
-  return real != null ? real : Math.floor((Date.now() - dev.startedAt) / 1000);
+  return parseRouterUptime(dev.lastResource && dev.lastResource.uptime);
 }
 
 /* ================= 设备注册表 ================= */
@@ -312,6 +459,7 @@ class Device {
     this.lastRates = new Map();   // name -> { rxBps, txBps, rxPps, txPps }
     this.lastResource = null;
     this.connections = { v4: 0, v6: 0, total: 0, tcp4: 0, udp4: 0, tcp6: 0, udp6: 0, tcp: 0, udp: 0 };
+    this.connectionsReal = false; this.connectionsAt = 0;
     this.lastConnPoll = 0;
     this.polling = false;
     this.mode = cfg.demo ? 'demo' : 'connecting';
@@ -338,7 +486,7 @@ class Device {
     return { id: this.id, name: this.name, mode: this.mode, host: this.cfg.host, port: this.cfg.port,
       tls: !!this.cfg.tls, user: this.cfg.user, connected: !!(this.api && this.api.connected),
       error: this.lastError, points: this.history.length, forceDemo: this.forceDemo,
-      uptime: Math.floor((Date.now() - this.startedAt) / 1000), interval: INTERVAL };
+      uptime: packetUptime(this), interval: INTERVAL, dataReal: this.mode === 'live' && !this.forceDemo };
   }
   stopTrafficStream() {
     if (this.monitorRetry) { clearTimeout(this.monitorRetry); this.monitorRetry = null; }
@@ -370,8 +518,8 @@ class Device {
         console.log(`[ros] ${this.name} connected ${this.cfg.host}:${this.cfg.port}`);
         startTrafficStream(this);
       } catch (e) {
-        client.close(); this.stopTrafficStream(); this.mode = 'demo'; this.lastError = e.message || String(e);
-        console.log(`[ros] ${this.name} demo fallback: ${this.lastError}`);
+        client.close(); this.stopTrafficStream(); this.mode = 'offline'; this.lastError = e.message || String(e);
+        console.log(`[ros] ${this.name} connection failed: ${this.lastError}`);
       }
     }, this.api ? Math.max(2000, envNum('ROS_RECONNECT_MS', 10000)) : 300);
   }
@@ -391,10 +539,12 @@ function savedListenPort(value) {
 function loadDeviceRegistry() {
   let reg = null;
   try { reg = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8')); } catch (e) { reg = null; }
+  let needsMigration = false;
   if (!reg || !Array.isArray(reg.devices) || !reg.devices.length) {
     /* 迁移旧的单设备 settings.json / 环境变量 */
     let old = {};
     try { old = JSON.parse(fs.readFileSync(LEGACY_SETTINGS, 'utf8')); } catch (e) { old = {}; }
+    scrubLegacySettings();
     const seeded = {
       id: newId(),
       name: old.name || '主路由',
@@ -417,9 +567,11 @@ function loadDeviceRegistry() {
   if (persistedPort) PORT = persistedPort;
   for (const d of reg.devices) {
     if (!d.id || !validHost(d.host) || !validPort(d.port) || !validName(d.name)) continue;
+    if (typeof d.password === 'string' && d.password && !d.password.startsWith('enc:v1:')) needsMigration = true;
+    if (typeof d.user === 'string' && d.user && !d.user.startsWith('enc:v1:')) needsMigration = true;
     devices.set(String(d.id), new Device({
       id: String(d.id), name: String(d.name).trim(), host: String(d.host).trim(), port: Number(d.port),
-      user: String(d.user || 'admin'), password: String(d.password || ''), tls: !!d.tls, demo: !!d.demo,
+      user: decryptCredential(d.user) || 'admin', password: decryptCredential(d.password), tls: !!d.tls, demo: !!d.demo,
     }));
   }
   if (!devices.size) {
@@ -428,11 +580,13 @@ function loadDeviceRegistry() {
     activeId = fallback.id;
     saveDeviceRegistry();
   } else activeId = devices.has(reg.activeId) ? reg.activeId : devices.keys().next().value;
-  if (portMigrated) saveDeviceRegistry(); // 设备已在内存中，安全落盘
+  if (portMigrated || needsMigration) saveDeviceRegistry(); // 明文凭据就地升级为密文
+  if (needsMigration) console.log('[credentials] migrated plaintext device credentials to AES-256-GCM');
 }
 function saveDeviceRegistry() {
   const reg = {
-    devices: [...devices.values()].map((d) => ({ ...d.cfg })),
+    devices: [...devices.values()].map((d) => ({ ...d.cfg,
+      user: encryptCredential(d.cfg.user), password: encryptCredential(d.cfg.password) })),
     activeId, webPort: PORT, hostPort: Number(process.env.WEB_PORT || 0) || 0,
   };
   try {
@@ -486,14 +640,15 @@ function wordsFromValues(fields, values) {
   return out;
 }
 async function rosPrint(dev, section) {
-  if (dev.forceDemo || !(dev.api && dev.api.connected)) return demoPrint(dev, section.id);
+  if (dev.forceDemo) return demoPrint(dev, section.id);   // 仅用户显式开启的演示模式
+  if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法读取真实配置 / Router offline - no real data available');
   const r = await dev.api.exec([`${section.path}/print`]);
   if (r.status.type === 'trap') throw new Error(r.status.message || '读取失败');
   return r.re;
 }
 async function rosWrite(dev, section, action, payload) {
   const { ids = [], values = {} } = payload || {};
-  if (dev.forceDemo || !(dev.api && dev.api.connected)) {
+  if (dev.forceDemo) {
     switch (action) {
       case 'add': return { changed: 1, row: demoAdd(dev, section.id, values) };
       case 'set': {
@@ -511,6 +666,7 @@ async function rosWrite(dev, section, action, payload) {
       default: throw new Error('不支持的操作');
     }
   }
+  if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未写入任何配置 / Router offline - nothing was changed');
   const cmds = []; const wv = wordsFromValues(section.fields, values);
   switch (action) {
     case 'add': cmds.push([`${section.path}/add`, ...wv]); break;
@@ -527,26 +683,35 @@ async function rosWrite(dev, section, action, payload) {
   return { changed };
 }
 const SPECIAL = {
-  reboot: async (dev) => { if (!dev.forceDemo && dev.api && dev.api.connected) { const r = await dev.api.exec(['/system/reboot']); if (r.status.type === 'trap') throw new Error(r.status.message); } return { ok: true, demo: dev.forceDemo }; },
+  reboot: async (dev) => {
+    if (dev.forceDemo) return { ok: true, demo: true, simulated: true };
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未执行重启 / Router offline - reboot not executed');
+    const r = await dev.api.exec(['/system/reboot']); if (r.status.type === 'trap') throw new Error(r.status.message);
+    return { ok: true };
+  },
   backup: async (dev, p) => {
     const name = String((p && p.name) || ('backup-' + new Date().toISOString().slice(0, 10))).replace(/[^a-zA-Z0-9_\-]/g, '');
-    if (!dev.forceDemo && dev.api && dev.api.connected) { const r = await dev.api.exec(['/system/backup/save', `=name=${name}`]); if (r.status.type === 'trap') throw new Error(r.status.message); }
-    return { ok: true, name, demo: dev.forceDemo };
+    if (dev.forceDemo) return { ok: true, name, demo: true, simulated: true };
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未生成备份 / Router offline - backup not created');
+    const r = await dev.api.exec(['/system/backup/save', `=name=${name}`]); if (r.status.type === 'trap') throw new Error(r.status.message);
+    return { ok: true, name };
   },
   ping: async (dev, p) => {
     const address = String((p && p.address) || dev.cfg.host).trim();
     if (!/^[a-zA-Z0-9_.:-]+$/.test(address)) throw new Error('地址格式不正确');
-    if (!dev.forceDemo && dev.api && dev.api.connected) {
-      const r = await dev.api.exec(['/ping', `=address=${address}`, '=count=5']);
-      return { ok: true, rows: r.re };
+    if (dev.forceDemo) {
+      const rows = [];
+      for (let i = 1; i <= 5; i++) rows.push({ seq: String(i), host: address, time: (1 + Math.random() * 3).toFixed(2) + 'ms', ttl: '64', size: '56' });
+      return { ok: true, rows, demo: true, simulated: true };
     }
-    const rows = [];
-    for (let i = 1; i <= 5; i++) rows.push({ seq: String(i), host: address, time: (1 + Math.random() * 3).toFixed(2) + 'ms', ttl: '64', size: '56' });
-    return { ok: true, rows, demo: true };
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法执行真实 ping / Router offline - ping unavailable');
+    const r = await dev.api.exec(['/ping', `=address=${address}`, '=count=5']);
+    return { ok: true, rows: r.re };
   },
   'log-clear': async (dev) => {
-    if (!dev.forceDemo && dev.api && dev.api.connected) { const r = await dev.api.exec(['/log/clear']); if (r.status.type === 'trap') throw new Error(r.status.message); }
-    else dev.demoDB.logs.length = 0;
+    if (dev.forceDemo) { dev.demoDB.logs.length = 0; return { ok: true, demo: true, simulated: true }; }
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未清除日志 / Router offline - logs not cleared');
+    const r = await dev.api.exec(['/log/clear']); if (r.status.type === 'trap') throw new Error(r.status.message);
     return { ok: true };
   },
 };
@@ -610,13 +775,16 @@ async function collectLive(dev, client, useStream) {
       rxBps = num(tr['rx-bits-per-second']); txBps = num(tr['tx-bits-per-second']);
       rxPps = num(tr['rx-packets-per-second']); txPps = num(tr['tx-packets-per-second']);
     }
-    const prev = dev.ifaceTotals.get(row.name) || { rx: num(row['rx-byte']), tx: num(row['tx-byte']) };
-    const next = { rx: num(row['rx-byte']) > 0 ? num(row['rx-byte']) : prev.rx + rxBps * INTERVAL / 8000, tx: num(row['tx-byte']) > 0 ? num(row['tx-byte']) : prev.tx + txBps * INTERVAL / 8000 };
-    dev.ifaceTotals.set(row.name, next);
+    /* 累计字节只使用 RouterOS 的真实计数器；字段缺失时留空，绝不用「速率 × 时间」估算补值 */
+    const hasCounters = row['rx-byte'] !== undefined && row['tx-byte'] !== undefined
+      && Number.isFinite(Number(row['rx-byte'])) && Number.isFinite(Number(row['tx-byte']));
+    if (hasCounters) dev.ifaceTotals.set(row.name, { rx: num(row['rx-byte']), tx: num(row['tx-byte']) });
+    if (!useStream) dev.lastRates.set(row.name, { rxBps, txBps, rxPps, txPps }); // 轮询模式同样是 monitor-traffic 真实值
     out.push({
       name: row.name, type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: 'false',
       rxBps, txBps, rxPps, txPps,
-      rxBytes: Math.round(next.rx), txBytes: Math.round(next.tx),
+      rxBytes: hasCounters ? num(row['rx-byte']) : null, txBytes: hasCounters ? num(row['tx-byte']) : null,
+      countersReal: hasCounters,
       rxErrors: num(row['rx-error']), txErrors: num(row['tx-error']), rxDrops: num(row['rx-drop']), txDrops: num(row['tx-drop']),
     });
   }
@@ -661,16 +829,19 @@ function demoConnections(dev) {
   return { v4: Math.max(0, v4), v6: Math.max(0, v6), total: Math.max(0, v4) + Math.max(0, v6),
     tcp4, udp4, tcp6, udp6, tcp: tcp4 + tcp6, udp: udp4 + udp6 };
 }
-async function refreshConnections(dev, wasLive) {
+async function refreshConnections(dev, live) {
   if (Date.now() - dev.lastConnPoll < CONN_INTERVAL) return;
   dev.lastConnPoll = Date.now();
-  if (wasLive && dev.api && dev.api.connected) {
+  if (live && dev.api && dev.api.connected) {
     try {
       const c = await collectConnections(dev, dev.api);
-      if (c.v4 || c.v6) { dev.connections = c; return; }
-    } catch (e) { /* 回退到演示/保留旧值 */ }
+      if (c.v4 > 0 || c.v6 > 0) { dev.connections = c; dev.connectionsReal = true; dev.connectionsAt = Date.now(); return; }
+    } catch (e) { /* 采集失败：保留上一次真实值 */ }
+    dev.connectionsReal = false;
+    return;
   }
-  dev.connections = demoConnections(dev);
+  if (dev.forceDemo) { dev.connections = demoConnections(dev); dev.connectionsReal = false; }
+  else dev.connectionsReal = false;   // 离线：保留上次真实值，不生成假数据
 }
 
 /* ---- 真·实时：RouterOS 原生 monitor-traffic 持续推送（每秒一次 !re） ---- */
@@ -679,11 +850,12 @@ function ifacesFromCache(dev) {
   for (const [name, meta] of dev.ifaceMeta) {
     if (meta.disabled === 'true') continue;
     const rate = dev.lastRates.get(name) || {};
-    const total = dev.ifaceTotals.get(name) || { rx: 0, tx: 0 };
+    const total = dev.ifaceTotals.get(name) || null;   // 只缓存真实计数器，没有就是未知
     out.push({
       name, type: meta.type, comment: meta.comment, running: meta.running, disabled: 'false',
       rxBps: rate.rxBps || 0, txBps: rate.txBps || 0, rxPps: rate.rxPps || 0, txPps: rate.txPps || 0,
-      rxBytes: Math.round(total.rx), txBytes: Math.round(total.tx),
+      rxBytes: total ? Math.round(total.rx) : null, txBytes: total ? Math.round(total.tx) : null,
+      countersReal: !!total,
       rxErrors: meta.rxErrors || 0, txErrors: meta.txErrors || 0, rxDrops: meta.rxDrops || 0, txDrops: meta.txDrops || 0,
     });
   }
@@ -696,8 +868,9 @@ function emitStreamPacket(dev) {
   const packet = {
     deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
     interval: INTERVAL, streaming: true, uptime: packetUptime(dev), error: dev.lastError,
+    dataReal: !dev.forceDemo && dev.mode === 'live',
     totalRx, totalTx, ifaces, resource: dev.lastResource || {}, resourceHistory: dev.resourceHistory,
-    connections: dev.connections,
+    connections: dev.connections, connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
   };
   dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
   if (dev.history.length > HISTORY) dev.history.shift();
@@ -739,29 +912,42 @@ async function pollDevice(dev) {
   if (dev.polling) return;
   dev.polling = true;
   try {
-    const wasLive = !dev.forceDemo && dev.api && dev.api.connected;
+    const wasLive = !dev.forceDemo && !!(dev.api && dev.api.connected);
     const useStream = !!(wasLive && dev.streamActive);
-    let ifaces, resource;
+    let ifaces = null, resource = null, realSample = false;
     if (wasLive) {
       try {
         [ifaces, resource] = await Promise.all([collectLive(dev, dev.api, useStream), collectResource(dev, dev.api)]);
         dev.lastResource = resource;
-        dev.mode = 'live'; dev.lastError = '';
+        dev.mode = 'live'; dev.lastError = ''; realSample = true;
       } catch (e) {
-        dev.lastError = e.message || String(e); dev.stopTrafficStream(); dev.api.close(); dev.api = null; dev.mode = 'demo'; dev.ensureConnection();
+        dev.lastError = e.message || String(e); dev.stopTrafficStream();
+        dev.api.close(); dev.api = null; dev.mode = 'offline'; dev.ensureConnection();
       }
     }
-    if (!ifaces) { if (!dev.forceDemo) dev.ensureConnection(); ifaces = demoSnapshot(dev); }
-    if (!resource) { resource = demoResource(dev); if (!dev.forceDemo && !(dev.api && dev.api.connected)) dev.mode = 'demo'; }
-    if (!dev.forceDemo && !wasLive) dev.mode = 'demo';
-    await refreshConnections(dev, wasLive);
+    if (!ifaces) {
+      if (dev.forceDemo) { ifaces = demoSnapshot(dev); dev.mode = 'demo'; }
+      else {
+        /* 未连接 / 断线：沿用最后一次真实接口快照并把速率清零，绝不注入演示数据 */
+        ifaces = dev.lastPacket && dev.lastPacket.ifaces
+          ? dev.lastPacket.ifaces.map((i) => ({ ...i, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0 })) : [];
+        dev.ensureConnection();
+        if (dev.mode === 'demo') dev.mode = 'offline';
+      }
+    }
+    if (!resource) {
+      if (dev.forceDemo) { resource = demoResource(dev); dev.mode = 'demo'; }
+      else resource = dev.lastResource || {};
+    }
+    await refreshConnections(dev, realSample);
 
     const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
-    recordUsage(dev, ifaces);
+    recordUsage(dev, ifaces, realSample);   // 只有真实在线采样才写入统计历史
     const packet = {
       deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
-      interval: INTERVAL, uptime: packetUptime(dev), error: dev.lastError,
+      interval: INTERVAL, uptime: packetUptime(dev), error: dev.lastError, dataReal: realSample,
       totalRx, totalTx, ifaces, resource, connections: dev.connections,
+      connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
     };
     dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
     if (dev.history.length > HISTORY) dev.history.shift();
@@ -1091,9 +1277,11 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/snapshot') return json(res, 200, snapshotOf(reqDevice(req, url)));
   if (p === '/api/usage' && req.method === 'GET') {
     const dev = reqDevice(req, url);
-    return json(res, 200, dev ? usageSummary(dev) : { deviceId: '', demo: true, today: { rx: 0, tx: 0 }, week: { rx: 0, tx: 0 }, month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 }, daily: [], days: 0, interfaces: [], scope: 'all', available: [], matched: 0 });
+    const iface = String(url.searchParams.get('iface') || '').trim().slice(0, 64);
+    return json(res, 200, dev ? usageSummary(dev, { iface }) : emptyUsageResponse());
   }
-  /* 自定义参与流量统计的接口：interfaces=[] 表示全部接口，元素支持 * / ? 通配符 */
+  /* 自定义参与流量统计的接口：interfaces=[] 表示全部接口，元素支持 * / ? 通配符。
+     历史按接口独立保存，切换范围无需重建基线、不会丢历史，也不会混入其他接口。 */
   if (p === '/api/usage' && req.method === 'POST') {
     try {
       const body = await readBody(req);
@@ -1102,12 +1290,10 @@ const server = http.createServer(async (req, res) => {
       if (!Array.isArray(body.interfaces)) throw new Error('接口列表格式错误');
       const cleaned = [...new Set(body.interfaces.map((x) => String(x == null ? '' : x).trim()).filter(Boolean))]
         .filter((x) => x.length <= 64 && !/[\x00-\x1f]/.test(x)).slice(0, 64);
-      const bucket = usageBucket(dev);
-      bucket.interfaces = cleaned;
-      bucket.perIface = null; bucket.last = null; // 切换范围后重建基线，避免总量突变
+      usageBucket(dev).interfaces = cleaned;
       usageDirty = true; saveUsage(true);
       console.log(`[usage] ${dev.name} interfaces=${cleaned.length ? cleaned.join(',') : 'ALL'} by=${req.socket.remoteAddress}`);
-      return json(res, 200, { ok: true, ...usageSummary(dev) });
+      return json(res, 200, { ok: true, ...usageSummary(dev, { iface: String(body.iface || '').trim().slice(0, 64) }) });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/history') {

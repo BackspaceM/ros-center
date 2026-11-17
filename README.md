@@ -22,7 +22,7 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 - **多设备管控**：顶栏下拉切换；设备增删改查、测试连接、设为主设备、重连；配置持久化到 `data/devices.json`
 - **仪表盘**：实时流量来自 RouterOS 原生 `monitor-traffic` 流式监听（设备每秒主动推送，无需反复查询）；总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口类型分布（按真实接口类型统计，无编造数据）、接口与连接排行。运行时间取自路由器 `/system/resource` 的真实 uptime
 - **连接状态**：真实读取 RouterOS 连接表，分别统计 IPv4 / IPv6 / 汇总，且 TCP、UDP 各自再分 IPv4/IPv6（每 5 秒刷新），趋势图展示总数与双栈历史；另设 IPv4、IPv6 两个连接明细分类
-- **流量统计**：按日 / 周 / 月统计上下行流量（自动换算 MB/GB/TB/PB），基于 RouterOS 接口累计字节计数器的日增量，数据持久化在 `data/usage.json`；今日/本周/本月/累计卡片 + 柱状趋势图 + 明细表。路由器重启或计数回绕自动识别，不产生虚高。**统计接口可自定义**：在统计页点「设置统计接口」，可统计全部接口、勾选路由器真实接口，或手动填写接口名 / 通配符（如 `pppoe-*`、`vlan??`）；建议只选 WAN 外网口，否则 LAN 与 WAN 会被重复计入、统计值大约翻倍。按接口逐个差分累计，切换范围会重建计数基线，历史数据保留
+- **流量统计（真实 · 实时）**：唯一数据源是 RouterOS `/interface/print` 的 `rx-byte` / `tx-byte` **真实累计字节计数器**，每秒采样一次、按接口逐个求差分写入「接口 × 小时 / 分钟」桶；不使用速率积分、随机数或任何估算，只有真实在线采样才入库。演示模式或路由器离线时统计不累计，页面明确标注「演示 DEMO / 离线 OFFLINE」而非用假数据冒充。**范围可切换**：今日 / 本周 / 本月 / 累计四个标签，卡片、趋势图、明细同步切换（今日按最近 60 分钟、周/月按天、累计按月），每 2 秒自动刷新、数字实时增长。**接口可选**：「设置统计接口」决定参与累计的接口（全部 / 勾选真实接口 / 通配符如 `pppoe-*`、`vlan??`），建议只选 WAN 外网口，避免 LAN + WAN 双算；「查看接口」下拉可单独查看某个网口，选中后卡片、速率、趋势、明细**只显示该接口**的数据。历史按接口分别保存，切换范围或接口即时精确重算，不重置基线、不丢历史、不混入其他接口；数据持久化在 `data/usage.json`，计数器回绕 / 路由器重启会跳过异常采样，不产生虚高
 
 流式监听不可用时（旧版 RouterOS 或网络限制）自动回退到轮询，并每 10 秒重试一次恢复流式。可用 `TRAFFIC_STREAM=0` 强制只用轮询。
 - **分类配置**：9 组 44 个分类，接口、IP、DHCP、DNS、路由、防火墙 IPv4/IPv6（Filter/NAT/Mangle/地址列表/服务端口）、WiFi、PPP、WireGuard、队列、用户、系统服务、计划任务、脚本等，支持新增/编辑/启用/禁用/删除/搜索/表头排序/分页；RouterOS 的十六进制 `.id` 显示为十进制序号
@@ -88,7 +88,7 @@ docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
 ```
 
-首次启动建议保持 `DEMO_MODE=1` 先看界面，然后在网页里新增真实设备并关闭演示模式。
+默认 `DEMO_MODE=0`，启动即连接真实路由器。仅当想单独预览界面时才设为 `1`：此时页面会明确标注「演示 DEMO」，**流量统计不会写入任何演示数据**。连不上路由器时显示「离线 OFFLINE」并保留最后一次真实值，不会注入假数据或估算值。
 
 #### 方式三：本机直接运行
 
@@ -102,7 +102,7 @@ node server.js          # Node.js 18+，无需 npm install
 
 **方法 1（推荐）：WebUI 设备管理页**
 
-系统管理 → 设备管理 → 新增设备：填写名称、地址、端口、账号、密码、API-SSL、演示模式 → 先点「测试连接」→ 保存。每台设备独立保存，配置写入 `./data/devices.json`（权限 0600，密码不会回显到前端）。
+系统管理 → 设备管理 → 新增设备：填写名称、地址、端口、账号、密码、API-SSL、演示模式 → 先点「测试连接」→ 保存。每台设备独立保存，配置写入 `./data/devices.json`（权限 0600）。**账号和密码用 AES-256-GCM 加密后落盘**，不再是明文：密钥默认在 `./data/secret.key`（首次启动随机生成，权限 0600），也可用环境变量 `ROS_CENTER_KEY` 指定（容器重建 / 只挂部分数据卷时建议设置，否则密钥丢失需重新录入密码）；旧版明文配置启动时会就地自动迁移为密文，前端与所有 API 都不会回显密码。
 
 **方法 2：`.env` 环境变量（仅作为第一台设备的初始值）**
 
@@ -119,11 +119,12 @@ node server.js          # Node.js 18+，无需 npm install
 | `POLL_INTERVAL_MS` | `1000` | 轮询/系统资源刷新间隔（毫秒，最低 500） |
 | `CONN_POLL_INTERVAL_MS` | `5000` | 连接数统计刷新间隔（毫秒，最低 3000） |
 | `HISTORY_POINTS` | `180` | 图表保留点数 |
-| `DEMO_MODE` | `0` | `1` = 强制演示数据，不连路由器 |
+| `DEMO_MODE` | `0` | `1` = 仅界面演示（明确标注 DEMO，统计不累计），不连路由器 |
+| `ROS_CENTER_KEY` | 空 | 可选：设备凭据加密密钥；留空则用 `data/secret.key`。更换后需重新录入密码 |
 | `DOCKER_IMAGE` | `backspacem/ros-center:latest` | compose 使用的镜像名 |
 | `WEB_USER` / `WEB_PASSWORD` | 空 | 可选 WebUI 登录账号密码（Basic Auth 兼容）；也可在网页「设备管理 → 安全建议」中设置，优先级更高 |
 
-网页里保存的配置（`data/devices.json`、`data/auth.json`）优先级高于 `.env`。登录会话写在 `data/session.secret` 签名的 HttpOnly Cookie 中，7 天有效；侧栏 `⎋` 退出。关闭登录保护会写入 `{"disabled": true}` 到 `data/auth.json`。
+网页里保存的配置（`data/devices.json`、`data/auth.json`）优先级高于 `.env`。登录会话写在 `data/session.secret` 签名的 HttpOnly Cookie 中，7 天有效；侧栏 `⎋` 退出。关闭登录保护会写入 `{"disabled": true}` 到 `data/auth.json`。`data/` 目录建议整体持久化（`devices.json` 密文 + `secret.key` 密钥 + `usage.json` 统计历史 + `auth.json` 哈希），不要只挂单个文件。
 
 **RouterOS 侧准备**（建议用只读账号）：
 
@@ -141,13 +142,13 @@ node server.js          # Node.js 18+，无需 npm install
 - 表格点任意表头切换升序/降序；`ID` 列显示 RouterOS 十六进制 `.id` 对应的十进制序号，鼠标悬停可看原始 `.id`
 - DNS/设备标识/时钟/NTP 为单例配置，以参数卡片展示，点「编辑」直接修改
 - `?lang=en` 英文；`?theme=liquid` 指定配色、`?mode=dark` 指定深浅（light/dark/system）；`?collapse=1` 折叠侧栏
-- 流量统计为低频历史数据，切换分类或设备时才刷新，不会每秒抖屏；`'实时流量'` 独立页已并入仪表盘，不再单独列出
-- 统计接口可在页面里设置，也可用 HTTP 接口：`GET /api/usage` 读取汇总与可选接口清单、`POST /api/usage` 带 `{"interfaces":["ether1","pppoe-*"]}` 保存（空数组 = 全部接口），可用 `?device=<ID>` 指定设备；每台设备的选择独立持久化在 `data/usage.json`
+- 流量统计页每 2 秒自动拉取后端真实统计（后端每秒采样），局部刷新卡片 / 图表 / 明细，不会整页抖屏；`'实时流量'` 独立页已并入仪表盘，不再单独列出
+- 统计接口与查看接口可在页面里设置，也可用 HTTP 接口：`GET /api/usage` 读取汇总与真实接口清单，`GET /api/usage?iface=ether1` 只查看单个接口，`POST /api/usage` 带 `{"interfaces":["ether1","pppoe-*"]}` 保存参与统计的接口（空数组 = 全部接口），可用 `?device=<ID>` 指定设备；每台设备的选择独立持久化在 `data/usage.json`，返回体含 `dataReal` / `source` / `sampleTs` 便于核验数据真实性
 - 写操作走「路径白名单 + 字段白名单」双重校验，危险操作需二次确认，所有写操作记录到日志
 
 ### 安全提醒
 
-默认 API（8728）是明文，只在可信内网使用，并用防火墙限制来源 IP；公网环境请启用 API-SSL（8729）并配置证书。若需要写配置，请单独建一个仅授权必要菜单的 RouterOS 用户，不要用 full 权限账号。WebUI 暴露到公网前请在「设备管理 → 安全建议」里启用登录密码（或设置 `WEB_USER` / `WEB_PASSWORD`），并前置 HTTPS 反向代理。
+默认 API（8728）是明文，只在可信内网使用，并用防火墙限制来源 IP；公网环境请启用 API-SSL（8729）并配置证书。若需要写配置，请单独建一个仅授权必要菜单的 RouterOS 用户，不要用 full 权限账号。WebUI 暴露到公网前请在「设备管理 → 安全建议」里启用登录密码（或设置 `WEB_USER` / `WEB_PASSWORD`），并前置 HTTPS 反向代理。RouterOS 账号密码在 `data/devices.json` 中以 AES-256-GCM 密文保存（密钥 `data/secret.key` 或 `ROS_CENTER_KEY`），WebUI 登录密码为 scrypt 哈希；请同时保护 `data/` 目录权限并持久化整个目录。
 
 ---
 
@@ -166,7 +167,7 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 - **Multi-router management**: switch devices from the top bar; add/edit/delete, test connection, set primary, reconnect; persisted in `data/devices.json`
 - **Dashboard**: live traffic from RouterOS native `monitor-traffic` streaming (the device pushes a fresh sample every second, no repeated polling); download/upload/active ports/peak cards, dual-line charts, interface-type distribution (from real interface types, no invented numbers), interface & connection rankings. Uptime comes from the router's real `/system/resource` uptime
 - **Connection status**: reads the real RouterOS connection table and reports IPv4 / IPv6 / total, with TCP and UDP each further split by IPv4/IPv6 (refreshed every 5s), plus a dual-stack history chart; separate IPv4 and IPv6 connection detail sections
-- **Traffic statistics**: download/upload totals by day, week and month (auto-scaled MB/GB/TB/PB), derived from daily deltas of RouterOS interface byte counters and persisted in `data/usage.json`; today/week/month/all-time cards plus a bar-chart trend and detail table. Router reboots / counter resets are detected and never inflate totals. **Interfaces are configurable**: click "Configure interfaces" on the statistics page to count all interfaces, tick real router interfaces, or enter names / wildcards manually (`pppoe-*`, `vlan??`). Select only the WAN uplink — counting LAN and WAN together double-counts traffic. Counters are differenced per interface; changing the scope rebuilds the baseline while history is kept
+- **Traffic statistics (real & live)**: the only data source is the **real cumulative byte counters** `rx-byte` / `tx-byte` from RouterOS `/interface/print`, sampled every second and differenced per interface into "interface × hour / minute" buckets. No rate integration, random numbers or estimates — only genuine online samples are stored. In demo mode or when the router is offline, statistics do not accumulate and the page clearly says "DEMO / OFFLINE" instead of showing fake numbers. **Selectable ranges**: Today / This week / This month / All time tabs switch cards, chart and details together (today = last 60 minutes, week/month = daily, all-time = monthly); the page refreshes every 2 seconds so numbers grow live. **Selectable interfaces**: "Configure interfaces" decides which interfaces are counted (all / tick real router interfaces / wildcards such as `pppoe-*`, `vlan??`) — pick only the WAN uplink to avoid double counting LAN + WAN; the "View interface" dropdown shows exactly one port, and cards, rate, trend and details then show **only that interface**. History is stored per interface, so switching scope or interface recomputes exactly — no baseline reset, no lost history, no mixing with other ports. Persisted in `data/usage.json`; counter wraps / router reboots skip anomalous samples instead of inflating totals
 
 If streaming is unavailable (older RouterOS or restricted networks), the app falls back to polling and retries streaming every 10 seconds. Set `TRAFFIC_STREAM=0` to force polling.
 - **Categorized config**: 9 groups, 44 sections — interfaces, IP, DHCP, DNS, routes, separate IPv4/IPv6 firewall (filter/NAT/mangle/address lists/service ports), WiFi, PPP, WireGuard, queues, users, services, schedules, scripts — with add/edit/enable/disable/delete/search/column sorting/pagination. RouterOS hex `.id` values are shown as decimal sequence numbers
@@ -223,7 +224,7 @@ node server.js      # Node.js 18+, no npm install needed
 
 ### Configuration
 
-**Recommended — Web UI:** System → Devices → Add. Fill name, host, port, username, password, TLS and demo mode, click **Test connection**, then save. Each device is stored independently in `data/devices.json` (mode 0600; passwords are never returned to the browser).
+**Recommended — Web UI:** System → Devices → Add. Fill name, host, port, username, password, TLS and demo mode, click **Test connection**, then save. Each device is stored independently in `data/devices.json` (mode 0600). **Usernames and passwords are encrypted at rest with AES-256-GCM** — no plaintext in JSON. The key defaults to `data/secret.key` (randomly generated on first start, mode 0600) or can be supplied via `ROS_CENTER_KEY` (recommended when rebuilding containers or mounting only part of the data volume; losing the key means re-entering passwords). Legacy plaintext configs are migrated in place at startup, and no API ever returns the password.
 
 **Alternative — `.env` / environment variables** (initial values for the first device only):
 
@@ -240,11 +241,12 @@ node server.js      # Node.js 18+, no npm install needed
 | `POLL_INTERVAL_MS` | `1000` | Polling / system resource refresh interval in ms (min 500) |
 | `CONN_POLL_INTERVAL_MS` | `5000` | Connection count refresh interval in ms (min 3000) |
 | `HISTORY_POINTS` | `180` | Chart history points |
-| `DEMO_MODE` | `0` | `1` forces demo data |
+| `DEMO_MODE` | `0` | `1` = UI demo only (clearly labelled, statistics do not accumulate), no router connection |
+| `ROS_CENTER_KEY` | empty | Optional credential encryption key; uses `data/secret.key` when unset. Re-enter passwords after changing it |
 | `DOCKER_IMAGE` | `backspacem/ros-center:latest` | Image used by compose |
 | `WEB_USER` / `WEB_PASSWORD` | empty | Optional WebUI sign-in (legacy Basic auth compatible); can also be set under "Devices → Security tip", which takes precedence |
 
-Settings saved in the Web UI take precedence over `.env`.
+Settings saved in the Web UI take precedence over `.env`. `DEMO_MODE=0` is the default and connects to the real router; set it to `1` only to preview the UI (page is clearly labelled DEMO and no demo traffic is ever written into statistics). If the router is unreachable the UI shows OFFLINE and keeps the last real values — no fake or estimated data is injected. Persist the whole `data/` directory (encrypted `devices.json`, `secret.key`, `usage.json` history, `auth.json` hash), not just single files.
 
 **RouterOS preparation** (read-only user recommended):
 
@@ -258,12 +260,12 @@ Settings saved in the Web UI take precedence over `.env`.
 ### Tips
 
 - Deep links: `?device=<ID>` / `?dev=<name>`, `?section=firewallFilter` (or `firewall6Filter` for IPv6), `?action=add`, `?action=wgqr`, `?lang=en`, `?theme=liquid` (color scheme), `?mode=dark` (light/dark/system), `?collapse=1`
-- Traffic statistics is low-frequency history data, refreshed only on section/device switch; the separate "Live traffic" page has been merged into the Dashboard
-- Interfaces can be configured in the UI or via HTTP: `GET /api/usage` returns totals plus available interfaces, `POST /api/usage` with `{"interfaces":["ether1","pppoe-*"]}` saves the selection (empty array = all interfaces); add `?device=<ID>` to target a router. Each device keeps its own selection in `data/usage.json`
+- The statistics page polls the backend every 2 seconds (backend samples every second) and updates cards/chart/details in place, without repainting the whole page; the separate "Live traffic" page has been merged into the Dashboard
+- Interfaces can be configured in the UI or via HTTP: `GET /api/usage` returns totals and real interface list, `GET /api/usage?iface=ether1` shows one interface only, `POST /api/usage` with `{"interfaces":["ether1","pppoe-*"]}` saves the counted interfaces (empty array = all); add `?device=<ID>` to target a router. Each device keeps its own selection in `data/usage.json`, and responses include `dataReal` / `source` / `sampleTs` so data authenticity can be verified
 - Click any column header to toggle ascending/descending sort; the ID column shows the decimal form of RouterOS hex `.id` (hover for the raw value)
 - DNS / identity / clock / NTP are singleton settings shown as parameter cards — click Edit to change
 - Writes are constrained by path and field allowlists; destructive actions require confirmation and are logged.
 
 ### Security
 
-Plain API (8728) is unencrypted — restrict it to a trusted LAN with firewall rules, or enable API-SSL (8729) with a proper certificate. Use a dedicated least-privilege RouterOS user for writes. Enable a WebUI login password under "Devices → Security tip" (or via `WEB_USER` / `WEB_PASSWORD`) and put an HTTPS reverse proxy in front before exposing it to the internet.
+Plain API (8728) is unencrypted — restrict it to a trusted LAN with firewall rules, or enable API-SSL (8729) with a proper certificate. Use a dedicated least-privilege RouterOS user for writes. Enable a WebUI login password under "Devices → Security tip" (or via `WEB_USER` / `WEB_PASSWORD`) and put an HTTPS reverse proxy in front before exposing it to the internet. RouterOS usernames/passwords are stored as AES-256-GCM ciphertext in `data/devices.json` (key in `data/secret.key` or `ROS_CENTER_KEY`); the WebUI password is an scrypt hash. Protect and persist the whole `data/` directory.

@@ -40,7 +40,7 @@ function renderDashboard() {
     </div>
     <div class="grid-32">
       <div class="panel">
-        <div class="panel-head"><div><h2>${t('conn_title')}</h2><p class="sub">${t('conn_sub')}</p></div></div>
+        <div class="panel-head"><div><h2>${t('conn_title')}</h2><p class="sub">${t('conn_sub')}${d.connectionsReal === false ? ' · ' + L('演示 / 离线：非实时，显示上次真实值', 'Demo / offline: not live, showing last real values') : ''}</p></div></div>
         <div class="stat-row">
           ${statBox(t('conn_total') || L('连接总数', 'Total connections'), String((cn.total || 0).toLocaleString()))}
           ${statBox('IPv4', String((cn.v4 || 0).toLocaleString()))}
@@ -134,55 +134,91 @@ function drawConnSpark() {
     ], (v) => String(Math.round(v)));
 }
 
-/* ================= 流量统计（日 / 周 / 月，上下行） ================= */
-const TRAFFIC_RANGE = { day: { days: 30, label: () => L('近 30 天（按日）', 'Last 30 days (daily)') },
-  week: { days: 84, label: () => L('近 12 周（按周）', 'Last 12 weeks (weekly)') },
-  month: { days: 365, label: () => L('近 12 月（按月）', 'Last 12 months (monthly)') } };
+/* ================= 流量统计（真实计数器差分 · 范围可切换 · 单接口可选） ================= */
+const STATS_RANGES = {
+  today: { label: () => t('stats_range_today'), series: () => t('stats_series_today') },
+  week: { label: () => t('stats_range_week'), series: () => t('stats_series_week') },
+  month: { label: () => t('stats_range_month'), series: () => t('stats_series_month') },
+  total: { label: () => t('stats_range_total'), series: () => t('stats_series_total') },
+};
 function renderTrafficStats(range) {
-  state.usageRange = range || state.usageRange || 'day';
-  state.usageData = state.usageData || null;
+  if (range) state.usageRange = range;
+  if (!STATS_RANGES[state.usageRange]) state.usageRange = 'today';
   $('content').innerHTML = `
     <div class="page-head">
-      <div><h1>${t('stats_title') || L('流量统计', 'Traffic statistics')}</h1><p>${t('stats_sub') || L('按日 / 周 / 月统计上下行流量，来自路由器接口累计字节', 'Up/down traffic by day, week and month, from router interface byte counters')}</p></div>
+      <div><h1>${t('stats_title') || L('流量统计', 'Traffic statistics')}</h1><p>${t('stats_sub')}</p></div>
       <div class="page-actions">
-        <span class="badge-live ${state.mode === 'live' ? 'live' : ''}"><span class="d"></span>${t(state.mode)}</span>
+        <span class="badge-live" id="statsBadge"><span class="d"></span>${esc(t(state.mode))}</span>
         <button class="btn" id="statsRefresh">${t('refresh')}</button>
       </div>
     </div>
-    <div class="scope-bar" id="statsScope"><span class="tag blue">${t('stats_scope') || L('统计范围', 'Scope')}</span>
-      <span class="scope-text">${t('stats_scope_wait') || L('读取统计配置…', 'Loading statistics settings…')}</span></div>
+    <div class="scope-bar" id="statsScope">
+      <span class="tag blue">${t('stats_scope')}</span>
+      <span class="scope-text" id="statsScopeText">${t('stats_scope_wait')}</span>
+      <span class="scope-spacer"></span>
+      <label class="scope-view" title="${esc(t('stats_view_hint'))}">${t('stats_view')}
+        <select id="statsViewIface"><option value="">${esc(t('stats_view_scope'))}</option></select></label>
+      <button class="btn btn-sm" id="statsIfaceBtn">⚙ ${t('stats_iface_btn')}</button>
+    </div>
+    <div class="tabs stats-tabs" id="statsTabs">
+      ${Object.keys(STATS_RANGES).map((k) => `<button class="tab ${k === state.usageRange ? 'active' : ''}" data-range="${k}">${esc(STATS_RANGES[k].label())}</button>`).join('')}
+    </div>
     <div class="cards" id="statCards"></div>
-    <div class="panel" style="margin-top:14px">
-      <div class="panel-head"><div><h2>${t('stats_chart') || L('流量趋势', 'Traffic trend')}</h2><p class="sub" id="statsRangeLabel"></p></div>
-        <div class="tabs" id="statsTabs" style="padding:0">
-          ${Object.keys(TRAFFIC_RANGE).map((k) => `<button class="tab ${k === state.usageRange ? 'active' : ''}" data-range="${k}">${({ day: L('日', 'Day'), week: L('周', 'Week'), month: L('月', 'Month') })[k]}</button>`).join('')}
-        </div></div>
+    <div class="data-source" id="statsSource"></div>
+    <div class="panel">
+      <div class="panel-head"><div><h2>${t('stats_chart')}</h2><p class="sub" id="statsRangeLabel"></p></div></div>
       <div class="chart-wrap"><canvas id="statsChart"></canvas><div class="tooltip" id="statsTip" hidden></div></div>
     </div>
     <div class="panel" style="margin-top:14px">
-      <div class="panel-head"><div><h2>${t('stats_detail') || L('明细', 'Details')}</h2><p class="sub">${esc(TRAFFIC_RANGE[state.usageRange].label())}</p></div></div>
+      <div class="panel-head"><div><h2>${t('stats_detail')}</h2><p class="sub" id="statsDetailLabel"></p></div></div>
       <div class="table-scroll"><table><thead><tr><th>${t('time')}</th><th class="num">${t('legend_rx')}</th><th class="num">${t('legend_tx')}</th><th class="num">${t('total')}</th></tr></thead>
         <tbody id="statsBody"></tbody></table></div>
     </div>`;
-  $('statsTabs').querySelectorAll('.tab').forEach((b) => b.onclick = () => { renderTrafficStats(b.dataset.range); });
-  $('statsRefresh').onclick = () => { state.usageData = null; renderTrafficStats(); };
-  if (state.usageData) { paintTrafficStats(state.usageData); return; }
-  $('statCards').innerHTML = `<div class="empty" style="grid-column:1/-1">${t('loading')}</div>`;
-  api('/api/usage').then((d) => { state.usageData = d; if (state.section === 'trafficStats') paintTrafficStats(d); })
-    .catch((e) => { $('statCards').innerHTML = `<div class="empty" style="grid-column:1/-1">${t('load_fail')}: ${esc(e.message)}</div>`; });
+  $('statsTabs').querySelectorAll('.tab').forEach((b) => b.onclick = () => {
+    state.usageRange = b.dataset.range;
+    $('statsTabs').querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.range === state.usageRange));
+    if (state.usageData) paintTrafficStats(state.usageData);
+  });
+  $('statsRefresh').onclick = () => { state.usageData = null; refreshUsageData(); };
+  $('statsViewIface').onchange = (e) => { state.usageViewIface = e.target.value; state.usageData = null; refreshUsageData(); };
+  $('statsIfaceBtn').onclick = () => openUsageInterfaces(state.usageData || {});
+  if (state.usageData) paintTrafficStats(state.usageData);
+  else $('statCards').innerHTML = `<div class="empty" style="grid-column:1/-1">${t('loading')}</div>`;
+  refreshUsageData();
+  ensureUsageTimer(true);
 }
 function paintTrafficStats(d) {
   const cards = $('statCards'); if (!cards) return;
+  const range = STATS_RANGES[state.usageRange] ? state.usageRange : 'today';
+  const val = d[range] || { rx: 0, tx: 0 };
+  const rate = d.rate || { rx: 0, tx: 0, real: false };
+  updateStatsBadge(d);
   paintUsageScope(d);
-  const card = (label, obj, key, cls) => { const f = splitBytes(obj ? obj[key] : 0); return `<div class="card ${cls}"><div class="card-label">${esc(label)}</div><div class="card-value">${f.v}<small>${f.u}</small></div><div class="card-foot">${t('stats_from_router') || L('路由器真实计数', 'Real router counters')}</div></div>`; };
-  cards.innerHTML = card(L('今日下载', "Today's download"), d.today, 'rx', 'rx') + card(L('今日上传', "Today's upload"), d.today, 'tx', 'tx')
-    + card(L('本周下载', "This week's download"), d.week, 'rx', 'rx') + card(L('本周上传', "This week's upload"), d.week, 'tx', 'tx')
-    + card(L('本月下载', "This month's download"), d.month, 'rx', 'rx') + card(L('本月上传', "This month's upload"), d.month, 'tx', 'tx')
-    + card(L('累计下载', 'All-time download'), d.total, 'rx', 'ok') + card(L('累计上传', 'All-time upload'), d.total, 'tx', 'warn');
-  const daily = (d.daily || []).slice();
-  const range = state.usageRange;
-  const buckets = aggregateUsage(daily, range);
-  $('statsRangeLabel').textContent = TRAFFIC_RANGE[range].label();
+  const card = (label, bytes, cls, foot) => {
+    const f = splitBytes(bytes);
+    return `<div class="card ${cls}"><div class="card-label">${esc(label)}</div><div class="card-value">${f.v}<small>${f.u}</small></div><div class="card-foot">${esc(foot)}</div></div>`;
+  };
+  const rr = fmtRate(rate.rx), rt = fmtRate(rate.tx);
+  cards.innerHTML =
+    card(STATS_RANGES[range].label() + ' · ' + t('stats_card_rx'), val.rx, 'rx', t('stats_from_router'))
+    + card(STATS_RANGES[range].label() + ' · ' + t('stats_card_tx'), val.tx, 'tx', t('stats_from_router'))
+    + card(t('stats_card_sum'), val.rx + val.tx, 'ok', t('stats_from_router'))
+    + `<div class="card warn"><div class="card-label">${t('stats_card_rate')}</div>
+        <div class="card-value">${rate.real ? rr.v : '—'}<small>${rate.real ? rr.u : ''}</small></div>
+        <div class="card-foot">${rate.real ? '↓ ' + rr.v + ' ' + rr.u + ' · ↑ ' + rt.v + ' ' + rt.u : esc(t('stats_source_fake'))}</div></div>`;
+  const src = $('statsSource');
+  if (src) {
+    const real = !!d.dataReal;
+    src.className = 'data-source ' + (real ? 'real' : 'fake');
+    src.innerHTML = `<span class="d"></span><b>${esc(real ? t('stats_source_real') : t('stats_source_fake'))}</b>
+      <span>${esc(t('stats_updated'))} ${esc(fmtTime(d.ts))} · ${esc(t('stats_sample'))} ${d.sampleTs ? esc(fmtTime(d.sampleTs)) : esc(t('stats_no_sample'))}</span>
+      ${d.resetNotice ? '<em>' + esc(t('stats_reset_notice')) + '</em>' : ''}
+      ${d.resets ? '<em>' + esc(L('计数器重置跳过 ' + d.resets + ' 次采样', d.resets + ' counter resets skipped')) + '</em>' : ''}`;
+  }
+  const buckets = (d.series && d.series[range]) || [];
+  const sub = STATS_RANGES[range].series();
+  $('statsRangeLabel').textContent = sub;
+  const dl = $('statsDetailLabel'); if (dl) dl.textContent = sub;
   drawBarChart('statsChart', 'statsTip', buckets, fmtBytes);
   $('statsBody').innerHTML = buckets.slice().reverse().map((b) => {
     const rx = splitBytes(b.rx), tx = splitBytes(b.tx);
@@ -190,19 +226,30 @@ function paintTrafficStats(d) {
     <td class="num"><span class="rate tx">${tx.v}</span> <span class="tag">${tx.u}</span></td><td class="num">${fmtBytes(b.rx + b.tx)}</td></tr>`;
   }).join('') || emptyRow(4);
 }
-/* 统计范围条：显示当前参与统计的接口，并提供设置入口 */
+/* 范围条 + 查看接口下拉：只在接口清单变化时重建下拉，避免实时刷新打断用户选择 */
 function paintUsageScope(d) {
-  const box = $('statsScope'); if (!box) return;
+  const box = $('statsScopeText'); if (!box) return;
   const custom = d.scope === 'custom';
   const names = (d.interfaces || []);
   const matched = Number(d.matched) || 0;
-  const label = custom ? names.map((n) => esc(n)).join(' · ') : (t('stats_scope_all') || L('全部接口', 'All interfaces'));
-  box.innerHTML = `<span class="tag blue">${t('stats_scope') || L('统计范围', 'Scope')}</span>
-    <span class="scope-text"><b title="${esc(names.join(', '))}">${label || (t('stats_scope_custom') || L('自定义接口', 'Custom interfaces'))}</b>
-      <span class="scope-meta">${t('stats_iface_matched') || L('已匹配', 'Matched')} ${matched} ${t('stats_iface_unit') || L('个接口', 'interfaces')}${custom && !matched ? ' · ' + (t('stats_iface_none') || L('没有匹配到任何接口', 'No interfaces matched')) : ''}</span></span>
-    <span class="scope-spacer"></span>
-    <button class="btn btn-sm" id="statsIfaceBtn">⚙ ${t('stats_iface_btn') || L('设置统计接口', 'Configure interfaces')}</button>`;
-  $('statsIfaceBtn').onclick = () => openUsageInterfaces(d);
+  const label = custom ? names.map((n) => esc(n)).join(' · ') : t('stats_scope_all');
+  const viewTag = d.viewIface ? `<span class="tag blue">${esc(t('stats_view'))} · <b>${esc(d.viewIface)}</b></span>` : '';
+  box.innerHTML = `<b title="${esc(names.join(', '))}">${label || t('stats_scope_custom')}</b>
+      <span class="scope-meta">${t('stats_iface_matched')} ${matched} ${t('stats_iface_unit')}${custom && !matched ? ' · ' + t('stats_iface_none') : ''}</span>${viewTag}`;
+  const sel = $('statsViewIface');
+  if (sel) {
+    const avail = d.available || [];
+    const sig = avail.map((i) => i.name).join('|');
+    if (sel.dataset.sig !== sig) {
+      const cur = state.usageViewIface;
+      sel.innerHTML = `<option value="">${esc(t('stats_view_scope'))}</option>`
+        + avail.map((i) => `<option value="${esc(i.name)}">${esc(i.name)}${i.type ? ' (' + esc(i.type) + ')' : ''}</option>`).join('');
+      sel.dataset.sig = sig;
+      sel.value = avail.some((i) => i.name === cur) ? cur : '';
+      state.usageViewIface = sel.value;
+    }
+  }
+  const btn = $('statsIfaceBtn'); if (btn) btn.onclick = () => openUsageInterfaces(d);
 }
 /* 自定义参与统计的接口：全部 / 勾选真实接口 + 手动输入通配符 */
 function openUsageInterfaces(d) {
@@ -254,11 +301,11 @@ function openUsageInterfaces(d) {
         }
         ok.disabled = true;
         try {
-          const r = await api('/api/usage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interfaces: names }) });
+          const r = await api('/api/usage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interfaces: names, iface: state.usageViewIface }) });
           closeModal();
           state.usageData = r;
-          if (state.section === 'trafficStats') renderTrafficStats();
-          toast(t('stats_iface_saved') || L('统计接口已保存', 'Interfaces saved'), 'ok');
+          if (state.section === 'trafficStats') paintTrafficStats(r);
+          toast(t('stats_iface_saved'), 'ok');
         } catch (e) { toast(e.message, 'err'); ok.disabled = false; }
       };
     });

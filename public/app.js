@@ -13,7 +13,7 @@ const I18N = {
     ifdist_title: '接口类型分布', ifdist_sub: '按实际接口类型统计，非估算', wlan_title: '终端概览', wlan_sub: '在线终端与接口分布', top_if: '接口流量排行 (TOP 10)',
     top_if_sub: '按累计流量排序', top_conn: '连接流量排行 (TOP 10)', top_conn_sub: '按连接字节数排序',
     all: '全部接口', legend_rx: '下载 RX', legend_tx: '上传 TX',
-    live: '实时 LIVE', demo: '演示 DEMO', connecting: '连接中', reconnect: '重连中',
+    live: '实时 LIVE', demo: '演示 DEMO', connecting: '连接中', reconnect: '重连中', offline: '离线 OFFLINE',
     stream_on: '实时流', stream_off: '轮询',
     add: '新增', refresh: '刷新', save: '保存', cancel: '取消', edit: '编辑', delete: '删除',
     enable: '启用', disable: '禁用', enabled: '已启用', disabled: '已禁用', yes: '是', no: '否',
@@ -70,18 +70,26 @@ const I18N = {
     wg_route: '客户端 AllowedIPs', wg_psk: '预共享密钥', wg_responder: '仅响应 (responder)',
     wg_save_peer: '保存到 RouterOS', wg_peer_saved: '对端已保存', wg_auto: '自动', wg_required_wg: '请填写接口、允许地址和私钥',
     sort_hint: '点击排序（升序 / 降序）', singleton_hint: '该页面只有一组配置，点「编辑」直接修改',
-    stats_title: '流量统计', stats_sub: '按日 / 周 / 月统计上下行流量，来自路由器接口累计字节',
-    stats_chart: '流量趋势', stats_detail: '明细', stats_from_router: '来自路由器真实计数',
+    stats_title: '流量统计', stats_sub: '来自 RouterOS 接口累计字节计数器的真实差分，每秒采样',
+    stats_chart: '流量趋势', stats_detail: '明细', stats_from_router: '真实计数器差分',
     stats_scope: '统计范围', stats_scope_all: '全部接口', stats_scope_custom: '自定义接口',
     stats_scope_wait: '读取统计配置…', stats_iface_btn: '设置统计接口',
-    stats_iface_title: '流量统计接口', stats_iface_tip: '默认统计所有接口。若只想统计上网流量，请只勾选 WAN / 外网口（如 pppoe-out1、ether1），否则 LAN 与 WAN 会被重复计入，统计数据大约翻倍。',
+    stats_view: '查看接口', stats_view_scope: '按统计范围', stats_view_hint: '选中某个接口后，卡片、趋势和明细只显示该接口',
+    stats_range_today: '今日', stats_range_week: '本周', stats_range_month: '本月', stats_range_total: '累计',
+    stats_card_rx: '下载', stats_card_tx: '上传', stats_card_sum: '合计', stats_card_rate: '当前速率',
+    stats_series_today: '今日 · 最近 60 分钟（按分钟）', stats_series_week: '本周 · 按天', stats_series_month: '本月 · 按天', stats_series_total: '累计 · 按月',
+    stats_source_real: '真实数据 · /interface/print 的 rx-byte / tx-byte 计数器差分，每秒采样',
+    stats_source_fake: '演示模式或路由器离线：统计不累计，下方数字不是真实流量',
+    stats_updated: '更新于', stats_sample: '最近采样', stats_no_sample: '尚无真实采样',
+    stats_reset_notice: '旧版混合统计已清空（无法按接口拆分），从现在起按接口精确记录',
+    stats_iface_title: '流量统计接口', stats_iface_tip: '默认统计所有接口。若只想统计上网流量，请只勾选 WAN / 外网口（如 pppoe-out1、ether1），否则 LAN 与 WAN 会被重复计入。历史按接口分别保存，随时可切换。',
     stats_iface_all: '统计全部接口', stats_iface_custom: '仅统计指定接口',
     stats_iface_list: '从路由器接口中选择', stats_iface_manual: '手动填写接口名 / 通配符',
     stats_iface_manual_hint: '每行或用逗号分隔一个名称，支持 * 和 ? 通配符，例如 ether1、pppoe-*、vlan??。可填写当前列表中不存在的接口。',
     stats_iface_no_list: '暂时没有读取到接口，请手动填写',
-    stats_iface_saved: '统计接口已保存，从现在起按新范围累计',
+    stats_iface_saved: '统计接口已保存，历史按接口即时重算',
     stats_iface_need_one: '请至少选择一个接口或填写一个接口名',
-    stats_iface_reset: '切换范围会重建计数基线，历史数据保留。',
+    stats_iface_reset: '历史按接口分别记录，切换范围不重置基线、不丢历史；单独选择某接口即只显示它的流量。',
     stats_iface_matched: '已匹配', stats_iface_unit: '个接口',
     stats_iface_none: '当前没有匹配到任何接口，请检查名称',
     stats_iface_search: '搜索接口…',
@@ -97,7 +105,7 @@ const I18N = {
     ifdist_title: 'Interface types', ifdist_sub: 'Counted by real interface type, not estimated', wlan_title: 'Client overview', wlan_sub: 'Online clients and interface distribution', top_if: 'Interface traffic (TOP 10)',
     top_if_sub: 'Sorted by total traffic', top_conn: 'Connection traffic (TOP 10)', top_conn_sub: 'Sorted by bytes',
     all: 'All interfaces', legend_rx: 'Download RX', legend_tx: 'Upload TX',
-    live: 'LIVE', demo: 'DEMO', connecting: 'Connecting', reconnect: 'Reconnecting',
+    live: 'LIVE', demo: 'DEMO', connecting: 'Connecting', reconnect: 'Reconnecting', offline: 'OFFLINE',
     stream_on: 'STREAM', stream_off: 'POLL',
     add: 'Add', refresh: 'Refresh', save: 'Save', cancel: 'Cancel', edit: 'Edit', delete: 'Delete',
     enable: 'Enable', disable: 'Disable', enabled: 'Enabled', disabled: 'Disabled', yes: 'Yes', no: 'No',
@@ -154,18 +162,26 @@ const I18N = {
     wg_route: 'Client AllowedIPs', wg_psk: 'Preshared key', wg_responder: 'Responder only',
     wg_save_peer: 'Save to RouterOS', wg_peer_saved: 'Peer saved', wg_auto: 'Auto', wg_required_wg: 'Interface, allowed address and private key are required',
     sort_hint: 'Click to sort (ascending / descending)', singleton_hint: 'A single settings block - use Edit to change values',
-    stats_title: 'Traffic statistics', stats_sub: 'Up/down traffic by day, week and month, from router interface byte counters',
-    stats_chart: 'Traffic trend', stats_detail: 'Details', stats_from_router: 'Real router counters',
+    stats_title: 'Traffic statistics', stats_sub: 'Real deltas of RouterOS interface byte counters, sampled every second',
+    stats_chart: 'Traffic trend', stats_detail: 'Details', stats_from_router: 'Real counter deltas',
     stats_scope: 'Scope', stats_scope_all: 'All interfaces', stats_scope_custom: 'Custom interfaces',
     stats_scope_wait: 'Loading statistics settings…', stats_iface_btn: 'Configure interfaces',
-    stats_iface_title: 'Traffic statistics interfaces', stats_iface_tip: 'All interfaces are counted by default. To measure internet usage, select only the WAN / uplink interface (e.g. pppoe-out1, ether1); counting LAN and WAN together double-counts traffic.',
+    stats_view: 'View interface', stats_view_scope: 'Follow scope', stats_view_hint: 'Pick one interface to show only its counters, trend and details',
+    stats_range_today: 'Today', stats_range_week: 'This week', stats_range_month: 'This month', stats_range_total: 'All time',
+    stats_card_rx: 'Download', stats_card_tx: 'Upload', stats_card_sum: 'Total', stats_card_rate: 'Current rate',
+    stats_series_today: 'Today · last 60 minutes', stats_series_week: 'This week · daily', stats_series_month: 'This month · daily', stats_series_total: 'All time · monthly',
+    stats_source_real: 'Real data · rx-byte / tx-byte counter deltas from /interface/print, sampled every second',
+    stats_source_fake: 'Demo mode or router offline: statistics are not accumulating and the numbers below are not real traffic',
+    stats_updated: 'Updated', stats_sample: 'Last sample', stats_no_sample: 'No real sample yet',
+    stats_reset_notice: 'Legacy mixed-interface history was cleared (cannot be split per interface); new history is exact',
+    stats_iface_title: 'Traffic statistics interfaces', stats_iface_tip: 'All interfaces are counted by default. To measure internet usage, select only the WAN / uplink interface (e.g. pppoe-out1, ether1); counting LAN and WAN together double-counts traffic. History is stored per interface, so you can switch scope at any time.',
     stats_iface_all: 'Count all interfaces', stats_iface_custom: 'Count only selected interfaces',
     stats_iface_list: 'Pick from router interfaces', stats_iface_manual: 'Manual names / wildcards',
     stats_iface_manual_hint: 'One name per line or comma-separated. Wildcards * and ? are supported, e.g. ether1, pppoe-*, vlan??. Names not present in the list are allowed.',
     stats_iface_no_list: 'No interfaces available yet - enter names manually',
-    stats_iface_saved: 'Interfaces saved. New scope applies from now on',
+    stats_iface_saved: 'Interfaces saved. History is recomputed per interface immediately',
     stats_iface_need_one: 'Select at least one interface or enter a name',
-    stats_iface_reset: 'Changing the scope resets the counter baseline; history is kept.',
+    stats_iface_reset: 'History is stored per interface: changing scope does not reset the baseline or lose history, and selecting a single interface shows only that interface.',
     stats_iface_matched: 'Matched', stats_iface_unit: 'interfaces',
     stats_iface_none: 'No interface matches the current selection - check the names',
     stats_iface_search: 'Search interfaces…',
@@ -181,8 +197,8 @@ const L = (zh, en) => (lang === 'zh' ? zh : en);
 const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
-  hoverIndex: -1, selectedIface: '__all__', mode: 'demo', configDemo: false,
-  usageRange: 'day', usageData: null,
+  hoverIndex: -1, selectedIface: '__all__', mode: 'connecting', configDemo: false,
+  usageRange: 'today', usageData: null, usageViewIface: '', usageTimer: null, usageLoading: false,
   collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
   authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
 };
@@ -255,7 +271,8 @@ function splitBytes(b) {
 }
 function fmtBytes(b) { const p = splitBytes(b); return p.v + ' ' + p.u; }
 function fmtUptime(s) {
-  s = Number(s) || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  if (s == null || !Number.isFinite(Number(s))) return '—';
+  s = Number(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return lang === 'zh' ? (d ? d + '天' : '') + (h ? h + '时' : '') + m + '分' : (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm';
 }
 function fmtTime(ts) { const d = new Date(ts); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); }
@@ -447,7 +464,7 @@ async function switchDevice(id, silent) {
   state.deviceId = id;
   try { localStorage.setItem('ros-traffic-device', id); } catch (e) { /* ignore */ }
   state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); state.selectedIface = '__all__';
-  state.latest = null; state.connRows = []; state.usageData = null;
+  state.latest = null; state.connRows = []; state.usageData = null; state.usageViewIface = '';
   renderDevicePicker();
   const nowDev = state.devices.find((x) => x.id === id);
   if (nowDev && $('adminName')) $('adminName').textContent = nowDev.user || 'admin';
@@ -499,7 +516,8 @@ function connect() {
 }
 function applyData(d) {
   if (d.deviceName) { const dev = state.devices.find((x) => x.id === (d.deviceId || state.deviceId)); if (dev) dev.status = dev.status || {}, dev.status.mode = d.mode; }
-  state.latest = d; state.mode = d.mode === 'live' ? 'live' : 'demo';
+  state.latest = d;
+  state.mode = ['live', 'demo', 'connecting', 'offline', 'reconnect'].includes(d.mode) ? d.mode : 'offline';
   if (Array.isArray(d.resourceHistory) && d.resourceHistory.length) state.resourceHistory = d.resourceHistory.slice();
   if (d.connections) {
     const last = state.connHistory[state.connHistory.length - 1];
@@ -524,7 +542,36 @@ function applyData(d) {
   updateTopbar(d);
   if (state.section === 'dashboard') renderDashboard();
   else if (state.section === 'connections' || state.section === 'connections6') refreshRowsIfLoaded();
-  /* 实时数据不重绘流量统计页：统计是低频历史数据，避免每秒抖屏 */
+  /* 统计页不随每秒实时帧整页重绘，但状态徽标必须即时更新（首屏不会再停留在 DEMO） */
+  if (state.section === 'trafficStats') updateStatsBadge(d);
+}
+/* 流量统计：独立轮询后端真实统计（后端每秒采样），局部刷新，不重建 DOM */
+async function refreshUsageData() {
+  if (state.usageLoading) return;
+  state.usageLoading = true;
+  try {
+    const q = state.usageViewIface ? '?iface=' + encodeURIComponent(state.usageViewIface) : '';
+    const d = await api('/api/usage' + q);
+    state.usageData = d;
+    if (state.section === 'trafficStats') paintTrafficStats(d);
+  } catch (e) {
+    const cards = $('statCards');
+    if (cards && !cards.querySelector('.card')) cards.innerHTML = `<div class="empty" style="grid-column:1/-1">${t('load_fail')}: ${esc(e.message)}</div>`;
+  } finally { state.usageLoading = false; }
+}
+function ensureUsageTimer(on) {
+  if (on && !state.usageTimer) {
+    state.usageTimer = setInterval(() => {
+      if (state.section === 'trafficStats' && !document.hidden) refreshUsageData();
+    }, 2000);
+  } else if (!on && state.usageTimer) { clearInterval(state.usageTimer); state.usageTimer = null; }
+}
+function updateStatsBadge(d) {
+  const el = $('statsBadge'); if (!el) return;
+  const mode = (d && d.mode) || state.mode;
+  const real = !!(d && d.dataReal);
+  el.className = 'badge-live ' + (mode === 'live' && real ? 'live' : '');
+  el.innerHTML = '<span class="d"></span>' + esc(t(mode));
 }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function updateTopbar(d) {
@@ -550,6 +597,7 @@ function setBar(id, pct) { const el = $(id); if (!el) return; el.style.width = M
 function renderPage() {
   const sec = state.schema.sections.find((s) => s.id === state.section);
   if (!sec) return;
+  if (sec.id !== 'trafficStats') ensureUsageTimer(false);
   const g = state.schema.groups.find((x) => x.id === sec.group);
   $('crumbGroup').textContent = g ? tx(g) : ''; $('crumbSection').textContent = tx(sec.title);
   if (sec.id === 'dashboard') return renderDashboard();
@@ -667,7 +715,7 @@ async function boot() {
   if (new URLSearchParams(location.search).get('action') === 'deviceadd' && state.section === 'connectionSettings') {
     setTimeout(() => { $('devAdd').onclick(); }, 600);
   }
-  loadSnapshot();
+  await loadSnapshot();   // 首屏先拿到真实运行模式，避免一上来误标 DEMO
   connect();
   // 预加载连接数据供仪表盘 TOP 表格使用
   api('/api/config?section=connections').then((d) => { state.connRows = d.rows || []; if (state.section === 'dashboard') renderDashboard(); }).catch(() => {});
