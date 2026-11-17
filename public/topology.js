@@ -1,9 +1,10 @@
 'use strict';
 /* 网络拓扑独立页
    - 层级完全由 parent 关系推导（根之上还能挂上级设备），同层不重叠
-   - 固定上下分层布局，滚轮缩放、拖拽平移、透明画布
-   - 所有节点可拖动，但与同层设备/无关连线重叠时会被约束；编辑弹窗可填「本层排序」
-   - 点击设备播放其绑定的动画（节点脉冲/链路流动/涟漪扩散），显示关联接口的实时上下行速率 */
+   - 上下 / 左右两种布局；左右时最上级在左、下级在右、同级竖排一列
+   - 滚轮缩放、拖拽平移、透明画布；所有节点可自由拖动，只要不与其它节点重叠
+   - 双击设备 = 编辑该设备本身（同 id 覆盖，绝不会新增副本）；编辑弹窗可填「本层排序」
+   - 点击设备播放其绑定的动画（节点脉冲/链路流动/涟漪扩散），显示实时上下行速率 */
 (function () {
   const TYPES = ['router', 'switch', 'ap', 'nas', 'client', 'other'];
   const TYPE_ZH = { router: '路由器', switch: '交换机', ap: '无线 AP', nas: 'NAS / 存储', client: '终端', other: '其它' };
@@ -14,7 +15,7 @@
   const ANIM_EN = { none: 'None (select only)', pulse: 'Node pulse', flow: 'Link flow', ripple: 'Ripple' };
   const NODE_W = 190, NODE_H = 62, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
   let data = null, loading = false, iconUrl = '';
-  const direction = 'tb';
+  let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
   let selectedId = null, drag = null, panDrag = null, rates = new Map(), rateTimer = null;
   let activeFx = null;
@@ -51,6 +52,8 @@
         <button class="topo-ctrl" id="topoZoomOut" type="button" title="${esc(L('缩小', 'Zoom out'))}">−</button>
         <button class="topo-ctrl" id="topoFit" type="button" title="${esc(L('适应视图', 'Fit view'))}">⤢</button>
         <span class="topo-ctrl-sep"></span>
+        <button class="topo-ctrl topo-dir" id="topoDir" type="button" title="${esc(L('切换上下 / 左右视图', 'Switch vertical / horizontal view'))}">${direction === 'tb' ? '↕ ' + esc(L('上下', 'Vertical')) : '↔ ' + esc(L('左右', 'Horizontal'))}</button>
+        <span class="topo-ctrl-sep"></span>
         <span class="topo-hint">${esc(L('滚轮缩放 · 空白处拖动平移 · 双击设备编辑 · 选中后点删除移除', 'Scroll to zoom · drag to pan · double-click a device to edit · select then Delete to remove'))}</span>
       </div>
       <div class="topo-stage" id="topoStage"><div class="topo-empty">${esc(L('正在加载拓扑…', 'Loading topology…'))}</div></div>
@@ -58,6 +61,11 @@
     $('topoZoomIn').onclick = () => zoomAt(1.08);
     $('topoZoomOut').onclick = () => zoomAt(1 / 1.08);
     $('topoFit').onclick = () => { fitView(); draw(); };
+    $('topoDir').onclick = () => {
+      direction = direction === 'tb' ? 'lr' : 'tb';
+      $('topoDir').innerHTML = direction === 'tb' ? '↕ ' + esc(L('上下', 'Vertical')) : '↔ ' + esc(L('左右', 'Horizontal'));
+      buildLayout(); fitView(); draw();
+    };
     $('topoAdd').onclick = () => openEditor(null);
     $('topoDelete').onclick = () => deleteSelected();
     $('topoAnimBtn').onclick = () => openAnimSettings();
@@ -91,51 +99,19 @@
   }
 
   let nodes = [], map = new Map(), levels = [], pos = new Map();
-  /* 上下级在交叉轴上的允许范围：拖动超出即弹回原位 */
-  function crossRange(n) {
-    const crossOf = (p) => direction === 'tb' ? p.x : p.y;
-    const size = direction === 'tb' ? baseW : baseH;
-    const vals = [];
-    const parent = n.parent && map.get(n.parent), pp = parent && pos.get(parent.id);
-    if (pp) vals.push(crossOf(pp));
-    for (const c of nodes) if (c.parent === n.id) { const cp = pos.get(c.id); if (cp) vals.push(crossOf(cp)); }
-    if (!vals.length) return { min: NODE_W / 2 + 8, max: size - NODE_W / 2 - 8 };
-    const pad = NODE_W / 2 + GAP;
-    return { min: Math.min(...vals) - pad, max: Math.max(...vals) + pad };
-  }
-  /* 同层节点不能重叠（含最小间距） */
-  function siblingsFree(n, cx, pm) {
-    const level = levels.find((arr) => arr && arr.some((x) => x.id === n.id)) || [];
-    for (const s of level) {
-      if (s.id === n.id) continue;
-      const sp = (pm || pos).get(s.id);
-      if (sp && Math.abs(cx - sp.x) < NODE_W + 12) return false;
-    }
-    return true;
-  }
-  /* 拖动落点校验：同层不重叠，且节点方框不与无关连线交叉 */
-  function spotFree(svg, n, cx, cy) {
-    if (!siblingsFree(n, cx)) return false;
-    const halfW = NODE_W / 2 + 6, halfH = NODE_H / 2 + 6;
+  /* 唯一的拖动约束：不与其它设备卡片重叠。层级由 parent 决定，位置可自由摆放 */
+  function spotFree(n, x, y) {
     for (const other of nodes) {
       if (other.id === n.id) continue;
-      const op = pos.get(other.id);
-      if (!op || Math.abs(op.y - cy) > NODE_H + 12) continue;
-      if (Math.abs(op.x - cx) < NODE_W + 12) return false;
-    }
-    if (svg) {
-      for (const path of svg.querySelectorAll('.topo-link')) {
-        if (path.dataset.from === n.id || path.dataset.to === n.id) continue;
-        let len = 0;
-        try { len = path.getTotalLength(); } catch (e) { continue; }
-        for (let d = 0; d <= len; d += 8) {
-          const pt = path.getPointAtLength(d);
-          if (pt.x > cx - halfW && pt.x < cx + halfW && pt.y > cy - halfH && pt.y < cy + halfH) return false;
-        }
-      }
+      const op = pos.get(other.id); if (!op) continue;
+      if (Math.abs(op.x - x) < NODE_W + 12 && Math.abs(op.y - y) < NODE_H + 12) return false;
     }
     return true;
   }
+  const clampPos = (x, y) => ({
+    x: Math.max(NODE_W / 2 + 8, Math.min(baseW - NODE_W / 2 - 8, x)),
+    y: Math.max(NODE_H / 2 + 8, Math.min(baseH - NODE_H / 2 - 8, y)),
+  });
   function buildLayout() {
     nodes = allNodes();
     map = new Map(nodes.map((n) => [n.id, n]));
@@ -164,27 +140,40 @@
       });
     });
     let maxRow = 1; levels.forEach((a) => { if (a) maxRow = Math.max(maxRow, a.length); });
-    const crossSize = Math.max(760, maxRow * (NODE_W + GAP) + MARGIN * 2);
-    const depthSize = Math.max(340, levels.length * LEVEL_GAP + MARGIN * 2);
+    /* 上下：同层横排、跨层纵向；左右：最上级在左、下级在右、同层竖排一列 */
+    const crossStep = direction === 'tb' ? NODE_W + GAP : NODE_H + GAP;
+    const depthStep = direction === 'tb' ? LEVEL_GAP : NODE_W + GAP * 2;
+    const crossSize = Math.max(760, maxRow * crossStep + MARGIN * 2);
+    const depthSize = Math.max(360, levels.length * depthStep + MARGIN * 2);
     baseW = direction === 'tb' ? crossSize : depthSize;
     baseH = direction === 'tb' ? depthSize : crossSize;
     pos = new Map();
     levels.forEach((arr, l) => {
       if (!arr) return;
-      const rowSize = arr.length * (NODE_W + GAP) - GAP;
+      const nodeCross = direction === 'tb' ? NODE_W : NODE_H;
+      const rowSize = (arr.length - 1) * crossStep + nodeCross;
+      const start = (crossSize - rowSize) / 2 + nodeCross / 2;
+      const depth = MARGIN / 2 + 26 + l * depthStep;
       arr.forEach((n, i) => {
-        const cross = (crossSize - rowSize) / 2 + i * (NODE_W + GAP) + NODE_W / 2;
-        const depth = MARGIN / 2 + 26 + l * LEVEL_GAP;
+        const cross = start + i * crossStep;
         pos.set(n.id, direction === 'tb' ? { x: cross, y: depth } : { x: depth, y: cross });
       });
     });
-    /* 已保存的拖动坐标只在允许范围内生效，否则回退到自动排布位置 */
+    /* 手动拖动的绝对坐标：与其它节点（含同样手动定位的节点）不重叠即可沿用 */
+    const autoPos = new Map(pos);
+    const saved = new Map();
     for (const n of nodes) {
-      const saved = direction === 'tb' ? Number(n.x) : Number(n.y);
-      if (!saved) continue;
-      const p = pos.get(n.id), r = crossRange(n);
-      if (saved < r.min || saved > r.max || !siblingsFree(n, saved)) continue;
-      pos.set(n.id, direction === 'tb' ? { x: saved, y: p.y } : { x: p.x, y: saved });
+      const sx = Number(n.x), sy = Number(n.y);
+      if (sx && sy) saved.set(n.id, clampPos(sx, sy));
+    }
+    for (const [id, p] of saved) {
+      let ok = true;
+      for (const [otherId, auto] of autoPos) {
+        if (otherId === id) continue;
+        const op = saved.has(otherId) ? saved.get(otherId) : auto;
+        if (Math.abs(op.x - p.x) < NODE_W + 12 && Math.abs(op.y - p.y) < NODE_H + 12) { ok = false; break; }
+      }
+      if (ok) pos.set(id, p);
     }
   }
 
@@ -214,13 +203,13 @@
     const t = portIndex < 0 ? 0 : offset(portIndex);
     return direction === 'tb'
       ? { x: p.x + t, y: p.y + NODE_H / 2 + 16 + PORT_H }
-      : { x: p.x + NODE_H / 2 + 16 + PORT_H, y: p.y + t };
+      : { x: p.x + NODE_W / 2 + 16 + PORT_H, y: p.y + t };
   }
 
   function edgeOf(n, side) {
     const p = pos.get(n.id);
     if (direction === 'tb') return { x: p.x, y: p.y + (side === 'bottom' ? NODE_H / 2 : -NODE_H / 2) };
-    return { x: p.x + (side === 'bottom' ? NODE_H / 2 : -NODE_H / 2), y: p.y };
+    return { x: p.x + (side === 'bottom' ? NODE_W / 2 : -NODE_W / 2), y: p.y };
   }
 
   function curve(a, b) {
@@ -263,6 +252,17 @@
     return out;
   }
 
+  /* 速率来源：优先节点自带的关联接口；手工设备没填接口时，用填写的「上级端口」
+     （例如设备接在上级 ether3 口，该口的实时速率即可代表这条链路） */
+  function directRate(n) {
+    for (const key of [n.iface, n.parentPort]) {
+      const k = String(key || '').trim(); if (!k) continue;
+      const r = rates.get(k);
+      if (r && (r.rxBps || r.txBps)) return r;
+    }
+    return zeroRate;
+  }
+
   /* 计算模式：节点可多选若干下级设备，取其速率之和；嵌套自动去重，避免重复计数 */
   function effectiveRate(id, seen) {
     seen = seen || new Set();
@@ -270,7 +270,7 @@
     seen.add(id);
     const n = map.get(id); if (!n) return zeroRate;
     const calc = (Array.isArray(n.calcFrom) ? n.calcFrom : []).filter((x) => map.has(x));
-    if (!calc.length) return rates.get(n.iface || '') || zeroRate;
+    if (!calc.length) return directRate(n);
     const keep = calc.filter((a) => !calc.some((b) => b !== a && isDescendantOf(a, b)));
     let rxBps = 0, txBps = 0;
     for (const cid of keep) {
@@ -333,6 +333,7 @@
     applyView(stage.querySelector('svg'));
     bindSvg(stage.querySelector('svg'));
     renderFoot();
+    paintRates(); /* 重绘后立即回填速率，避免出现 2.5 秒空白 */
   }
 
   function renderFoot() {
@@ -373,36 +374,27 @@
         draw();
       });
       g.addEventListener('dblclick', (ev) => { ev.stopPropagation(); openEditor(n); });
-      /* 所有设备都可拖动；自动发现的节点拖动时会生成可持久化的覆盖版本 */
+      /* 所有设备都可自由拖动（x / y 双向），唯一约束是不与其它设备卡片重叠 */
       g.addEventListener('mousedown', (ev) => {
         if (ev.button !== 0) return;
         ev.preventDefault(); ev.stopPropagation();
         const p0 = pos.get(n.id), rect = svg.getBoundingClientRect();
-        const p0cross = direction === 'tb' ? p0.x : p0.y;
-        const range = crossRange(n);
-        drag = { moved: false, node: n, cross: p0cross };
+        drag = { moved: false, node: n, x: p0.x, y: p0.y, sx0: ev.clientX, sy0: ev.clientY };
         const move = (e) => {
-          const dc = direction === 'tb'
-            ? (e.clientX - drag.sx0) / rect.width * (baseW / zoom)
-            : (e.clientY - drag.sy0) / rect.height * (baseH / zoom);
           if (Math.abs(e.clientX - drag.sx0) + Math.abs(e.clientY - drag.sy0) > 3) drag.moved = true;
-          const size = baseW;
-          const candidate = Math.max(NODE_W / 2 + 8, Math.min(size - NODE_W / 2 - 8, p0cross + dc));
-          /* 越界或与同层设备/无关连线重叠时保持上一个合法位置 */
-          if (candidate < range.min || candidate > range.max || !spotFree(svg, n, candidate, p0.y)) return;
-          drag.cross = candidate;
-          g.setAttribute('transform', `translate(${drag.cross},${p0.y})`);
+          const dx = (e.clientX - drag.sx0) / rect.width * (baseW / zoom);
+          const dy = (e.clientY - drag.sy0) / rect.height * (baseH / zoom);
+          const c = clampPos(p0.x + dx, p0.y + dy);
+          if (!spotFree(n, c.x, c.y)) return;
+          drag.x = c.x; drag.y = c.y;
+          g.setAttribute('transform', `translate(${c.x},${c.y})`);
         };
         const up = () => {
           document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-          if (drag && drag.moved) {
-            const c = drag.cross;
-            if (c < range.min || c > range.max || !spotFree(svg, n, c, p0.y)) draw();
-            else savePosition(n, c, p0.y);
-          }
+          if (drag && drag.moved && (Math.abs(drag.x - p0.x) > 1 || Math.abs(drag.y - p0.y) > 1))
+            savePosition(n, drag.x, drag.y);
           setTimeout(() => { drag = null; }, 0);
         };
-        drag.sx0 = ev.clientX; drag.sy0 = ev.clientY;
         document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
       });
     });
@@ -418,7 +410,8 @@
   function startRates() {
     if (rateTimer) clearInterval(rateTimer);
     const tick = async () => {
-      if (state.section !== 'topology' || document.hidden || !data) return;
+      /* 预览面板 / 后台标签里 document.hidden 可能为 true，不能用它做守卫，否则速率永远不刷新 */
+      if (!data || !$('topoStage')) return;
       try {
         const snap = await api('/api/snapshot');
         rates = new Map((snap.ifaces || []).map((i) => [i.name, { rxBps: i.rxBps || 0, txBps: i.txBps || 0 }]));
@@ -521,12 +514,13 @@
   window.openTopologyAnimSettings = openAnimSettings;
 
   function openEditor(node) {
-    const override = !!(node && node.auto);
-    const isNew = !node || override;
+    /* 双击已有设备（包括自动发现的设备）永远是「编辑这个设备」，用同一个 id 覆盖，绝不新增副本 */
+    const isNew = !node;
     const parentNode = node && map.get(node.parent);
     const others = nodes.filter((n) => (!node || n.id !== node.id));
     const parentOpts = others.map((n) => `<option value="${esc(n.id)}"${node && node.parent === n.id ? ' selected' : ''}>${esc(n.name)}</option>`).join('');
-    iconUrl = (!override && node && node.icon) || '';
+    iconUrl = (node && node.icon) || '';
+    const relationDefault = !node ? 'child' : (node.parent ? 'child' : 'top');
     const portsText = Array.isArray(node && node.ports) ? node.ports.join(', ') : '';
     const calcList = descendantsOf(node ? node.id : '');
     const calcSelected = Array.isArray(node && node.calcFrom) ? node.calcFrom : [];
@@ -535,9 +529,9 @@
       <div class="form-row"><label>${esc(L('类型', 'Type'))}</label><select id="tnType">${TYPES.map((tp) => `<option value="${tp}"${node && node.type === tp ? ' selected' : ''}>${esc(typeLabel(tp))}</option>`).join('')}</select></div>
       <div class="form-row"><label>${esc(L('IP / 地址', 'IP / address'))}</label><input id="tnIp" type="text" maxlength="64" value="${esc(node ? node.ip : '')}"></div>
       <div class="form-row"><label>${esc(L('层级关系', 'Hierarchy'))}</label><div><select id="tnRelation" style="max-width:220px">
-        <option value="child">${esc(L('作为它的下级（它 → 本设备）', 'Child of selected device'))}</option>
-        <option value="parent">${esc(L('作为它的上级（本设备 → 它）', 'Parent of selected device'))}</option>
-        <option value="top">${esc(L('独立顶层', 'Standalone top level'))}</option>
+        <option value="child"${relationDefault === 'child' ? ' selected' : ''}>${esc(L('作为它的下级（它 → 本设备）', 'Child of selected device'))}</option>
+        <option value="parent"${relationDefault === 'parent' ? ' selected' : ''}>${esc(L('作为它的上级（本设备 → 它）', 'Parent of selected device'))}</option>
+        <option value="top"${relationDefault === 'top' ? ' selected' : ''}>${esc(L('独立顶层', 'Standalone top level'))}</option>
       </select><p class="form-hint">${esc(L('选择「上级」可把现有设备挂到新设备下面，例如给主路由加光猫', 'Choose "Parent" to put the selected device under the new one (e.g. ONT above the router)'))}</p></div></div>
       <div class="form-row"><label>${esc(L('目标设备', 'Target device'))}</label><select id="tnParent">${parentOpts}</select></div>
       <div class="form-row"><label>${esc(L('上级端口', 'Parent port'))}</label><input id="tnParentPort" type="text" maxlength="32" list="tnKnownPorts" value="${esc(node ? node.parentPort || '' : '')}" placeholder="${esc(L('接在上级设备的哪个口', 'Which upstream port'))}"><datalist id="tnKnownPorts">${((parentNode && parentNode.ports) || []).map((p) => `<option value="${esc(p)}"></option>`).join('')}</datalist></div>
@@ -569,28 +563,38 @@
       $('tnSave').onclick = async () => {
         const name = $('tnName').value.trim(); if (!name) { toast(L('请填写名称', 'Name is required'), 'err'); return; }
         const relation = $('tnRelation').value, targetId = $('tnParent').value;
+        const myId = node ? node.id : 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+        /* 编辑时保持原有上级，除非用户明确改了层级关系或目标设备 */
+        let parent = node ? (node.parent || null) : null;
+        if (relation === 'child') parent = targetId || null;
+        else if (relation === 'top') parent = null;
+        if (parent === myId || (parent && node && isDescendantOf(parent, myId))) {
+          toast(L('该层级关系会形成循环', 'This hierarchy would create a cycle'), 'err'); return;
+        }
         const item = {
-          id: !isNew ? node.id : 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+          id: myId,
           name, type: $('tnType').value, ip: $('tnIp').value.trim(),
-          parent: relation === 'child' ? targetId : null, parentPort: $('tnParentPort').value.trim(),
+          parent, parentPort: $('tnParentPort').value.trim(),
           ports: $('tnPorts').value.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean).slice(0, 64),
           iface: (node && node.iface) || '', icon: iconUrl, note: $('tnNote').value.trim(),
           anim: $('tnAnim').value,
           calcFrom: [...document.querySelectorAll('.calc-chk:checked')].map((x) => x.value),
           order: Math.max(0, Math.min(999, Math.round(Number($('tnOrder').value) || 0))),
-          x: 0, y: 0,
+          x: (node && Number(node.x)) || 0, y: (node && Number(node.y)) || 0,
+          deleted: false,
         };
         const custom = ((data && data.custom) || []).slice();
         const idx = custom.findIndex((n) => n.id === item.id);
         if (idx >= 0) custom[idx] = item; else custom.push(item);
-        /* 「作为上级」：把目标设备挂到新设备下；目标为自动节点时生成覆盖版本 */
+        /* 「作为上级」：把目标设备挂到本设备下；目标为自动节点时生成同 id 覆盖版本 */
         if (relation === 'parent' && targetId && targetId !== item.id) {
           const target = map.get(targetId);
-          if (target) {
+          if (target && !(node && isDescendantOf(node.id, targetId))) {
             const override = { id: target.id, name: target.name, type: target.type, ip: target.ip || '',
               parent: item.id, parentPort: target.parentPort || '', ports: Array.isArray(target.ports) ? target.ports : [],
               iface: target.iface || '', icon: target.icon || '', note: target.note || '', anim: target.anim || 'none',
-              calcFrom: Array.isArray(target.calcFrom) ? target.calcFrom.slice() : [], order: Number(target.order) || 0, x: target.x || 0, y: target.y || 0 };
+              calcFrom: Array.isArray(target.calcFrom) ? target.calcFrom.slice() : [], order: Number(target.order) || 0,
+              deleted: false, x: target.x || 0, y: target.y || 0 };
             const ti = custom.findIndex((n) => n.id === targetId);
             if (ti >= 0) custom[ti] = { ...custom[ti], parent: item.id }; else custom.push(override);
           }

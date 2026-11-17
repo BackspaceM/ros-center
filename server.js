@@ -1113,11 +1113,17 @@ async function autoTopology(dev) {
   const nodes = [{ id: 'root', name: rootName, type: 'router', ip: String(dev.cfg.host || ''),
     parent: null, parentPort: '', ports: [], auto: true, note: dev.name || '', iface: rootIface }];
   const notes = [];
-  let neighbors = [], leases = [];
+  let neighbors = [], leases = [], dhcpServers = [];
   try { neighbors = (await rosPrint(dev, SECTION_MAP.neighbors)) || []; }
   catch (e) { notes.push('邻居发现不可用：' + e.message); }
   try { leases = (await rosPrint(dev, SECTION_MAP.dhcpLeases)) || []; }
   catch (e) { notes.push('DHCP 租约不可用：' + e.message); }
+  /* 租约本身不带接口名，从 DHCP 服务端配置把 server → interface 映射出来，
+     让纯 DHCP 终端也能显示所在 LAN 接口的实时速率（与根节点一致的接口级数据） */
+  try { dhcpServers = (await rosPrint(dev, SECTION_MAP.dhcpServers)) || []; }
+  catch (e) { /* 可选增强，失败不影响拓扑 */ }
+  const serverIface = new Map(dhcpServers.filter((s) => s && s.name && s.interface)
+    .map((s) => [String(s.name), String(s.interface)]));
 
   const macKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^0-9a-f]/g, '');
   const byMac = new Map();
@@ -1144,6 +1150,7 @@ async function autoTopology(dev) {
     nodes.push({ id: 'auto_l_' + (mac || encodeURIComponent(name)), name, type,
       ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
       parent: (mac && byMac.get(mac)) || 'root', parentPort: '',
+      iface: String(r.interface || serverIface.get(String(r.server || '')) || ''),
       ports: [], auto: true, note: status === 'waiting' ? '等待中' : '' });
   }
   return { nodes, ok: neighbors.length > 0 || leases.length > 0, notes,
