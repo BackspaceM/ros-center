@@ -1,0 +1,21 @@
+name: Diagnose Docker Hub
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve token owner
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set +e
+          echo "=== hub api ==="
+          curl -sS -w "\nHTTP:%{http_code}\n" -H "Authorization: Bearer $TOKEN" https://hub.docker.com/v2/user/
+          echo "=== registry auth ==="
+          curl -sS -w "\nHTTP:%{http_code}\n" -u "BackspaceM:$TOKEN" "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/busybox:pull" | head -c 300
+          echo
+      - name: Try docker login
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$TOKEN" | docker login -u BackspaceM --password-stdin 2>&1 | tail -3
