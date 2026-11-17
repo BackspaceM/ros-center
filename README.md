@@ -79,7 +79,9 @@ git clone https://github.com/BackspaceM/ros-center.git
 cd ros-center
 cp .env.example .env
 # 如需改端口：WEB_PORT=8080 CONTAINER_PORT=3000
-docker compose up -d --build
+# 默认直接拉取 Docker Hub 官方镜像 backspacem/ros-center:latest：
+docker compose up -d
+# 如需用本地源码构建，则改用：docker compose up -d --build
 ```
 
 首次启动建议保持 `DEMO_MODE=1` 先看界面，然后在网页里新增真实设备并关闭演示模式。
@@ -111,7 +113,7 @@ node server.js          # Node.js 18+，无需 npm install
 | `POLL_INTERVAL_MS` | `2000` | 采样间隔（毫秒） |
 | `HISTORY_POINTS` | `180` | 图表保留点数 |
 | `DEMO_MODE` | `0` | `1` = 强制演示数据，不连路由器 |
-| `DOCKER_IMAGE` | `ros-traffic-webui:latest` | compose 使用的镜像名 |
+| `DOCKER_IMAGE` | `backspacem/ros-center:latest` | compose 使用的镜像名 |
 | `WEB_USER` / `WEB_PASSWORD` | 空 | 可选 WebUI Basic 登录 |
 
 网页里保存的配置优先级高于 `.env`。
@@ -191,7 +193,9 @@ Then open `http://<host-ip>:3000` and go to **System → Devices** to add your R
 git clone https://github.com/BackspaceM/ros-center.git
 cd ros-center
 cp .env.example .env
-docker compose up -d --build
+# Pulls the official image backspacem/ros-center:latest by default:
+docker compose up -d
+# Use local source build instead: docker compose up -d --build
 ```
 
 **From source:**
@@ -219,7 +223,7 @@ node server.js      # Node.js 18+, no npm install needed
 | `POLL_INTERVAL_MS` | `2000` | Poll interval in ms |
 | `HISTORY_POINTS` | `180` | Chart history points |
 | `DEMO_MODE` | `0` | `1` forces demo data |
-| `DOCKER_IMAGE` | `ros-traffic-webui:latest` | Image used by compose |
+| `DOCKER_IMAGE` | `backspacem/ros-center:latest` | Image used by compose |
 | `WEB_USER` / `WEB_PASSWORD` | empty | Optional WebUI Basic auth |
 
 Settings saved in the Web UI take precedence over `.env`.

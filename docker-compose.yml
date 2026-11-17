@@ -1,8 +1,8 @@
 services:
-  ros-traffic:
+  ros-center:
+    image: ${DOCKER_IMAGE:-backspacem/ros-center:latest}
     build: .
-    image: ${DOCKER_IMAGE:-ros-traffic-webui:latest}
-    container_name: ros-traffic
+    container_name: ros-center
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:${CONTAINER_PORT:-3000}"

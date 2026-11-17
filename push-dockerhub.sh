@@ -9,7 +9,7 @@ if [ -z "${DOCKERHUB_USER:-}" ] || [ -z "${DOCKERHUB_TOKEN:-}" ]; then
   exit 1
 fi
 
-IMAGE="${DOCKERHUB_USER}/routeros-traffic-webui:latest"
+IMAGE="${DOCKERHUB_USER}/ros-center:latest"
 printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
 docker build -t "$IMAGE" .
 docker push "$IMAGE"
