@@ -270,81 +270,115 @@ async function openWireguardQr(row, sec) {
     });
 }
 
-/* ================= 连接设置（无需编辑 .env） ================= */
+/* ================= 多设备管理 ================= */
+function deviceStatusTag(d) {
+  const st = d.status || {};
+  const cls = st.connected || st.mode === 'live' ? 'green' : (d.demo ? 'amber' : 'red');
+  const label = st.connected || st.mode === 'live' ? t('live') : (d.demo ? t('demo') : t(st.mode || 'connecting'));
+  return `<span class="tag ${cls}">${esc(label)}</span>`;
+}
 function renderConnectionSettings() {
   $('content').innerHTML = `
-    <div class="page-head"><div><h1>${t('conn_settings')}</h1><p>${t('conn_settings_sub')}</p></div>
-      <div class="page-actions"><button class="btn" id="connRefresh">${t('refresh')}</button></div></div>
-    <div class="note-card"><b>${t('conn_current')}:</b> <span id="connCurrent">${t('loading')}</span><br>${t('conn_tip')}</div>
-    <div class="grid-2">
-      <div class="panel"><div class="panel-head"><div><h2>RouterOS API</h2><p class="sub">${esc(t('conn_settings'))}</p></div></div>
-        <div class="panel-body">
-          <div class="form-row"><label>${t('conn_host')} <span class="req">*</span></label><div><input type="text" id="cfgHost" placeholder="10.0.0.1"></div></div>
-          <div class="form-row"><label>${t('conn_port')} <span class="req">*</span></label><div><input type="number" id="cfgPort" min="1" max="65535" value="8728"></div></div>
-          <div class="form-row"><label>${t('conn_user')} <span class="req">*</span></label><div><input type="text" id="cfgUser" autocomplete="username"></div></div>
-          <div class="form-row"><label>${t('conn_password')}</label><div><input type="password" id="cfgPass" autocomplete="current-password" placeholder="${esc(t('conn_masked'))}"></div></div>
-          <div class="form-row"><label>${t('conn_tls')}</label><div class="form-check"><input type="checkbox" id="cfgTls"></div></div>
-          <div class="form-row"><label>${t('conn_demo')}</label><div class="form-check"><input type="checkbox" id="cfgDemo"></div></div>
-          <div class="form-row"><label>${t('conn_web_port')}</label><div><input type="number" id="cfgWebPort" min="1" max="65535" value="3000"><p class="form-hint">${t('conn_web_port_hint')}</p></div></div>
-          <div style="display:flex;gap:8px;margin-top:18px">
-            <button class="btn" id="connTest">${t('conn_test')}</button>
-            <button class="btn primary" id="connSave">${t('conn_save')}</button>
-          </div>
-          <div id="connResult" style="margin-top:14px"></div>
-        </div></div>
+    <div class="page-head"><div><h1>${t('devices')}</h1><p>${t('devices_sub')}</p></div>
+      <div class="page-actions">
+        <button class="btn" id="devWebPort">${t('conn_web_port')}: ${esc(state.webPort || 3000)}</button>
+        <button class="btn" id="devRefresh">${t('refresh')}</button>
+        <button class="btn primary" id="devAdd">+ ${t('device_add')}</button>
+      </div></div>
+    <div class="note-card">${t('device_hint')} · ${t('device_count')}: <b id="devCount">${state.devices.length}</b></div>
+    <div class="panel" style="margin-top:14px"><div class="table-scroll"><table>
+      <thead><tr><th>${t('device_name')}</th><th>${t('conn_host')}</th><th>${t('conn_port')}</th><th>${t('conn_user')}</th>
+        <th>${t('device_status')}</th><th>${t('conn_demo')}</th><th style="width:270px"></th></tr></thead>
+      <tbody id="devBody"></tbody></table></div></div>
+    <div class="grid-2" style="margin-top:14px">
+      <div class="panel"><div class="panel-head"><div><h2>${t('conn_web_port')}</h2><p class="sub">${t('conn_web_port_hint')}</p></div></div>
+        <div class="panel-body"><div class="form-row"><label>${t('conn_web_port')}</label>
+          <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 3000)}">
+          <p class="form-hint">${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 3000)}</p></div></div>
+          <button class="btn primary" id="devSavePort">${t('save')}</button></div></div>
       <div class="panel"><div class="panel-head"><div><h2>${t('conn_security')}</h2><p class="sub">${esc(t('note'))}</p></div></div>
-        <div class="panel-body">
-          <div class="note-card warn">${t('conn_security_tip')}</div>
-          <div class="modal-note"><b>RouterOS CLI:</b>
-            <pre class="code">/user group add name=webui policy=read,api
+        <div class="panel-body"><div class="note-card warn">${t('conn_security_tip')}</div>
+          <div class="modal-note"><b>RouterOS CLI:</b><pre class="code">/user group add name=webui policy=read,api
 /user add name=webui group=webui password=${L('强密码', 'strong-password')}
-/ip service set api address=10.0.0.0/24</pre></div>
-          <div class="modal-note" style="margin-top:14px"><b>${t('conn_current')}:</b>
-            <div id="connDetail" style="margin-top:6px;color:var(--muted)">${t('loading')}</div></div>
-        </div></div>
+/ip service set api address=10.0.0.0/24</pre></div></div></div>
     </div>`;
-
-  function values() {
-    return {
-      host: $('cfgHost').value.trim(), port: Number($('cfgPort').value),
-      user: $('cfgUser').value.trim(), password: $('cfgPass').value,
-      tls: $('cfgTls').checked, demo: $('cfgDemo').checked, webPort: Number($('cfgWebPort').value),
-    };
-  }
-  function renderCurrent(s) {
-    $('connCurrent').innerHTML = `<span class="tag ${s.connected ? 'green' : 'amber'}">${esc(s.connected ? t('live') : t(s.demo ? 'demo' : (s.mode || 'connecting')))}</span>
-      &nbsp;${esc(s.host)}:${esc(s.port)} · ${esc(s.user)} · ${t('conn_web_port')} ${esc(s.webPort || 3000)}`;
-    $('connDetail').innerHTML = `${esc(s.host)}:${esc(s.port)}<br>${t('conn_user')}: ${esc(s.user)}<br>${t('conn_password')}: ${s.passwordSet ? '••••••••' + ' (' + t('conn_masked') + ')' : '—'}<br>API-SSL: ${s.tls ? t('yes') : t('no')}<br>${t('conn_host_port')}: ${esc(s.hostPort || s.webPort || 3000)} · ${t('conn_web_port')}: ${esc(s.webPort || 3000)}`;
-    if (s.user) $('adminName').textContent = s.user;
-  }
-  function load() {
-    api('/api/settings').then((s) => {
-      $('cfgHost').value = s.host || ''; $('cfgPort').value = s.port || 8728;
-      $('cfgUser').value = s.user || ''; $('cfgTls').checked = !!s.tls; $('cfgDemo').checked = !!s.demo;
-      $('cfgWebPort').value = s.webPort || 3000;
-      $('cfgPass').placeholder = s.passwordSet ? t('conn_masked') : '—';
-      renderCurrent(s);
-    }).catch((e) => toast(e.message, 'err'));
-  }
-  $('connRefresh').onclick = load;
-  $('connTest').onclick = async () => {
-    const b = $('connTest'); b.disabled = true; $('connResult').innerHTML = `<span class="tag amber">${t('loading')}</span>`;
-    try {
-      const r = await api('/api/settings/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values()) });
-      $('connResult').innerHTML = `<span class="tag green">✓ ${t('conn_test_ok')}${r.version ? ' · RouterOS ' + esc(r.version) : ''}</span>`;
-      toast(t('conn_test_ok'), 'ok');
-    } catch (e) { $('connResult').innerHTML = `<span class="tag red">✕ ${t('conn_test_fail')}: ${esc(e.message)}</span>`; toast(e.message, 'err'); }
-    finally { b.disabled = false; }
+  const renderRows = () => {
+    const tb = $('devBody'); if (!tb) return;
+    $('devCount').textContent = state.devices.length;
+    tb.innerHTML = state.devices.map((d) => `<tr data-dev="${esc(d.id)}">
+      <td><b>${esc(d.name)}</b>${d.id === state.devicePrimary ? ' <span class="tag blue">' + esc(t('device_current')) + '</span>' : ''}</td>
+      <td>${esc(d.host)}</td><td>${esc(d.port)}</td><td>${esc(d.user)}</td>
+      <td>${deviceStatusTag(d)}</td><td>${d.demo ? t('yes') : t('no')}</td>
+      <td><div class="row-actions">
+        ${d.id === state.deviceId ? '<span class="tag blue">' + esc(t('device_active')) + '</span>' : `<button class="icon-btn" data-act="use" title="${t('device_primary')}">✓</button>`}
+        <button class="icon-btn" data-act="edit" title="${t('device_edit')}">✎</button>
+        <button class="icon-btn" data-act="reconn" title="${t('device_reconnect')}">↻</button>
+        <button class="icon-btn del" data-act="del" title="${t('device_del')}">✕</button>
+      </div></td></tr>`).join('') || `<tr><td colspan="7" class="empty">${t('no_data')}</td></tr>`;
+    tb.querySelectorAll('[data-act]').forEach((b) => b.onclick = () => {
+      const id = b.closest('tr').dataset.dev;
+      const dev = state.devices.find((x) => x.id === id);
+      const act = b.dataset.act;
+      if (act === 'use') setPrimary(id);
+      else if (act === 'edit') openDeviceForm(dev);
+      else if (act === 'reconn') api('/api/devices/' + id + '/reconnect', { method: 'POST' }).then(() => refresh()).catch((e) => toast(e.message, 'err'));
+      else if (act === 'del') confirmModal(t('device_del'), t('device_del_msg'), true, () =>
+        api('/api/devices/' + id, { method: 'DELETE' }).then(() => { if (state.deviceId === id) switchDevice(state.devices.find((x) => x.id !== id).id, true); refresh(); toast(t('deleted_ok'), 'ok'); }).catch((e) => toast(e.message, 'err')));
+    });
   };
-  $('connSave').onclick = () => confirmModal(t('conn_save'), `${t('conn_host')}: <b>${esc($('cfgHost').value)}</b><br>${t('conn_user')}: <b>${esc($('cfgUser').value)}</b><br>${t('conn_demo')}: <b>${$('cfgDemo').checked ? t('yes') : t('no')}</b>`, false, async () => {
+  const refresh = async () => { await loadDevices(true); renderRows(); renderDevicePicker(); };
+  async function setPrimary(id) {
+    try { const d = await api('/api/devices/' + id + '/active', { method: 'POST' }); state.devicePrimary = d.activeId; await refresh(); toast(t('device_saved'), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  }
+  function openDeviceForm(dev) {
+    const isNew = !dev;
+    const body = `
+      <div class="form-row"><label>${t('device_name')} <span class="req">*</span></label><div><input id="dvName" value="${esc(dev ? dev.name : '')}"></div></div>
+      <div class="form-row"><label>${t('conn_host')} <span class="req">*</span></label><div><input id="dvHost" value="${esc(dev ? dev.host : '')}" placeholder="10.0.0.1"></div></div>
+      <div class="form-row"><label>${t('conn_port')} <span class="req">*</span></label><div><input type="number" id="dvPort" min="1" max="65535" value="${esc(dev ? dev.port : 8728)}"></div></div>
+      <div class="form-row"><label>${t('conn_user')} <span class="req">*</span></label><div><input id="dvUser" value="${esc(dev ? dev.user : '')}" autocomplete="off"></div></div>
+      <div class="form-row"><label>${t('conn_password')}</label><div><input type="password" id="dvPass" autocomplete="new-password" placeholder="${esc(t('device_no_password'))}"></div></div>
+      <div class="form-row"><label>${t('conn_tls')}</label><div class="form-check"><input type="checkbox" id="dvTls" ${dev && dev.tls ? 'checked' : ''}></div></div>
+      <div class="form-row"><label>${t('conn_demo')}</label><div class="form-check"><input type="checkbox" id="dvDemo" ${dev && dev.demo ? 'checked' : ''}></div></div>
+      <div id="dvResult" style="margin-top:10px"></div>`;
+    openModal(isNew ? t('device_add') : t('device_edit'), body,
+      `<button class="btn" data-close>${t('cancel')}</button><button class="btn" id="dvTest">${t('device_test')}</button><button class="btn primary" id="dvSave">${t('save')}</button>`,
+      (m) => {
+        m.querySelector('[data-close]').onclick = closeModal;
+        const vals = () => ({ name: m.querySelector('#dvName').value.trim(), host: m.querySelector('#dvHost').value.trim(),
+          port: Number(m.querySelector('#dvPort').value), user: m.querySelector('#dvUser').value.trim(),
+          password: m.querySelector('#dvPass').value, tls: m.querySelector('#dvTls').checked, demo: m.querySelector('#dvDemo').checked });
+        m.querySelector('#dvTest').onclick = async () => {
+          const btn = m.querySelector('#dvTest'); btn.disabled = true;
+          m.querySelector('#dvResult').innerHTML = `<span class="tag amber">${t('loading')}</span>`;
+          try { const r = await api('/api/devices/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(vals()) });
+            m.querySelector('#dvResult').innerHTML = `<span class="tag green">✓ ${t('conn_test_ok')}${r.version ? ' · RouterOS ' + esc(r.version) : ''}</span>`; }
+          catch (e) { m.querySelector('#dvResult').innerHTML = `<span class="tag red">✕ ${esc(e.message)}</span>`; }
+          finally { btn.disabled = false; }
+        };
+        m.querySelector('#dvSave').onclick = async () => {
+          const v = vals();
+          if (!v.name || !v.host || !v.port || !v.user) { toast(t('device_required'), 'err'); return; }
+          try {
+            if (isNew) await api('/api/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+            else await api('/api/devices/' + dev.id + '/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+            closeModal(); await refresh(); if (!isNew && dev.id === state.deviceId) switchDevice(dev.id, true);
+            toast(t('device_saved'), 'ok');
+          } catch (e) { toast(e.message, 'err'); }
+        };
+      });
+  }
+  $('devAdd').onclick = () => openDeviceForm(null);
+  $('devRefresh').onclick = refresh;
+  $('devSavePort').onclick = async () => {
     try {
-      const s = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values()) });
-      toast(s.restartRequired ? t('conn_restart') : t('conn_saved'), s.restartRequired ? '' : 'ok'); renderCurrent(s);
-      $('cfgPass').value = '';
-      setTimeout(() => load(), 1500);
+      const r = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webPort: Number($('cfgWebPort').value) }) });
+      await loadDevices(true); toast(r.restartRequired ? t('conn_restart') : t('saved_ok'), r.restartRequired ? '' : 'ok');
+      $('devWebPort').textContent = t('conn_web_port') + ': ' + state.webPort;
     } catch (e) { toast(e.message, 'err'); }
-  });
-  load();
+  };
+  renderRows();
 }
 
 /* 所有脚本就绪后启动 */

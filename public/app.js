@@ -34,6 +34,12 @@ const I18N = {
     rate_rx: '下载速率', rate_tx: '上传速率', spark: '趋势', total: '累计流量', status: '状态',
     time: '时间', topics: '主题', message: '内容', clear_log: '清空日志',
     count: '数量', name: '名称', value: '值', group: '用户组', comment: '备注',
+    devices: '设备管理', devices_sub: '集中管控多台 RouterOS，切换后所有页面自动跟随当前设备',
+    device_name: '设备名称', device_primary: '设为主设备', device_active: '当前设备', device_add: '新增设备',
+    device_edit: '编辑设备', device_del: '删除设备', device_del_msg: '确定删除该设备？其历史数据和演示配置将一并清除。',
+    device_status: '状态', device_test: '测试连接', device_saved: '设备已保存', device_switch: '已切换到',
+    device_current: '当前为主设备', device_count: '设备数量', device_hint: '点顶栏设备下拉即可切换；主设备决定默认显示哪台。',
+    device_reconnect: '重新连接', device_no_password: '留空表示不修改', device_required: '请填写名称、地址、端口和账号',
     theme_system: '跟随系统', theme_light: '浅色', theme_dark: '深色', theme_glass: '毛玻璃', theme_porcelain: '青花瓷',
     theme_liquid: '液态玻璃', theme_aurora: '极光', theme_ocean: '深海', theme_sakura: '樱粉', theme_mono: '黑白极简',
     theme_title: '界面风格', conn_settings: '连接设置', conn_settings_sub: '直接在网页里填写 RouterOS 地址与账号，无需编辑 .env 文件',
@@ -83,6 +89,12 @@ const I18N = {
     rate_rx: 'Download rate', rate_tx: 'Upload rate', spark: 'Trend', total: 'Total traffic', status: 'Status',
     time: 'Time', topics: 'Topics', message: 'Message', clear_log: 'Clear log',
     count: 'Count', name: 'Name', value: 'Value', group: 'Group', comment: 'Comment',
+    devices: 'Devices', devices_sub: 'Manage multiple RouterOS routers; every page follows the selected device',
+    device_name: 'Device name', device_primary: 'Set primary', device_active: 'Current device', device_add: 'Add device',
+    device_edit: 'Edit device', device_del: 'Delete device', device_del_msg: 'Delete this device? Its history and demo config will be removed.',
+    device_status: 'Status', device_test: 'Test connection', device_saved: 'Device saved', device_switch: 'Switched to',
+    device_current: 'Primary device', device_count: 'Devices', device_hint: 'Use the device dropdown in the top bar to switch; the primary device is shown by default.',
+    device_reconnect: 'Reconnect', device_no_password: 'Leave blank to keep', device_required: 'Name, host, port and user are required',
     theme_system: 'System', theme_light: 'Light', theme_dark: 'Dark', theme_glass: 'Glass', theme_porcelain: 'Porcelain',
     theme_liquid: 'Liquid glass', theme_aurora: 'Aurora', theme_ocean: 'Deep sea', theme_sakura: 'Sakura', theme_mono: 'Mono',
     theme_title: 'Theme', conn_settings: 'Connection settings', conn_settings_sub: 'Set RouterOS address and credentials right in the web UI - no .env editing needed',
@@ -112,7 +124,7 @@ const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
   hoverIndex: -1, selectedIface: '__all__', mode: 'demo', configDemo: false,
-  collapsedGroups: new Set(),
+  collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 3000, hostPort: 0,
 };
 try { JSON.parse(localStorage.getItem('ros-traffic-groups') || '[]').forEach((id) => state.collapsedGroups.add(id)); } catch (e) { /* ignore */ }
 const $ = (id) => document.getElementById(id);
@@ -168,6 +180,10 @@ function toast(msg, kind = '') {
   setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 3200);
 }
 async function api(path, opts) {
+  /* 所有配置类接口自动带上当前设备；设备管理/目录接口除外 */
+  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status)(\?|$)/.test(path)) {
+    path += (path.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(state.deviceId);
+  }
   const r = await fetch(path, opts);
   let d; try { d = await r.json(); } catch (e) { throw new Error('HTTP ' + r.status); }
   if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
@@ -304,6 +320,51 @@ function iconSvg(name) {
   };
   return `<svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${p[name] || p.grid}</svg>`;
 }
+/* ================= 多设备切换 ================= */
+function renderDevicePicker() {
+  const sel = $('deviceSelect'); if (!sel) return;
+  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+  sel.value = state.deviceId;
+  const cur = state.devices.find((d) => d.id === state.deviceId);
+  $('deviceDot').classList.toggle('live', !!(cur && (cur.status.mode === 'live' || cur.status.connected)));
+}
+async function loadDevices(keepLocal) {
+  try {
+    const d = await api('/api/devices');
+    state.devices = d.devices || [];
+    state.devicePrimary = d.activeId || '';
+    state.webPort = d.webPort || 3000; state.hostPort = d.hostPort || 0;
+    if (!keepLocal && !state.deviceId) {
+      const urlDev = new URLSearchParams(location.search).get('device');
+      const nameDev = new URLSearchParams(location.search).get('dev');
+      const saved = localStorage.getItem('ros-traffic-device');
+      const wanted = urlDev || (nameDev && (state.devices.find((x) => x.name === nameDev) || {}).id) || saved;
+      state.deviceId = state.devices.some((x) => x.id === wanted) ? wanted : state.devicePrimary;
+    }
+    if (!state.devices.some((x) => x.id === state.deviceId)) state.deviceId = state.devicePrimary;
+    renderDevicePicker();
+    return d;
+  } catch (e) { return null; }
+}
+async function switchDevice(id, silent) {
+  if (!id || id === state.deviceId || !state.devices.some((d) => d.id === id)) return;
+  state.deviceId = id;
+  try { localStorage.setItem('ros-traffic-device', id); } catch (e) { /* ignore */ }
+  state.points = []; state.resourceHistory = []; state.ifHistory.clear(); state.selectedIface = '__all__';
+  state.latest = null; state.connRows = [];
+  renderDevicePicker();
+  const nowDev = state.devices.find((x) => x.id === id);
+  if (nowDev && $('adminName')) $('adminName').textContent = nowDev.user || 'admin';
+  if (socket) { const old = socket; socket = null; old.onclose = null; old.close(); }
+  connect();
+  await loadSnapshot();
+  const sec = state.schema && state.schema.sections.find((s) => s.id === state.section);
+  if (sec && sec.path && $('tbody')) { try { await loadRows(sec); } catch (e) { /* ignore */ } }
+  try { state.connRows = (await api('/api/config?section=connections')).rows || []; } catch (e) { /* ignore */ }
+  renderPage();
+  if (!silent) { const d = state.devices.find((x) => x.id === id); toast(t('device_switch') + ' ' + (d ? d.name : ''), 'ok'); }
+}
+
 function navigate(id) {
   state.section = id; state.rows = []; state.selectedIds.clear(); state.rowFilter = ''; state.page = 1;
   const sec = state.schema.sections.find((s) => s.id === id);
@@ -329,13 +390,18 @@ function pushIfHist(name, ts, v) {
 }
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  socket = new WebSocket(proto + '//' + location.host);
+  socket = new WebSocket(proto + '//' + location.host + '/?device=' + encodeURIComponent(state.deviceId || '*'));
   socket.onopen = () => { reconnectDelay = 1000; };
-  socket.onmessage = (ev) => { let d; try { d = JSON.parse(ev.data); } catch (e) { return; } applyData(d); };
+  socket.onmessage = (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    if (d.deviceId && state.deviceId && d.deviceId !== state.deviceId) return;
+    applyData(d);
+  };
   socket.onclose = () => { setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(10000, reconnectDelay * 1.6); };
   socket.onerror = () => socket.close();
 }
 function applyData(d) {
+  if (d.deviceName) { const dev = state.devices.find((x) => x.id === (d.deviceId || state.deviceId)); if (dev) dev.status = dev.status || {}, dev.status.mode = d.mode; }
   state.latest = d; state.mode = d.mode === 'live' ? 'live' : 'demo';
   if (Array.isArray(d.resourceHistory) && d.resourceHistory.length) state.resourceHistory = d.resourceHistory.slice();
   let rxSel = d.totalRx || 0, txSel = d.totalTx || 0;
@@ -357,6 +423,7 @@ function applyData(d) {
 }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function updateTopbar(d) {
+  const devDot = $('deviceDot'); if (devDot) devDot.classList.toggle('live', d.mode === 'live');
   const pill = $('sideMode'); pill.textContent = t(state.mode);
   $('sideDot').parentElement.classList.toggle('live', state.mode === 'live');
   const r = d.resource || {};
@@ -438,6 +505,7 @@ async function boot() {
     saveCollapsedGroups(); buildNav($('navSearch').value);
   };
   $('settingsShortcut').onclick = () => navigate('connectionSettings');
+  $('deviceSelect').onchange = (e) => switchDevice(e.target.value);
   $('logoutBtn').onclick = async () => {
     try {
       const d = await api('/api/status');
@@ -447,7 +515,9 @@ async function boot() {
     } catch (e) { toast(e.message, 'err'); }
   };
   $('adminBtn').onclick = () => navigate('connectionSettings');
-  api('/api/settings').then((s) => { if (s.user) $('adminName').textContent = s.user; }).catch(() => {});
+  await loadDevices();
+  const curDev = state.devices.find((d) => d.id === state.deviceId);
+  if (curDev && curDev.user) $('adminName').textContent = curDev.user;
   try { state.schema = await api('/api/schema'); }
   catch (e) { document.body.innerHTML = '<div style="padding:40px;font:14px sans-serif">无法加载配置目录：' + esc(e.message) + '</div>'; return; }
   const urlSection = new URLSearchParams(location.search).get('section');
@@ -466,6 +536,9 @@ async function boot() {
     if (sec && sec.writable && sec.path) setTimeout(() => openForm(sec, null), 800);
   }
   if (new URLSearchParams(location.search).get('action') === 'wgqr') setTimeout(() => openWireguardQr(), 800);
+  if (new URLSearchParams(location.search).get('action') === 'deviceadd' && state.section === 'connectionSettings') {
+    setTimeout(() => { $('devAdd').onclick(); }, 600);
+  }
   loadSnapshot();
   connect();
   // 预加载连接数据供仪表盘 TOP 表格使用

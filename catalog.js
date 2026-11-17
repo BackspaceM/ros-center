@@ -155,7 +155,7 @@ const SECTIONS = [
       F('priority', '优先级', 'Priority', 'number'), F('comment', '备注', 'Comment', 'text'), F('disabled', '禁用', 'Disabled', 'bool')]),
 
   /* ---------- 系统 ---------- */
-  S('connectionSettings', 'system', '连接设置', 'Connection settings', null, [], { virtual: true, toggle: false, writable: false }),
+  S('connectionSettings', 'system', '设备管理', 'Devices', null, [], { virtual: true, toggle: false, writable: false }),
   S('identity', 'system', '设备标识', 'Identity', '/system/identity',
     [F('.id', 'ID', 'ID', 'id'), F('name', '设备名称', 'Device name', 'text', { required: true })],
     { singleton: true, toggle: false, columns: ['name'] }),
