@@ -14,6 +14,7 @@ const I18N = {
     top_if_sub: '按累计流量排序', top_conn: '连接流量排行 (TOP 10)', top_conn_sub: '按连接字节数排序',
     all: '全部接口', legend_rx: '下载 RX', legend_tx: '上传 TX',
     live: '实时 LIVE', demo: '演示 DEMO', connecting: '连接中', reconnect: '重连中',
+    stream_on: '实时流', stream_off: '轮询',
     add: '新增', refresh: '刷新', save: '保存', cancel: '取消', edit: '编辑', delete: '删除',
     enable: '启用', disable: '禁用', enabled: '已启用', disabled: '已禁用', yes: '是', no: '否',
     filter: '筛选', search: '搜索', clear: '清空', close: '关闭', confirm: '确认',
@@ -80,6 +81,7 @@ const I18N = {
     top_if_sub: 'Sorted by total traffic', top_conn: 'Connection traffic (TOP 10)', top_conn_sub: 'Sorted by bytes',
     all: 'All interfaces', legend_rx: 'Download RX', legend_tx: 'Upload TX',
     live: 'LIVE', demo: 'DEMO', connecting: 'Connecting', reconnect: 'Reconnecting',
+    stream_on: 'STREAM', stream_off: 'POLL',
     add: 'Add', refresh: 'Refresh', save: 'Save', cancel: 'Cancel', edit: 'Edit', delete: 'Delete',
     enable: 'Enable', disable: 'Disable', enabled: 'Enabled', disabled: 'Disabled', yes: 'Yes', no: 'No',
     filter: 'Filter', search: 'Search', clear: 'Clear', close: 'Close', confirm: 'Confirm',
@@ -459,6 +461,12 @@ function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d;
 function updateTopbar(d) {
   const devDot = $('deviceDot'); if (devDot) devDot.classList.toggle('live', d.mode === 'live');
   const pill = $('sideMode'); pill.textContent = t(state.mode);
+  const streamEl = $('sideStream');
+  if (streamEl) {
+    streamEl.hidden = d.mode !== 'live';
+    streamEl.textContent = d.streaming ? t('stream_on') : t('stream_off');
+    streamEl.classList.toggle('on', !!d.streaming);
+  }
   $('sideDot').parentElement.classList.toggle('live', state.mode === 'live');
   const r = d.resource || {};
   const cpu = num(r['cpu-load']), memPct = r['total-memory'] ? Math.round((1 - num(r['free-memory']) / num(r['total-memory'])) * 100) : 0;

@@ -20,7 +20,7 @@ const path = require('path');
 const { GROUPS, SECTIONS, SECTION_MAP, seed, makeLog } = require('./catalog');
 
 const HOST = process.env.HOST || '0.0.0.0';
-const INTERVAL = Math.max(500, Number(process.env.POLL_INTERVAL_MS || 2000));
+const INTERVAL = Math.max(500, Number(process.env.POLL_INTERVAL_MS || 1000));
 const HISTORY = Math.max(30, Number(envNum('HISTORY_POINTS', 180)));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
@@ -94,8 +94,8 @@ class RouterOSAPI {
     if (r2.status.type === 'trap') throw new Error('RouterOS login failed: ' + (r2.status.message || 'rejected'));
     this.connected = true;
   }
-  exec(words) {
-    return new Promise((resolve, reject) => { this.queue.push({ words, resolve, reject }); this._pump(); });
+  exec(words, opts = {}) {
+    return new Promise((resolve, reject) => { this.queue.push({ words, resolve, reject, onRecord: opts.onRecord || null }); this._pump(); });
   }
   _pump() {
     if (this.current || !this.queue.length || !this.socket || this.socket.destroyed) return;
@@ -121,7 +121,11 @@ class RouterOSAPI {
   _endSentence() {
     const words = this.sentences; this.sentences = [];
     if (!this.current || !words.length) return;
-    if (words[0] === '!re') { (this.current.re = this.current.re || []).push(parseWords(words)); return; }
+    if (words[0] === '!re') {
+      const rec = parseWords(words);
+      if (this.current.onRecord) { try { this.current.onRecord(rec); } catch (e) { /* ignore */ } return; }
+      (this.current.re = this.current.re || []).push(rec); return;
+    }
     const status = { type: words[0].replace('!', ''), ...parseWords(words.slice(1)) };
     const task = this.current; this.current = null;
     task.resolve({ re: task.re || [], status });
@@ -163,6 +167,13 @@ class Device {
     this.cfg = cfg;                 // { id, name, host, port, user, password, tls, demo }
     this.api = null;
     this.reconnectTimer = null;
+    this.monitorApi = null;       // 专用于 /interface/monitor-traffic 流式监听的连接
+    this.monitorRetry = null;
+    this.streamFlush = null;
+    this.streamActive = false;
+    this.ifaceMeta = new Map();   // name -> { type, comment, running, disabled }
+    this.lastRates = new Map();   // name -> { rxBps, txBps, rxPps, txPps }
+    this.lastResource = null;
     this.polling = false;
     this.mode = cfg.demo ? 'demo' : 'connecting';
     this.lastError = '';
@@ -190,11 +201,19 @@ class Device {
       error: this.lastError, points: this.history.length, forceDemo: this.forceDemo,
       uptime: Math.floor((Date.now() - this.startedAt) / 1000), interval: INTERVAL };
   }
+  stopTrafficStream() {
+    if (this.monitorRetry) { clearTimeout(this.monitorRetry); this.monitorRetry = null; }
+    if (this.streamFlush) { clearTimeout(this.streamFlush); this.streamFlush = null; }
+    if (this.monitorApi) { this.monitorApi.close(); this.monitorApi = null; }
+    this.streamActive = false;
+  }
   reconnectNow() {
+    this.stopTrafficStream();
     if (this.api) { this.api.close(); this.api = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.lastError = ''; this.mode = this.forceDemo ? 'demo' : 'connecting';
     this.ifaceTotals.clear(); this.history.length = 0; this.resourceHistory.length = 0;
+    this.ifaceMeta.clear(); this.lastRates.clear(); this.lastResource = null;
     this.ensureConnection();
   }
   ensureConnection() {
@@ -210,8 +229,9 @@ class Device {
         if (check.status.type === 'trap') throw new Error(check.status.message || '读取系统信息失败');
         this.api = client; this.mode = 'live'; this.lastError = '';
         console.log(`[ros] ${this.name} connected ${this.cfg.host}:${this.cfg.port}`);
+        startTrafficStream(this);
       } catch (e) {
-        client.close(); this.mode = 'demo'; this.lastError = e.message || String(e);
+        client.close(); this.stopTrafficStream(); this.mode = 'demo'; this.lastError = e.message || String(e);
         console.log(`[ros] ${this.name} demo fallback: ${this.lastError}`);
       }
     }, this.api ? Math.max(2000, envNum('ROS_RECONNECT_MS', 10000)) : 300);
@@ -427,21 +447,36 @@ function demoSnapshot(dev) {
     };
   });
 }
-async function collectLive(dev, client) {
+async function collectLive(dev, client, useStream) {
   const list = await client.exec(['/interface/print', '=.proplist=name,type,comment,disabled,running,rx-byte,tx-byte,rx-packet,tx-packet,rx-error,tx-error,rx-drop,tx-drop']);
   if (list.status.type === 'trap') throw new Error('interface print: ' + (list.status.message || 'trap'));
+  dev.ifaceMeta.clear();
+  for (const row of list.re) {
+    if (!row.name) continue;
+    dev.ifaceMeta.set(row.name, {
+      type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: row.disabled || 'false',
+      rxErrors: num(row['rx-error']), txErrors: num(row['tx-error']), rxDrops: num(row['rx-drop']), txDrops: num(row['tx-drop']),
+    });
+  }
   const out = [];
   for (const row of list.re) {
     if (!row.name || row.disabled === 'true') continue;
-    let tr = {};
-    try { const r = await client.exec(['/interface/monitor-traffic', `=interface=${row.name}`, '=once=']); if (r.re.length) tr = r.re[0]; } catch (e) { /* ignore */ }
-    const rxBps = num(tr['rx-bits-per-second']), txBps = num(tr['tx-bits-per-second']);
+    let rxBps = 0, txBps = 0, rxPps = 0, txPps = 0;
+    if (useStream) {
+      const cached = dev.lastRates.get(row.name) || {};
+      rxBps = cached.rxBps || 0; txBps = cached.txBps || 0; rxPps = cached.rxPps || 0; txPps = cached.txPps || 0;
+    } else {
+      let tr = {};
+      try { const r = await client.exec(['/interface/monitor-traffic', `=interface=${row.name}`, '=once=']); if (r.re.length) tr = r.re[0]; } catch (e) { /* ignore */ }
+      rxBps = num(tr['rx-bits-per-second']); txBps = num(tr['tx-bits-per-second']);
+      rxPps = num(tr['rx-packets-per-second']); txPps = num(tr['tx-packets-per-second']);
+    }
     const prev = dev.ifaceTotals.get(row.name) || { rx: num(row['rx-byte']), tx: num(row['tx-byte']) };
     const next = { rx: num(row['rx-byte']) > 0 ? num(row['rx-byte']) : prev.rx + rxBps * INTERVAL / 8000, tx: num(row['tx-byte']) > 0 ? num(row['tx-byte']) : prev.tx + txBps * INTERVAL / 8000 };
     dev.ifaceTotals.set(row.name, next);
     out.push({
       name: row.name, type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: 'false',
-      rxBps, txBps, rxPps: num(tr['rx-packets-per-second']), txPps: num(tr['tx-packets-per-second']),
+      rxBps, txBps, rxPps, txPps,
       rxBytes: Math.round(next.rx), txBytes: Math.round(next.tx),
       rxErrors: num(row['rx-error']), txErrors: num(row['tx-error']), rxDrops: num(row['rx-drop']), txDrops: num(row['tx-drop']),
     });
@@ -452,18 +487,82 @@ async function collectResource(dev, client) {
   const r = await client.exec(['/system/resource/print']);
   return r.re[0] || {};
 }
+
+/* ---- 真·实时：RouterOS 原生 monitor-traffic 持续推送（每秒一次 !re） ---- */
+function ifacesFromCache(dev) {
+  const out = [];
+  for (const [name, meta] of dev.ifaceMeta) {
+    if (meta.disabled === 'true') continue;
+    const rate = dev.lastRates.get(name) || {};
+    const total = dev.ifaceTotals.get(name) || { rx: 0, tx: 0 };
+    out.push({
+      name, type: meta.type, comment: meta.comment, running: meta.running, disabled: 'false',
+      rxBps: rate.rxBps || 0, txBps: rate.txBps || 0, rxPps: rate.rxPps || 0, txPps: rate.txPps || 0,
+      rxBytes: Math.round(total.rx), txBytes: Math.round(total.tx),
+      rxErrors: meta.rxErrors || 0, txErrors: meta.txErrors || 0, rxDrops: meta.rxDrops || 0, txDrops: meta.txDrops || 0,
+    });
+  }
+  return out;
+}
+function emitStreamPacket(dev) {
+  if (!dev.ifaceMeta.size) return;
+  const ifaces = ifacesFromCache(dev);
+  const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
+  const packet = {
+    deviceId: dev.id, deviceName: dev.name, ts: Date.now(), mode: dev.mode, host: dev.cfg.host,
+    interval: INTERVAL, streaming: true, uptime: Math.floor((Date.now() - dev.startedAt) / 1000), error: dev.lastError,
+    totalRx, totalTx, ifaces, resource: dev.lastResource || {}, resourceHistory: dev.resourceHistory,
+  };
+  dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
+  if (dev.history.length > HISTORY) dev.history.shift();
+  dev.lastPacket = packet;
+  broadcast(dev.id, packet);
+}
+function streamFailed(dev, client, err) {
+  if (dev.monitorApi === client) { client.close(); dev.monitorApi = null; }
+  dev.streamActive = false;
+  console.warn(`[ros] ${dev.name} traffic stream unavailable: ${err && err.message ? err.message : err} - using polling`);
+  if (!dev.forceDemo && dev.api && dev.api.connected && !dev.monitorRetry) {
+    dev.monitorRetry = setTimeout(() => { dev.monitorRetry = null; startTrafficStream(dev); }, envNum('TRAFFIC_STREAM_RETRY_MS', 10000));
+  }
+}
+function startTrafficStream(dev) {
+  if (dev.forceDemo || String(process.env.TRAFFIC_STREAM || '1') === '0' || !dev.api || !dev.api.connected || dev.monitorApi || dev.monitorRetry) return;
+  const client = new RouterOSAPI({ ...dev.cfg });
+  client.connect().then(() => {
+    if (!dev.api || !dev.api.connected || dev.monitorApi) { client.close(); return; }
+    dev.monitorApi = client; dev.streamActive = true;
+    console.log(`[ros] ${dev.name} live traffic stream started (monitor-traffic)`);
+    client.exec(['/interface/monitor-traffic', '=interface=all'], {
+      onRecord: (rec) => {
+        const name = rec.name || rec.interface;
+        if (!name) return;
+        dev.lastRates.set(name, {
+          rxBps: num(rec['rx-bits-per-second']), txBps: num(rec['tx-bits-per-second']),
+          rxPps: num(rec['rx-packets-per-second']), txPps: num(rec['tx-packets-per-second']),
+        });
+        // 同一秒的多接口记录合并成一次完整快照，避免前端看到半更新数据
+        if (!dev.streamFlush) dev.streamFlush = setTimeout(() => { dev.streamFlush = null; emitStreamPacket(dev); }, 80);
+      },
+    }).then((r) => streamFailed(dev, client, new Error(r.status.type === 'trap' ? (r.status.message || 'monitor-traffic rejected') : 'monitor stream ended')))
+      .catch((e) => streamFailed(dev, client, e));
+  }).catch((e) => streamFailed(dev, client, e));
+}
+
 async function pollDevice(dev) {
   if (dev.polling) return;
   dev.polling = true;
   try {
     const wasLive = !dev.forceDemo && dev.api && dev.api.connected;
+    const useStream = !!(wasLive && dev.streamActive);
     let ifaces, resource;
     if (wasLive) {
       try {
-        [ifaces, resource] = await Promise.all([collectLive(dev, dev.api), collectResource(dev, dev.api)]);
+        [ifaces, resource] = await Promise.all([collectLive(dev, dev.api, useStream), collectResource(dev, dev.api)]);
+        dev.lastResource = resource;
         dev.mode = 'live'; dev.lastError = '';
       } catch (e) {
-        dev.lastError = e.message || String(e); dev.api.close(); dev.api = null; dev.mode = 'demo'; dev.ensureConnection();
+        dev.lastError = e.message || String(e); dev.stopTrafficStream(); dev.api.close(); dev.api = null; dev.mode = 'demo'; dev.ensureConnection();
       }
     }
     if (!ifaces) { if (!dev.forceDemo) dev.ensureConnection(); ifaces = demoSnapshot(dev); }
@@ -487,8 +586,8 @@ async function pollDevice(dev) {
       dev.demoDB.logs.unshift(row);
       if (dev.demoDB.logs.length > 200) dev.demoDB.logs.pop();
     }
-    dev.lastPacket = packet;
-    broadcast(dev.id, packet);
+    if (!useStream) { dev.lastPacket = packet; broadcast(dev.id, packet); }
+    // 流式活跃时由 monitor 记录直接推送，轮询只刷新历史与缓存，不覆盖流式快照
   } catch (e) { console.error(`[poll] ${dev.name}:`, e.message); }
   finally { dev.polling = false; }
 }

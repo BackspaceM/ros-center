@@ -20,7 +20,9 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 ### 功能亮点
 
 - **多设备管控**：顶栏下拉切换；设备增删改查、测试连接、设为主设备、重连；配置持久化到 `data/devices.json`
-- **实时流量**：总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口列表与迷你趋势、连接排行
+- **实时流量**：实时流量来自 RouterOS 原生 `monitor-traffic` 流式监听（设备每秒主动推送，无需反复查询）；总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口列表与迷你趋势、连接排行
+
+流式监听不可用时（旧版 RouterOS 或网络限制）自动回退到轮询，并每 10 秒重试一次恢复流式。可用 `TRAFFIC_STREAM=0` 强制只用轮询。
 - **分类配置**：9 组 44 个分类，接口、IP、DHCP、DNS、路由、防火墙 IPv4/IPv6（Filter/NAT/Mangle/地址列表/服务端口）、WiFi、PPP、WireGuard、队列、用户、系统服务、计划任务、脚本等，支持新增/编辑/启用/禁用/删除/搜索/表头排序/分页；RouterOS 的十六进制 `.id` 显示为十进制序号
 - **WireGuard 扫码添加**：行内扫码按钮打开 WinBox 风格对端表单（名称、接口、私钥可手填或一键生成、公钥、Endpoint/端口、允许地址、预共享密钥、持久保活、responder 等），实时生成客户端配置二维码，可保存回 RouterOS、复制或下载 `.conf`
 - **中英双语**：右上角一键切换，界面、表单、提示、错误全部双语
@@ -110,7 +112,9 @@ node server.js          # Node.js 18+，无需 npm install
 | `ROS_PORT` | `8728` | API 端口；API-SSL 用 `8729` |
 | `ROS_TLS` | `0` | `1` 启用 API-SSL |
 | `ROS_USER` / `ROS_PASSWORD` | `monitor` / 空 | RouterOS 账号密码 |
-| `POLL_INTERVAL_MS` | `2000` | 采样间隔（毫秒） |
+| `TRAFFIC_STREAM` | `1` | `1` 使用 RouterOS 原生 monitor 流式推送；`0` 强制轮询回退 |
+| `TRAFFIC_STREAM_RETRY_MS` | `10000` | 流式断开后重试间隔（毫秒） |
+| `POLL_INTERVAL_MS` | `1000` | 轮询/系统资源刷新间隔（毫秒，最低 500） |
 | `HISTORY_POINTS` | `180` | 图表保留点数 |
 | `DEMO_MODE` | `0` | `1` = 强制演示数据，不连路由器 |
 | `DOCKER_IMAGE` | `backspacem/ros-center:latest` | compose 使用的镜像名 |
@@ -155,7 +159,9 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 ### Features
 
 - **Multi-router management**: switch devices from the top bar; add/edit/delete, test connection, set primary, reconnect; persisted in `data/devices.json`
-- **Live traffic**: download/upload/active ports/peak cards, dual-line charts, per-interface mini sparklines, connection ranking
+- **Live traffic**: powered by RouterOS native `monitor-traffic` streaming (the device pushes a fresh sample every second, no repeated polling); download/upload/active ports/peak cards, dual-line charts, per-interface mini sparklines, connection ranking
+
+If streaming is unavailable (older RouterOS or restricted networks), the app falls back to polling and retries streaming every 10 seconds. Set `TRAFFIC_STREAM=0` to force polling.
 - **Categorized config**: 9 groups, 44 sections — interfaces, IP, DHCP, DNS, routes, separate IPv4/IPv6 firewall (filter/NAT/mangle/address lists/service ports), WiFi, PPP, WireGuard, queues, users, services, schedules, scripts — with add/edit/enable/disable/delete/search/column sorting/pagination. RouterOS hex `.id` values are shown as decimal sequence numbers
 - **WireGuard QR**: in-row scan button opens a WinBox-style peer form (name, interface, private key with one-click generation, public key, endpoint/port, allowed address, preshared key, persistent keepalive, responder...), generates a client QR, saves back to RouterOS, and copies/downloads `.conf`
 - **Bilingual UI**: one-click Chinese/English switch across labels, forms, hints and errors
@@ -222,7 +228,9 @@ node server.js      # Node.js 18+, no npm install needed
 | `ROS_PORT` | `8728` | API port; use `8729` for API-SSL |
 | `ROS_TLS` | `0` | `1` enables API-SSL |
 | `ROS_USER` / `ROS_PASSWORD` | `monitor` / empty | RouterOS credentials |
-| `POLL_INTERVAL_MS` | `2000` | Poll interval in ms |
+| `TRAFFIC_STREAM` | `1` | `1` uses native RouterOS monitor streaming; `0` forces polling fallback |
+| `TRAFFIC_STREAM_RETRY_MS` | `10000` | Retry interval in ms after a stream drops |
+| `POLL_INTERVAL_MS` | `1000` | Polling / system resource refresh interval in ms (min 500) |
 | `HISTORY_POINTS` | `180` | Chart history points |
 | `DEMO_MODE` | `0` | `1` forces demo data |
 | `DOCKER_IMAGE` | `backspacem/ros-center:latest` | Image used by compose |
