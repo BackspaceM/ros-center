@@ -45,10 +45,19 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' > /tmp/hub-meta.json
-          import json
+          import json, sys
+          raw = open("README.md", encoding="utf-8").read()
+          # Docker Hub full_description is limited to 25000 bytes; cap at a paragraph boundary
+          # and point to GitHub for the uncut document instead of failing the whole publish.
+          limit = 24900
+          if len(raw.encode("utf-8")) > limit:
+              head = raw.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+              head = head.rsplit("\n\n", 1)[0]
+              raw = head + "\n\n> Full documentation: https://github.com/BackspaceM/ros-center#readme\n"
+              print("README capped at %d bytes for Docker Hub" % len(raw.encode("utf-8")), file=sys.stderr)
           print(json.dumps({
             "description": "RouterOS multi-router control center: live traffic, traffic stats, config, bilingual UI, 13 themes",
-            "full_description": open("README.md", encoding="utf-8").read()
+            "full_description": raw
           }))
           PY
           CODE=$(curl -sS -o /tmp/hub-login.json -w '%{http_code}' -X POST \
