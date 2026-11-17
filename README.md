@@ -93,6 +93,16 @@ docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
 ```
 
+**Docker 映射与变量（要点）**
+
+- 端口：`WEB_PORT`（宿主机）→ `CONTAINER_PORT`（容器内，默认 `10086`）
+- 数据卷：`./data:/app/data` 保存设备、统计与拓扑；`./data/topology-icons:/app/data/topology-icons` 单独保存上传的拓扑图标（compose 已配置，`docker run` 需手动加）
+- 连接：`ROS_HOST` / `ROS_PORT` / `ROS_TLS` / `ROS_USER` / `ROS_PASSWORD` — RouterOS 地址、API 端口、TLS 与账号
+- 采集：`POLL_INTERVAL_MS` / `CONN_POLL_INTERVAL_MS` / `TRAFFIC_STREAM` / `TRAFFIC_STREAM_RETRY_MS` / `HISTORY_POINTS` — 刷新间隔、流量流与图表点数
+- 界面与存储：`DEMO_MODE` / `ROS_CENTER_KEY` / `WEB_USER` / `WEB_PASSWORD` / `DOCKER_IMAGE` — 演示开关、凭据加密密钥、WebUI 登录与镜像名
+
+完整默认值见下方变量表。
+
 默认 `DEMO_MODE=0`，启动即连接真实路由器。仅当想单独预览界面时才设为 `1`：此时页面会明确标注「演示 DEMO」，**流量统计不会写入任何演示数据**。连不上路由器时显示「离线 OFFLINE」并保留最后一次真实值，不会注入假数据或估算值。
 
 **监控负载说明**：真实在线模式下，服务端每秒只请求一次 `/system/resource/print`；接口速率走 `/interface/monitor-traffic` 长连接推送（可用 `TRAFFIC_STREAM=0` 退回轮询）；连接表默认每 5 秒刷新一次（`CONN_POLL_INTERVAL_MS`）。拓扑页每 2.5 秒读取的是服务端内存快照，**不会额外访问 RouterOS**。该频率对主路由的负载很小，不需要再降频。
@@ -228,6 +238,16 @@ cp .env.example .env
 docker compose up -d
 # Use local source build instead: docker compose up -d --build
 ```
+
+**Docker mounts and variables (quick reference)**
+
+- Ports: `WEB_PORT` (host) → `CONTAINER_PORT` (container, default `10086`)
+- Volumes: `./data:/app/data` for devices, stats and topology; `./data/topology-icons:/app/data/topology-icons` for uploaded topology icons (already in compose; add manually with `docker run`)
+- RouterOS: `ROS_HOST` / `ROS_PORT` / `ROS_TLS` / `ROS_USER` / `ROS_PASSWORD` — address, API port, TLS and credentials
+- Collection: `POLL_INTERVAL_MS` / `CONN_POLL_INTERVAL_MS` / `TRAFFIC_STREAM` / `TRAFFIC_STREAM_RETRY_MS` / `HISTORY_POINTS` — refresh intervals, traffic stream and chart points
+- UI/storage: `DEMO_MODE` / `ROS_CENTER_KEY` / `WEB_USER` / `WEB_PASSWORD` / `DOCKER_IMAGE` — demo switch, credential encryption key, WebUI sign-in and image name
+
+Defaults are listed in the variable table below.
 
 **From source:**
 
