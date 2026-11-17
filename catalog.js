@@ -25,7 +25,7 @@ const GROUPS = [
 
 const SECTIONS = [
   /* ---------- 概览 ---------- */
-  S('dashboard', 'overview', '系统概览', 'Dashboard', null, [], { virtual: true, toggle: false, writable: false }),
+  S('dashboard', 'overview', '仪表盘', 'Dashboard', null, [], { virtual: true, toggle: false, writable: false }),
   S('traffic', 'overview', '实时流量', 'Live traffic', null, [], { virtual: true, toggle: false, writable: false }),
   S('systemTools', 'overview', '运维工具', 'Tools', null, [], { virtual: true, toggle: false, writable: false }),
   S('connections', 'overview', '连接状态', 'Connections', '/ip/firewall/connection',
