@@ -47,7 +47,7 @@ jobs:
           python3 - <<'PY' > /tmp/hub-meta.json
           import json
           print(json.dumps({
-            "description": "ROS Center - multi-router RouterOS control center: live traffic, config, bilingual UI and 10 themes",
+            "description": "ROS Center - multi-router RouterOS control center: live traffic, traffic stats, config, bilingual UI and dual-axis themes",
             "full_description": open("README.md", encoding="utf-8").read()
           }))
           PY
