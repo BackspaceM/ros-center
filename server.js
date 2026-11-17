@@ -26,7 +26,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
-let PORT = envNum('PORT', 3000);
+let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
 
 /* ================= RouterOS binary API ================= */
@@ -221,6 +221,14 @@ class Device {
 const devices = new Map();
 let activeId = '';
 
+/* 旧版本默认监听 3000，升级到新默认 10086 时不能被持久化值覆盖；
+   只有非旧默认值才视为用户显式配置。 */
+function savedListenPort(value) {
+  const n = Number(value);
+  if (n === 3000 || !validPort(n)) return null;
+  return n;
+}
+
 function loadDeviceRegistry() {
   let reg = null;
   try { reg = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8')); } catch (e) { reg = null; }
@@ -238,14 +246,16 @@ function loadDeviceRegistry() {
       tls: typeof old.tls === 'boolean' ? old.tls : process.env.ROS_TLS === '1',
       demo: typeof old.demo === 'boolean' ? old.demo : process.env.DEMO_MODE === '1',
     };
-    reg = { devices: [seeded], activeId: seeded.id, webPort: Number(old.webPort || PORT), hostPort: Number(process.env.WEB_PORT || 0) || 0 };
+    reg = { devices: [seeded], activeId: seeded.id, webPort: savedListenPort(old.webPort) || PORT, hostPort: Number(process.env.WEB_PORT || 0) || 0 };
     if (validPort(reg.webPort)) PORT = Number(reg.webPort);
     devices.set(seeded.id, new Device({ ...seeded }));
     activeId = seeded.id;
     saveDeviceRegistry();
     return;
   }
-  if (validPort(reg.webPort)) PORT = Number(reg.webPort);
+  const persistedPort = savedListenPort(reg.webPort);
+  const portMigrated = !persistedPort && Number(reg.webPort) !== PORT;
+  if (persistedPort) PORT = persistedPort;
   for (const d of reg.devices) {
     if (!d.id || !validHost(d.host) || !validPort(d.port) || !validName(d.name)) continue;
     devices.set(String(d.id), new Device({
@@ -259,6 +269,7 @@ function loadDeviceRegistry() {
     activeId = fallback.id;
     saveDeviceRegistry();
   } else activeId = devices.has(reg.activeId) ? reg.activeId : devices.keys().next().value;
+  if (portMigrated) saveDeviceRegistry(); // 设备已在内存中，安全落盘
 }
 function saveDeviceRegistry() {
   const reg = {

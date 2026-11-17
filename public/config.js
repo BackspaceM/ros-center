@@ -281,7 +281,7 @@ function renderConnectionSettings() {
   $('content').innerHTML = `
     <div class="page-head"><div><h1>${t('devices')}</h1><p>${t('devices_sub')}</p></div>
       <div class="page-actions">
-        <button class="btn" id="devWebPort">${t('conn_web_port')}: ${esc(state.webPort || 3000)}</button>
+        <button class="btn" id="devWebPort">${t('conn_web_port')}: ${esc(state.webPort || 10086)}</button>
         <button class="btn" id="devRefresh">${t('refresh')}</button>
         <button class="btn primary" id="devAdd">+ ${t('device_add')}</button>
       </div></div>
@@ -293,8 +293,8 @@ function renderConnectionSettings() {
     <div class="grid-2" style="margin-top:14px">
       <div class="panel"><div class="panel-head"><div><h2>${t('conn_web_port')}</h2><p class="sub">${t('conn_web_port_hint')}</p></div></div>
         <div class="panel-body"><div class="form-row"><label>${t('conn_web_port')}</label>
-          <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 3000)}">
-          <p class="form-hint">${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 3000)}</p></div></div>
+          <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 10086)}">
+          <p class="form-hint">${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 10086)}</p></div></div>
           <button class="btn primary" id="devSavePort">${t('save')}</button></div></div>
       <div class="panel"><div class="panel-head"><div><h2>${t('conn_security')}</h2><p class="sub">${esc(t('note'))}</p></div></div>
         <div class="panel-body"><div class="note-card warn">${t('conn_security_tip')}</div>

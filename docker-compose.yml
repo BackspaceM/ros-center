@@ -5,11 +5,11 @@ services:
     container_name: ros-center
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-3000}:${CONTAINER_PORT:-3000}"
+      - "${WEB_PORT:-3000}:${CONTAINER_PORT:-10086}"
     volumes:
       - ./data:/app/data
     environment:
-      PORT: ${CONTAINER_PORT:-3000}
+      PORT: ${CONTAINER_PORT:-10086}
       HOST: 0.0.0.0
       ROS_HOST: ${ROS_HOST:-192.168.88.1}
       ROS_PORT: ${ROS_PORT:-8728}

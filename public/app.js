@@ -124,7 +124,7 @@ const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
   hoverIndex: -1, selectedIface: '__all__', mode: 'demo', configDemo: false,
-  collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 3000, hostPort: 0,
+  collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
 };
 try { JSON.parse(localStorage.getItem('ros-traffic-groups') || '[]').forEach((id) => state.collapsedGroups.add(id)); } catch (e) { /* ignore */ }
 const $ = (id) => document.getElementById(id);
@@ -333,7 +333,7 @@ async function loadDevices(keepLocal) {
     const d = await api('/api/devices');
     state.devices = d.devices || [];
     state.devicePrimary = d.activeId || '';
-    state.webPort = d.webPort || 3000; state.hostPort = d.hostPort || 0;
+    state.webPort = d.webPort || 10086; state.hostPort = d.hostPort || 0;
     if (!keepLocal && !state.deviceId) {
       const urlDev = new URLSearchParams(location.search).get('device');
       const nameDev = new URLSearchParams(location.search).get('dev');

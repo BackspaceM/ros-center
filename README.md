@@ -65,7 +65,7 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 ```bash
 mkdir -p ros-center && cd ros-center
 docker run -d --name ros-center --restart unless-stopped \
-  -p 3000:3000 \
+  -p 3000:10086 \
   -v "$PWD/data:/app/data" \
   backspacem/ros-center:latest
 ```
@@ -78,7 +78,7 @@ docker run -d --name ros-center --restart unless-stopped \
 git clone https://github.com/BackspaceM/ros-center.git
 cd ros-center
 cp .env.example .env
-# 如需改端口：WEB_PORT=8080 CONTAINER_PORT=3000
+# 如需改端口：WEB_PORT=8080 CONTAINER_PORT=10086
 # 默认直接拉取 Docker Hub 官方镜像 backspacem/ros-center:latest：
 docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
@@ -105,7 +105,7 @@ node server.js          # Node.js 18+，无需 npm install
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `WEB_PORT` | `3000` | 宿主机访问端口 |
-| `CONTAINER_PORT` | `3000` | 容器内监听端口，改完需与 `WEB_PORT` 映射一致并重启 |
+| `CONTAINER_PORT` | `10086` | 容器内监听端口，改完需同步修改 compose 端口映射并重启 |
 | `ROS_HOST` | `192.168.88.1` | 第一台 RouterOS 地址 |
 | `ROS_PORT` | `8728` | API 端口；API-SSL 用 `8729` |
 | `ROS_TLS` | `0` | `1` 启用 API-SSL |
@@ -180,7 +180,7 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 ```bash
 mkdir -p ros-center && cd ros-center
 docker run -d --name ros-center --restart unless-stopped \
-  -p 3000:3000 \
+  -p 3000:10086 \
   -v "$PWD/data:/app/data" \
   backspacem/ros-center:latest
 ```
@@ -215,7 +215,7 @@ node server.js      # Node.js 18+, no npm install needed
 | Variable | Default | Description |
 | --- | --- | --- |
 | `WEB_PORT` | `3000` | Host-side port |
-| `CONTAINER_PORT` | `3000` | Container listen port; keep mapping in sync and restart to apply |
+| `CONTAINER_PORT` | `10086` | Container listen port; update the compose port mapping and restart to apply |
 | `ROS_HOST` | `192.168.88.1` | First RouterOS address |
 | `ROS_PORT` | `8728` | API port; use `8729` for API-SSL |
 | `ROS_TLS` | `0` | `1` enables API-SSL |
