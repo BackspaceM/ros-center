@@ -205,8 +205,8 @@ function buildNav(filter = '') {
     const activeHere = items.some((s) => s.id === state.section);
     const collapsed = !f && state.collapsedGroups.has(g.id);
     return `<div class="nav-group ${collapsed ? 'collapsed' : ''} ${activeHere ? 'has-active' : ''}">
-      <button class="nav-group-title" data-group="${g.id}" title="${esc(tx(g.title))}">
-        <span>${esc(tx(g.title))}</span><span class="group-chev">⌄</span><span class="group-count">${items.length}</span>
+      <button class="nav-group-title" data-group="${g.id}" title="${esc(tx(g))}">
+        <span>${esc(tx(g))}</span><span class="group-chev">⌄</span><span class="group-count">${items.length}</span>
       </button>
       <div class="nav-items">${items.map((s) =>
         `<button class="nav-item ${s.id === state.section ? 'active' : ''}" data-section="${s.id}" title="${esc(tx(s.title))}">
@@ -306,7 +306,7 @@ function renderPage() {
   const sec = state.schema.sections.find((s) => s.id === state.section);
   if (!sec) return;
   const g = state.schema.groups.find((x) => x.id === sec.group);
-  $('crumbGroup').textContent = tx(g && g.title); $('crumbSection').textContent = tx(sec.title);
+  $('crumbGroup').textContent = g ? tx(g) : ''; $('crumbSection').textContent = tx(sec.title);
   if (sec.id === 'dashboard') return renderDashboard();
   if (sec.id === 'traffic') return renderTraffic();
   if (sec.id === 'systemTools') return renderTools();
