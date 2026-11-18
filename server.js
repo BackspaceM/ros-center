@@ -989,6 +989,12 @@ function ifacesFromCache(dev) {
   }
   return out;
 }
+/* 历史点同时保留每个接口的速率，前端切换「仪表盘速率接口」后可重建该接口的趋势 */
+function historyPoint(ts, ifaces, totalRx, totalTx) {
+  const per = {};
+  for (const i of ifaces || []) per[i.name] = { rx: i.rxBps || 0, tx: i.txBps || 0 };
+  return { ts, rx: totalRx, tx: totalTx, per };
+}
 function emitStreamPacket(dev) {
   if (!dev.ifaceMeta.size) return;
   const ifaces = ifacesFromCache(dev);
@@ -1000,7 +1006,7 @@ function emitStreamPacket(dev) {
     totalRx, totalTx, ifaces, resource: dev.lastResource || {}, resourceHistory: dev.resourceHistory,
     connections: dev.connections, connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
   };
-  dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
+  dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
   if (dev.history.length > HISTORY) dev.history.shift();
   dev.lastPacket = packet;
   broadcast(dev.id, packet);
@@ -1077,7 +1083,7 @@ async function pollDevice(dev) {
       totalRx, totalTx, ifaces, resource, connections: dev.connections,
       connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
     };
-    dev.history.push({ ts: packet.ts, rx: totalRx, tx: totalTx });
+    dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
     if (dev.history.length > HISTORY) dev.history.shift();
     dev.resourceHistory.push({ ts: packet.ts, cpu: num(resource['cpu-load']), free: num(resource['free-memory']), total: num(resource['total-memory']) });
     if (dev.resourceHistory.length > HISTORY) dev.resourceHistory.shift();

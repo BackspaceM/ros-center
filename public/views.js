@@ -14,7 +14,13 @@ function renderDashboard() {
   const memPct = r['total-memory'] ? Math.round((1 - num(r['free-memory']) / num(r['total-memory'])) * 100) : 0;
   const diskPct = r['total-hdd-space'] ? Math.round((1 - num(r['free-hdd-space']) / num(r['total-hdd-space'])) * 100) : 0;
   const active = (d.ifaces || []).filter((i) => i.running === 'true' && i.disabled !== 'true').length;
-  const rx = fmtRate(d.totalRx || 0), tx = fmtRate(d.totalTx || 0);
+  const sel = state.selectedIface;
+  const selIface = sel !== '__all__' ? (d.ifaces || []).find((i) => i.name === sel) : null;
+  const rx = fmtRate(sel === '__all__' ? (d.totalRx || 0) : (selIface ? selIface.rxBps || 0 : 0));
+  const tx = fmtRate(sel === '__all__' ? (d.totalTx || 0) : (selIface ? selIface.txBps || 0 : 0));
+  const scopeTag = sel === '__all__' ? '' : `<span class="card-scope">${esc(sel)}</span>`;
+  const rxFoot = esc(sel === '__all__' ? t('rx_hint') : t('rx_hint_one'));
+  const txFoot = esc(sel === '__all__' ? t('tx_hint') : t('tx_hint_one'));
   const cn = d.connections || { v4: 0, v6: 0, total: 0, tcp4: 0, tcp6: 0, udp4: 0, udp6: 0, tcp: 0, udp: 0 };
   let peak = 0; for (const p of state.points) peak = Math.max(peak, p.rx || 0);
   const pk = fmtRate(peak);
@@ -22,11 +28,18 @@ function renderDashboard() {
   $('content').innerHTML = `
     <div class="page-head">
       <div><h1>${t('overview_title') || '系统概览'}</h1><p>${esc(r['board-name'] || 'RouterOS')} · RouterOS ${esc(r.version || '')} · ${t('uptime')} ${fmtUptime(d.uptime)}</p></div>
-      <div class="page-actions">${demoBadge()}</div>
+      <div class="page-actions">
+        <button class="dash-iface-btn${sel === '__all__' ? '' : ' custom'}" id="dashIfaceBtn" type="button" title="${esc(t('dash_iface_title'))}">
+          <span class="dash-iface-ic">⇅</span>
+          <span class="dash-iface-txt"><small>${esc(t('dash_iface'))}</small><b class="dash-iface-name">${esc(dashIfaceLabel())}</b></span>
+          <span class="dash-iface-caret">⌄</span>
+        </button>
+        ${demoBadge()}
+      </div>
     </div>
     <div class="cards">
-      <div class="card rx"><div class="card-label">${t('total_rx')}</div><div class="card-value">${rx.v}<small>${rx.u}</small></div><div class="card-foot">${t('rx_hint')}</div></div>
-      <div class="card tx"><div class="card-label">${t('total_tx')}</div><div class="card-value">${tx.v}<small>${tx.u}</small></div><div class="card-foot">${t('tx_hint')}</div></div>
+      <div class="card rx"><div class="card-label">${t('total_rx')}${scopeTag}</div><div class="card-value">${rx.v}<small>${rx.u}</small></div><div class="card-foot">${rxFoot}</div></div>
+      <div class="card tx"><div class="card-label">${t('total_tx')}${scopeTag}</div><div class="card-value">${tx.v}<small>${tx.u}</small></div><div class="card-foot">${txFoot}</div></div>
       <div class="card ok"><div class="card-label">${t('active_if')}</div><div class="card-value">${active}<small>/ ${(d.ifaces || []).length}</small></div><div class="card-foot">${t('if_hint')}</div></div>
       <div class="card warn"><div class="card-label">${t('peak_rx')}</div><div class="card-value">${pk.v}<small>${pk.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
     </div>
@@ -73,6 +86,7 @@ function renderDashboard() {
   ], (v) => v.toFixed(1) + '%');
   drawConnSpark();
   renderTopTables(d);
+  if (window.paintDashIfacePop) window.paintDashIfacePop();
 }
 /* 连接状态：IPv4 / IPv6 各成一组，子项保持短小并可横向滑动 */
 function connGroup(name, total, tcp, udp, cls) {

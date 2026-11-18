@@ -8,6 +8,7 @@ const I18N = {
     overview_title: '系统概览', if_title: '接口详情',
     total_rx: '总下载', total_tx: '总上传', active_if: '活跃接口', peak_rx: '峰值下载',
     rx_hint: '所有接口接收速率之和', tx_hint: '所有接口发送速率之和', if_hint: '已启用并运行的接口',
+    rx_hint_one: '所选接口的接收速率', tx_hint_one: '所选接口的发送速率',
     trend_title: '实时流量趋势', trend_sub: '最近 6 分钟 · 每秒采样', conn_title: '连接状态',
     conn_sub: '活跃连接数 · 来自路由器连接表', conn_total: '连接总数', health_title: '设备健康', health_sub: 'CPU 与内存占用',
     ifdist_title: '接口类型分布', ifdist_sub: '按实际接口类型统计，非估算', wlan_title: '终端概览', wlan_sub: '在线终端与接口分布', top_if: '接口流量排行 (TOP 10)',
@@ -20,6 +21,12 @@ const I18N = {
     conn_total_hint: '当前活跃连接', conn_group_all: '全部', conn_tcp: 'TCP', conn_udp: 'UDP', conn_other: '其他', conn_v4: 'IPv4', conn_v6: 'IPv6',
     device_online: '在线', device_offline: '离线', demo_only: '演示 DEMO',
     stats_iface_all_short: '全部网口', stats_chart_prefix: '范围', search_hint: '快捷键搜索菜单',
+    dash_iface: '速率接口', dash_iface_title: '仪表盘速率接口',
+    dash_iface_sub: '上下行速率、趋势与峰值均按所选接口统计',
+    dash_iface_all: '全部接口', dash_iface_all_sub: '所有网口速率之和',
+    dash_iface_search: '搜索接口…', dash_iface_empty: '没有匹配的接口',
+    dash_iface_foot: '选择立即生效，并按设备记住', dash_iface_only: '仅统计 {name}',
+    dash_iface_up: '运行中', dash_iface_down: '未运行',
     enable: '启用', disable: '禁用', enabled: '已启用', disabled: '已禁用', yes: '是', no: '否',
     run_script: '运行', run_script_row: '运行此脚本', run_script_none: '请先选择要运行的脚本',
     run_script_ok: '脚本已提交运行', run_script_confirm: '确定立即运行选中的 {n} 个脚本？',
@@ -106,6 +113,7 @@ const I18N = {
     overview_title: 'Dashboard', if_title: 'Interface details',
     total_rx: 'Total download', total_tx: 'Total upload', active_if: 'Active ports', peak_rx: 'Peak download',
     rx_hint: 'Sum of receive rates', tx_hint: 'Sum of transmit rates', if_hint: 'Enabled and running interfaces',
+    rx_hint_one: 'Receive rate on the selected interface', tx_hint_one: 'Transmit rate on the selected interface',
     trend_title: 'Live traffic trend', trend_sub: 'Last 6 minutes · 1s sampling', conn_title: 'Connection status',
     conn_sub: 'Active connections · from the router connection table', conn_total: 'Total connections', health_title: 'Device health', health_sub: 'CPU and memory usage',
     ifdist_title: 'Interface types', ifdist_sub: 'Counted by real interface type, not estimated', wlan_title: 'Client overview', wlan_sub: 'Online clients and interface distribution', top_if: 'Interface traffic (TOP 10)',
@@ -118,6 +126,12 @@ const I18N = {
     conn_total_hint: 'Active connections', conn_group_all: 'All', conn_tcp: 'TCP', conn_udp: 'UDP', conn_other: 'Other', conn_v4: 'IPv4', conn_v6: 'IPv6',
     device_online: 'Online', device_offline: 'Offline', demo_only: 'DEMO',
     stats_iface_all_short: 'All interfaces', stats_chart_prefix: 'Range', search_hint: 'Search menu shortcut',
+    dash_iface: 'Rate source', dash_iface_title: 'Dashboard rate source',
+    dash_iface_sub: 'Uplink, downlink, trend and peak all follow the selected interface',
+    dash_iface_all: 'All interfaces', dash_iface_all_sub: 'Sum of all interfaces',
+    dash_iface_search: 'Search interfaces…', dash_iface_empty: 'No matching interfaces',
+    dash_iface_foot: 'Applies instantly and is remembered per device', dash_iface_only: '{name} only',
+    dash_iface_up: 'Up', dash_iface_down: 'Down',
     enable: 'Enable', disable: 'Disable', enabled: 'Enabled', disabled: 'Disabled', yes: 'Yes', no: 'No',
     run_script: 'Run', run_script_row: 'Run this script', run_script_none: 'Select the scripts to run first',
     run_script_ok: 'Script run submitted', run_script_confirm: 'Run the {n} selected script(s) now?',
@@ -543,7 +557,7 @@ async function switchDevice(id, silent) {
   if (!id || id === state.deviceId || !state.devices.some((d) => d.id === id)) return;
   state.deviceId = id;
   try { localStorage.setItem('ros-traffic-device', id); } catch (e) { /* ignore */ }
-  state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); state.selectedIface = '__all__';
+  state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); restoreDashIface();
   state.latest = null; state.connRows = []; state.usageData = null; state.usageDetailPage = 1; state.usageIfaceSig = '';
   renderDevicePicker();
   const nowDev = state.devices.find((x) => x.id === id);
@@ -567,14 +581,130 @@ function navigate(id) {
   try { localStorage.setItem('ros-traffic-section', id); } catch (e) { /* ignore */ }
 }
 
+/* ================= 仪表盘速率接口 =================
+   选择结果按设备持久化；历史点带 per（每接口速率），刷新后也能重建单接口趋势。 */
+function dashIfaceKey() { return 'ros-dash-iface:' + (state.deviceId || 'default'); }
+function dashIfaceLabel() { return state.selectedIface === '__all__' ? t('dash_iface_all') : state.selectedIface; }
+function pointForIface(p) {
+  const base = { ts: p.ts, per: p.per || null };
+  if (state.selectedIface === '__all__') return { ...base, rx: p.rx || 0, tx: p.tx || 0 };
+  const v = p.per && p.per[state.selectedIface];
+  return { ...base, rx: v ? v.rx || 0 : 0, tx: v ? v.tx || 0 : 0 };
+}
+function restoreDashIface() {
+  let saved = '__all__';
+  try { saved = localStorage.getItem(dashIfaceKey()) || '__all__'; } catch (e) { /* ignore */ }
+  state.selectedIface = saved;
+}
+function setDashIface(name) {
+  state.selectedIface = name === '__all__' ? '__all__' : String(name || '');
+  try { localStorage.setItem(dashIfaceKey(), state.selectedIface); } catch (e) { /* ignore */ }
+  state.points = state.points.map(pointForIface);
+  closeDashIfacePop();
+  if (state.section === 'dashboard') renderDashboard();
+  paintDashIfacePop();
+}
+let dashIfacePop = null;
+function ensureDashIfacePop() {
+  if (dashIfacePop) return dashIfacePop;
+  const el = document.createElement('div');
+  el.className = 'iface-pop';
+  el.id = 'dashIfacePop';
+  el.hidden = true;
+  el.innerHTML = `<div class="iface-pop-head">
+      <div><b>${esc(t('dash_iface_title'))}</b><small>${esc(t('dash_iface_sub'))}</small></div>
+      <button class="iface-pop-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="iface-pop-search"><input type="search" id="dashIfaceSearch" placeholder="${esc(t('dash_iface_search'))}" autocomplete="off"></div>
+    <div class="iface-pop-list" id="dashIfaceList"></div>
+    <div class="iface-pop-foot">${esc(t('dash_iface_foot'))}</div>`;
+  document.body.appendChild(el);
+  dashIfacePop = el;
+  el.querySelector('.iface-pop-close').onclick = () => closeDashIfacePop();
+  el.querySelector('#dashIfaceSearch').oninput = () => renderDashIfaceList();
+  el.addEventListener('click', (e) => {
+    const opt = e.target.closest('.iface-opt');
+    if (opt) setDashIface(opt.dataset.name);
+  });
+  return el;
+}
+function openDashIfacePop(btn) {
+  const el = ensureDashIfacePop();
+  el.hidden = false;
+  const r = btn.getBoundingClientRect();
+  const w = Math.min(340, Math.max(280, window.innerWidth - 24));
+  el.style.width = w + 'px';
+  el.style.left = Math.max(12, Math.min(r.right - w, window.innerWidth - w - 12)) + 'px';
+  el.style.top = Math.min(r.bottom + 8, Math.max(12, window.innerHeight - 400)) + 'px';
+  el.dataset.sig = '';
+  paintDashIfacePop();
+  const s = el.querySelector('#dashIfaceSearch'); s.value = ''; s.focus();
+}
+function closeDashIfacePop() { if (dashIfacePop) dashIfacePop.hidden = true; }
+function renderDashIfaceList() {
+  const el = dashIfacePop; if (!el) return;
+  const d = state.latest || {};
+  const q = (el.querySelector('#dashIfaceSearch').value || '').trim().toLowerCase();
+  const ifaces = (d.ifaces || []).slice().sort((a, b) => ((b.rxBps || 0) + (b.txBps || 0)) - ((a.rxBps || 0) + (a.txBps || 0)));
+  const allOn = state.selectedIface === '__all__';
+  let html = `<button class="iface-opt${allOn ? ' active' : ''}" data-name="__all__" type="button">
+      <span class="iface-opt-ic all">≡</span>
+      <span class="iface-opt-main"><b>${esc(t('dash_iface_all'))}</b><small>${esc(t('dash_iface_all_sub'))}</small></span>
+      <span class="iface-opt-rate"></span><span class="iface-opt-check">✓</span></button>`;
+  const list = ifaces.filter((i) => !q || String(i.name).toLowerCase().includes(q));
+  for (const i of list) {
+    const down = i.running !== 'true' || i.disabled === 'true';
+    html += `<button class="iface-opt${state.selectedIface === i.name ? ' active' : ''}${down ? ' down' : ''}" data-name="${esc(i.name)}" type="button">
+      <span class="iface-opt-ic${down ? ' off' : ''}">${esc(String(i.type || 'eth').slice(0, 1).toUpperCase())}</span>
+      <span class="iface-opt-main"><b>${esc(i.name)}</b><small>${esc([i.comment || i.type || '', down ? t('dash_iface_down') : ''].filter(Boolean).join(' · '))}</small></span>
+      <span class="iface-opt-rate"></span><span class="iface-opt-check">✓</span></button>`;
+  }
+  if (!list.length && q) html += `<div class="iface-pop-empty">${esc(t('dash_iface_empty'))}</div>`;
+  el.querySelector('#dashIfaceList').innerHTML = html;
+}
+function paintDashIfacePop() {
+  const d = state.latest || {}, ifaces = d.ifaces || [];
+  /* 设备换了 / 接口消失时自动回到「全部接口」（浮层关闭时也要检查） */
+  if (state.selectedIface !== '__all__' && ifaces.length && !ifaces.some((i) => i.name === state.selectedIface)) {
+    state.selectedIface = '__all__';
+    try { localStorage.setItem(dashIfaceKey(), '__all__'); } catch (e) { /* ignore */ }
+    state.points = state.points.map(pointForIface);
+  }
+  const el = dashIfacePop; if (!el || el.hidden) return;
+  const q = (el.querySelector('#dashIfaceSearch').value || '').trim().toLowerCase();
+  const sig = ifaces.map((i) => i.name).join('|') + '##' + state.selectedIface + '##' + lang + '##' + q;
+  if (el.dataset.sig !== sig) { el.dataset.sig = sig; renderDashIfaceList(); }
+  const rate = (rx, tx) => '↓ ' + fmtRateStr(rx) + ' · ↑ ' + fmtRateStr(tx);
+  const byName = new Map(ifaces.map((i) => [String(i.name), i]));
+  el.querySelectorAll('.iface-opt[data-name]').forEach((o) => {
+    o.classList.toggle('active', o.dataset.name === state.selectedIface);
+    const box = o.querySelector('.iface-opt-rate'); if (!box) return;
+    if (o.dataset.name === '__all__') { box.textContent = rate(d.totalRx || 0, d.totalTx || 0); return; }
+    const i = byName.get(o.dataset.name);
+    if (i) box.textContent = rate(i.rxBps || 0, i.txBps || 0);
+  });
+}
+window.paintDashIfacePop = paintDashIfacePop;
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('#dashIfaceBtn');
+  if (btn) {
+    e.preventDefault();
+    if (dashIfacePop && !dashIfacePop.hidden) closeDashIfacePop();
+    else openDashIfacePop(btn);
+    return;
+  }
+  if (dashIfacePop && !dashIfacePop.hidden && !(e.target.closest && e.target.closest('#dashIfacePop'))) closeDashIfacePop();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDashIfacePop(); });
+
 /* ================= 实时数据 ================= */
 let socket = null, reconnectDelay = 1000;
 async function loadSnapshot() {
   try {
     const d = await api('/api/snapshot');
-    if (Array.isArray(d.history)) state.points = d.history.slice();
+    if (Array.isArray(d.history)) state.points = d.history.map(pointForIface);
     if (Array.isArray(d.resourceHistory)) state.resourceHistory = d.resourceHistory.slice();
-    for (const p of state.points) if (p.per) for (const [n, v] of Object.entries(p.per)) pushIfHist(n, p.ts, v);
+    for (const p of d.history || []) if (p.per) for (const [n, v] of Object.entries(p.per)) pushIfHist(n, p.ts, v);
     if (d.ifaces) applyData(d);
   } catch (e) { /* ws fallback */ }
 }
@@ -839,6 +969,7 @@ async function boot() {
   } catch (e) { /* ignore */ }
   $('adminBtn').onclick = () => navigate('connectionSettings');
   await loadDevices();
+  restoreDashIface();
   const curDev = state.devices.find((d) => d.id === state.deviceId);
   if (curDev && curDev.user) $('adminName').textContent = curDev.user;
   try { state.schema = await api('/api/schema'); }
