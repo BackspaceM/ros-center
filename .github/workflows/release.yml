@@ -30,7 +30,7 @@ jobs:
         with:
           path: dist/base
           key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
-      - run: npm run build:desktop
+      - run: node build/desktop.js --mac-x64
       - uses: actions/upload-artifact@v4
         with:
           name: portable
@@ -40,8 +40,10 @@ jobs:
             dist/*.zip.sha256
 
   macos:
-    name: macOS .pkg + .dmg
-    runs-on: macos-14
+    name: macOS .pkg + .dmg (arm64 + x64)
+    # Intel macOS runner is available on all plans; pkgbuild/hdiutil just archive
+    # files, so both arm64 and x64 payloads can be produced on the same host.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,7 +53,7 @@ jobs:
         with:
           path: dist/base
           key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
-      - run: node build/macos-installer.js
+      - run: node build/macos-installer.js --arch=all
       - uses: actions/upload-artifact@v4
         with:
           name: macos-installers
@@ -113,8 +115,11 @@ jobs:
 
           | 平台 | 安装包 | 绿色版 |
           | --- | --- | --- |
-          | macOS (Apple Silicon) | `.pkg` / `.dmg` | `ros-center-macos-arm64.zip` |
-          | Windows (x64) | `*-setup.exe`（NSIS 安装向导，带卸载） | `ros-center-windows-x64.zip` |
+          | macOS Apple Silicon | `*-macos-arm64.pkg` / `.dmg` | `ros-center-macos-arm64.zip` |
+          | macOS Intel | `*-macos-x64.pkg` / `.dmg` | `ros-center-macos-x64.zip` |
+          | Windows x64 | `*-windows-x64-setup.exe`（NSIS 安装向导，带卸载） | `ros-center-windows-x64.zip` |
+
+          请选择与芯片一致的 macOS 版本：Apple Silicon 用 `arm64`，Intel Mac 用 `x64`。
 
           **macOS**：双击 `.pkg` 按向导安装到 `/Applications`，或双击 `.dmg` 把 App 拖进 Applications。
           程序未签名，首次打开请右键 → 打开，或执行

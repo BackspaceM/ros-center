@@ -4,7 +4,7 @@
    用法：npm run build:desktop  （或 node build/desktop.js --mac-only） */
 const fs = require('fs');
 const path = require('path');
-const { DIST, TARGETS, stage, sha256 } = require('./stage');
+const { DIST, TARGETS, macTarget, stage, sha256 } = require('./stage');
 const { writeZip } = require('./zip');
 
 function collectEntries(dir, prefix, launcherName, out) {
@@ -31,5 +31,8 @@ function build(t) {
 }
 
 const onlyMac = process.argv.includes('--mac-only');
-for (const t of TARGETS.filter((x) => !onlyMac || x.key === 'mac')) build(t);
+const withX64 = process.argv.includes('--mac-x64');
+const targets = TARGETS.filter((x) => !onlyMac || x.key === 'mac-arm64');
+if (withX64) targets.push(macTarget('x64'));
+for (const t of targets) build(t);
 console.log('\n完成，产物在 dist/');

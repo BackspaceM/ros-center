@@ -1,23 +1,26 @@
 'use strict';
 /* 构建 macOS 安装包：ROS-Center-<version>-macos-<arch>.pkg 与 .dmg
-   .app 内只放只读程序文件；配置/数据写到 ~/Library/Application Support/ROS Center，
-   因此 /Applications 下的安装不需要写入权限。运行：node build/macos-installer.js */
+   用法：node build/macos-installer.js [--arch=arm64|x64|all]
+   默认按本机架构；--arch=all 会同时产出 arm64 与 x64（CI 推荐）。
+   .app 内只放只读程序文件；配置/数据写到 ~/Library/Application Support/ROS Center。 */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, execSync } = require('child_process');
-const { DIST, VERSION, TARGETS, stage, copyDir, sha256 } = require('./stage');
+const { DIST, VERSION, macTarget, stage, copyDir, sha256 } = require('./stage');
 
 if (process.platform !== 'darwin') {
   console.error('macOS installer must be built on macOS');
   process.exit(1);
 }
 
-const ARCH = process.env.ROS_ARCH || (execSync('uname -m').toString().trim() === 'arm64' ? 'arm64' : 'x64');
 const NAME = 'ROS Center';
 const APP = NAME + '.app';
-const BASE = `ROS-Center-${VERSION}-macos-${ARCH}`;
 const WORK = path.join(DIST, 'stage', 'macos-installer');
 const ICON_DIR = path.join(DIST, 'icons');
+const arg = (process.argv.find((a) => a.startsWith('--arch=')) || '').split('=')[1];
+const hostArch = execSync('uname -m').toString().trim() === 'arm64' ? 'arm64' : 'x64';
+const ARCHES = arg === 'all' ? ['arm64', 'x64']
+  : [arg || process.env.ROS_ARCH || hostArch];
 
 const INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,6 +72,8 @@ const PKG_README = `ROS Center ${VERSION} — macOS 安装说明
   .pkg ：双击，按向导安装到 /Applications（可能需要右键 → 打开，因为未签名）
   .dmg ：双击挂载，把 "ROS Center.app" 拖进 Applications
 
+请选择与芯片一致的版本：Apple Silicon 用 arm64，Intel Mac 用 x64。
+
 启动
   打开「启动台 / Applications」里的 ROS Center，会自动打开浏览器访问
   http://localhost:10086 （端口被占用时自动顺延）。
@@ -98,15 +103,16 @@ function ensureIcons() {
   }
 }
 
-function buildApp() {
-  const staged = stage(TARGETS.find((t) => t.key === 'mac'), path.join(WORK, 'portable'));
-  const appDir = path.join(WORK, 'app', APP);
+function buildApp(arch) {
+  console.log('\n=== building .app for ' + arch + ' ===');
+  const w = path.join(WORK, arch);
+  const staged = stage(macTarget(arch), path.join(w, 'portable'));
+  const appDir = path.join(w, 'app', APP);
   const contents = path.join(appDir, 'Contents');
   const res = path.join(contents, 'Resources');
-  fs.rmSync(path.join(WORK, 'app'), { recursive: true, force: true });
+  fs.rmSync(path.join(w, 'app'), { recursive: true, force: true });
   fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true });
 
-  /* 程序文件（只读安装位置） */
   copyDir(path.join(staged, 'app'), path.join(res, 'app'));
   copyDir(path.join(staged, 'bin'), path.join(res, 'bin'));
   fs.copyFileSync(path.join(staged, 'config.example.env'), path.join(res, 'config.example.env'));
@@ -116,21 +122,19 @@ function buildApp() {
   fs.writeFileSync(path.join(contents, 'Info.plist'), INFO_PLIST);
   fs.writeFileSync(path.join(contents, 'MacOS', 'ros-center'), LAUNCHER, { mode: 0o755 });
   fs.writeFileSync(path.join(res, 'Stop.command'), STOP_COMMAND, { mode: 0o755 });
-  /* 绿色版启动器不适用于安装版，删掉避免误导 */
-  fs.rmSync(path.join(res, 'Start.command'), { force: true });
   console.log('app:', appDir);
   return appDir;
 }
 
-function buildPkg(appDir) {
-  const root = path.join(WORK, 'pkg-root');
+function buildPkg(appDir, arch) {
+  const w = path.join(WORK, arch);
+  const root = path.join(w, 'pkg-root');
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
   fs.cpSync(appDir, path.join(root, APP), { recursive: true });
 
-  const scripts = path.join(WORK, 'pkg-scripts');
+  const scripts = path.join(w, 'pkg-scripts');
   fs.mkdirSync(scripts, { recursive: true });
-  /* 提供命令行入口，卸载时由 pkgutil --forget + 手动删除符号链接 */
   fs.writeFileSync(path.join(scripts, 'postinstall'), `#!/bin/sh
 set -e
 mkdir -p /usr/local/bin 2>/dev/null || true
@@ -138,7 +142,7 @@ ln -sf "/Applications/${APP}/Contents/MacOS/ros-center" /usr/local/bin/ros-cente
 exit 0
 `, { mode: 0o755 });
 
-  const component = path.join(WORK, 'component.pkg');
+  const component = path.join(w, 'component.pkg');
   execFileSync('pkgbuild', [
     '--root', root,
     '--identifier', 'cn.roscenter.desktop',
@@ -149,7 +153,7 @@ exit 0
     component,
   ], { stdio: 'inherit' });
 
-  const out = path.join(DIST, BASE + '.pkg');
+  const out = path.join(DIST, `ROS-Center-${VERSION}-macos-${arch}.pkg`);
   execFileSync('productbuild', [
     '--package', component,
     '--identifier', 'cn.roscenter.desktop.product',
@@ -159,31 +163,31 @@ exit 0
   const hex = sha256(out);
   console.log('pkg:', path.relative(path.join(__dirname, '..'), out),
     (fs.statSync(out).size / 1024 / 1024).toFixed(1) + ' MB', 'sha256:', hex.slice(0, 12) + '…');
-  return out;
 }
 
-function buildDmg(appDir) {
-  const root = path.join(WORK, 'dmg-root');
+function buildDmg(appDir, arch) {
+  const w = path.join(WORK, arch);
+  const root = path.join(w, 'dmg-root');
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
   fs.cpSync(appDir, path.join(root, APP), { recursive: true });
-  /* 拖放安装的 Applications 别名 */
   const apps = path.join(root, 'Applications');
   try { fs.unlinkSync(apps); } catch (e) { /* ignore */ }
   fs.symlinkSync('/Applications', apps);
   fs.writeFileSync(path.join(root, '安装说明.txt'), PKG_README);
 
-  const out = path.join(DIST, BASE + '.dmg');
+  const out = path.join(DIST, `ROS-Center-${VERSION}-macos-${arch}.dmg`);
   execFileSync('hdiutil', ['create', '-volname', `ROS Center ${VERSION}`, '-srcfolder', root,
     '-ov', '-format', 'UDZO', '-fs', 'HFS+', out], { stdio: 'pipe' });
   const hex = sha256(out);
   console.log('dmg:', path.relative(path.join(__dirname, '..'), out),
     (fs.statSync(out).size / 1024 / 1024).toFixed(1) + ' MB', 'sha256:', hex.slice(0, 12) + '…');
-  return out;
 }
 
 ensureIcons();
-const appDir = buildApp();
-buildPkg(appDir);
-buildDmg(appDir);
-console.log('\nmacOS 安装包完成，产物在 dist/');
+for (const arch of ARCHES) {
+  const appDir = buildApp(arch);
+  buildPkg(appDir, arch);
+  buildDmg(appDir, arch);
+}
+console.log('\nmacOS 安装包完成（' + ARCHES.join(', ') + '），产物在 dist/');

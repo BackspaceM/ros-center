@@ -55,15 +55,24 @@ const README = `ROS Center 桌面版
   Windows 若出现 SmartScreen，点「更多信息 → 仍要运行」（开源程序未签名）。
 `;
 
-const TARGETS = [
-  {
-    key: 'mac', label: 'macOS (Apple Silicon / arm64)',
-    asset: `node-v${NODE_V}-darwin-arm64.tar.gz`,
-    url: `https://nodejs.org/dist/v${NODE_V}/node-v${NODE_V}-darwin-arm64.tar.gz`,
-    member: `node-v${NODE_V}-darwin-arm64/bin/node`,
-    bin: 'node', launcherName: 'Start.command', zip: 'ros-center-macos-arm64.zip',
+/* macOS 目标按架构构造：同一个 macOS runner 上可同时打出 arm64 与 x64 版本，
+   因为 pkgbuild / hdiutil 只打包文件，不执行里面的二进制。 */
+function macTarget(arch) {
+  const a = arch === 'x64' ? 'x64' : 'arm64';
+  const base = `node-v${NODE_V}-darwin-${a}`;
+  return {
+    key: 'mac-' + a, label: `macOS (${a})`,
+    asset: base + '.tar.gz',
+    url: `https://nodejs.org/dist/v${NODE_V}/${base}.tar.gz`,
+    member: `${base}/bin/node`,
+    bin: 'node', launcherName: 'Start.command', zip: `ros-center-macos-${a}.zip`,
     launcher: '#!/bin/sh\ncd "$(dirname "$0")"\nexport ROS_BASE_DIR="$(pwd)"\nexport ROS_DESKTOP=1\nexport HOST=127.0.0.1\nexec ./bin/node ./app/server.js\n',
-  },
+  };
+}
+
+const MAC_ARM64 = macTarget('arm64');
+const TARGETS = [
+  MAC_ARM64,
   {
     key: 'win', label: 'Windows (x64)',
     asset: `node-v${NODE_V}-win-x64.zip`,
@@ -202,4 +211,4 @@ function sha256(file) {
   return hex;
 }
 
-module.exports = { ROOT, DIST, BASE, NODE_V, VERSION, TARGETS, README, download, extractNode, unzipOne, collectFiles, copyDir, stage, sha256 };
+module.exports = { ROOT, DIST, BASE, NODE_V, VERSION, TARGETS, MAC_ARM64, macTarget, README, download, extractNode, unzipOne, collectFiles, copyDir, stage, sha256 };

@@ -99,7 +99,10 @@ docker compose up -d
 | 平台 | 安装包 | 绿色版 |
 | --- | --- | --- |
 | macOS Apple Silicon | `ROS-Center-*-macos-arm64.pkg` 或 `.dmg` | `ros-center-macos-arm64.zip` |
+| macOS Intel | `ROS-Center-*-macos-x64.pkg` 或 `.dmg` | `ros-center-macos-x64.zip` |
 | Windows x64 | `ROS-Center-*-windows-x64-setup.exe`（NSIS 安装向导，带卸载） | `ros-center-windows-x64.zip` |
+
+macOS 请选择与芯片一致的版本（Apple Silicon 用 `arm64`，Intel 用 `x64`）。
 
 - **macOS**：双击 `.pkg` 按向导装到 `/Applications`，或双击 `.dmg` 把 `ROS Center.app` 拖进 Applications。启动后自动打开 `http://localhost:10086`（端口占用自动顺延）。数据与配置在 `~/Library/Application Support/ROS Center/`；停止服务用 `pkill -f "[R]OS Center.app/Contents/Resources/bin/node"`。
 - **Windows**：运行 `*-setup.exe`，会创建开始菜单与桌面快捷方式，可通过「设置 → 应用」或安装目录里的 `Uninstall.exe` 卸载。数据与配置在 `%LOCALAPPDATA%\ROS Center\`，卸载不会删除。
@@ -110,12 +113,13 @@ docker compose up -d
 自行构建（绿色版任意平台都能打，安装包需在对应系统上生成）：
 
 ```bash
-npm run build:desktop          # macOS + Windows 绿色版 ZIP
-npm run build:mac-installer    # macOS 上生成 .pkg + .dmg（需 pkgbuild / productbuild / hdiutil）
-npm run build:win-installer    # Windows 上生成 .exe（需 NSIS 3）
+npm run build:desktop                 # macOS arm64 + Windows 绿色版 ZIP
+node build/desktop.js --mac-x64       # 追加 macOS x64 绿色版 ZIP
+npm run build:mac-installer -- --arch=all   # macOS 上生成 arm64 + x64 的 .pkg + .dmg
+npm run build:win-installer           # Windows 上生成 .exe（需 NSIS 3）
 ```
 
-首次构建会从 nodejs.org 下载官方 Node.js 运行时并缓存到 `dist/base/`，之后可离线复现。推送 `v*` tag，或在 Actions 手动运行「Release desktop installers」工作流，会在 macOS / Windows runner 上构建全部产物并自动发布到 Releases。端口与 RouterOS 连接参数可用数据目录里的 `.env` 覆盖（模板 `config.example.env`）；Intel Mac 把 `build/stage.js` 里的 `darwin-arm64` 改成 `darwin-x64` 重新构建即可。
+首次构建会从 nodejs.org 下载官方 Node.js 运行时并缓存到 `dist/base/`，之后可离线复现。推送 `v*` tag，或在 Actions 手动运行「Release desktop installers」工作流，会在 macOS / Windows runner 上构建全部产物并自动发布到 Releases。端口与 RouterOS 连接参数可用数据目录里的 `.env` 覆盖（模板 `config.example.env`）。
 
 **Docker 映射与变量（要点）**
 
@@ -269,7 +273,10 @@ Download the matching file from [Releases](https://github.com/BackspaceM/ros-cen
 | Platform | Installer | Portable |
 | --- | --- | --- |
 | macOS Apple Silicon | `ROS-Center-*-macos-arm64.pkg` or `.dmg` | `ros-center-macos-arm64.zip` |
+| macOS Intel | `ROS-Center-*-macos-x64.pkg` or `.dmg` | `ros-center-macos-x64.zip` |
 | Windows x64 | `ROS-Center-*-windows-x64-setup.exe` (NSIS wizard, uninstallable) | `ros-center-windows-x64.zip` |
+
+Pick the macOS build matching your chip (`arm64` for Apple Silicon, `x64` for Intel).
 
 - **macOS**: double-click the `.pkg` to install into `/Applications`, or open the `.dmg` and drag `ROS Center.app` into Applications. It opens `http://localhost:10086` automatically (the port auto-increments if busy). Config and data live in `~/Library/Application Support/ROS Center/`; stop the service with `pkill -f "[R]OS Center.app/Contents/Resources/bin/node"`.
 - **Windows**: run `*-setup.exe`; it creates Start Menu / Desktop shortcuts and an uninstaller (Settings → Apps, or `Uninstall.exe` in the install folder). Config and data live in `%LOCALAPPDATA%\ROS Center\` and survive uninstall.
@@ -280,12 +287,13 @@ Download the matching file from [Releases](https://github.com/BackspaceM/ros-cen
 Build them yourself (portable builds work on any host, installers must be built on their target OS):
 
 ```bash
-npm run build:desktop          # macOS + Windows portable ZIPs
-npm run build:mac-installer    # on macOS: .pkg + .dmg (pkgbuild / productbuild / hdiutil)
-npm run build:win-installer    # on Windows: .exe (NSIS 3)
+npm run build:desktop                        # macOS arm64 + Windows portable ZIPs
+node build/desktop.js --mac-x64              # additionally build the macOS x64 ZIP
+npm run build:mac-installer -- --arch=all    # on macOS: arm64 + x64 .pkg + .dmg
+npm run build:win-installer                  # on Windows: .exe (NSIS 3)
 ```
 
-The first build downloads the official Node.js runtime from nodejs.org into `dist/base/` so later builds work offline. Pushing a `v*` tag — or manually running the "Release desktop installers" workflow — builds every artifact on macOS / Windows runners and publishes them to Releases. Override the port and RouterOS credentials with a `.env` in the data directory (template: `config.example.env`). For Intel Macs change `darwin-arm64` to `darwin-x64` in `build/stage.js` and rebuild.
+The first build downloads the official Node.js runtime from nodejs.org into `dist/base/` so later builds work offline. Pushing a `v*` tag — or manually running the "Release desktop installers" workflow — builds every artifact on macOS / Windows runners and publishes them to Releases. Override the port and RouterOS credentials with a `.env` in the data directory (template: `config.example.env`).
 
 **Docker mounts and variables (quick reference)**
 
