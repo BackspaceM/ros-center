@@ -92,13 +92,30 @@ docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
 ```
 
-#### 方式三：桌面绿色版（macOS / Windows，免安装）
+#### 方式三：桌面版（Releases 安装包 / 绿色版）
+
+直接从 [GitHub Releases](https://github.com/BackspaceM/ros-center/releases) 下载对应平台文件即可，**目标机器不需要安装 Node.js，也不需要 `npm install`**：
+
+| 平台 | 安装包 | 绿色版 |
+| --- | --- | --- |
+| macOS Apple Silicon | `ROS-Center-*-macos-arm64.pkg` 或 `.dmg` | `ros-center-macos-arm64.zip` |
+| Windows x64 | `ROS-Center-*-windows-x64-setup.exe`（NSIS 安装向导，带卸载） | `ros-center-windows-x64.zip` |
+
+- **macOS**：双击 `.pkg` 按向导装到 `/Applications`，或双击 `.dmg` 把 `ROS Center.app` 拖进 Applications。启动后自动打开 `http://localhost:10086`（端口占用自动顺延）。数据与配置在 `~/Library/Application Support/ROS Center/`；停止服务用 `pkill -f "[R]OS Center.app/Contents/Resources/bin/node"`。
+- **Windows**：运行 `*-setup.exe`，会创建开始菜单与桌面快捷方式，可通过「设置 → 应用」或安装目录里的 `Uninstall.exe` 卸载。数据与配置在 `%LOCALAPPDATA%\ROS Center\`，卸载不会删除。
+- **绿色版**：解压后双击 `Start.command` / `Start.bat`，配置与数据在解压目录的 `data/` 下，删掉文件夹即卸载。
+- 程序未签名：macOS 首次打开请右键 → 打开，或执行 `xattr -dr com.apple.quarantine "/Applications/ROS Center.app"`；Windows 出现 SmartScreen 时点「更多信息 → 仍要运行」。
+- 每个产物附 `.sha256`，Release 里另有汇总的 `SHA256SUMS.txt`。
+
+自行构建（绿色版任意平台都能打，安装包需在对应系统上生成）：
 
 ```bash
-npm run build:desktop
+npm run build:desktop          # macOS + Windows 绿色版 ZIP
+npm run build:mac-installer    # macOS 上生成 .pkg + .dmg（需 pkgbuild / productbuild / hdiutil）
+npm run build:win-installer    # Windows 上生成 .exe（需 NSIS 3）
 ```
 
-产物在 `dist/`：`ros-center-macos-arm64.zip`（Apple Silicon）、`ros-center-windows-x64.zip`（Windows x64），并附带 `.sha256` 校验文件。首次构建会从 nodejs.org 下载对应平台的官方 Node.js 运行时并缓存到 `dist/base/`，之后可离线复现。解压后双击 `Start.command` / `Start.bat`，程序启动本地服务并自动打开浏览器。运行已内置在包里，**目标机器不需要安装 Node.js，也不需要 `npm install`**；配置、设备信息与流量统计都写在解压目录的 `data/` 下，整个目录删掉即卸载。端口与 RouterOS 连接参数可用 `.env` 覆盖（见包内 `README.txt` 与 `config.example.env`）。Intel Mac 把 `build/desktop.js` 里的 `darwin-arm64` 改成 `darwin-x64` 重新构建即可。
+首次构建会从 nodejs.org 下载官方 Node.js 运行时并缓存到 `dist/base/`，之后可离线复现。推送 `v*` tag，或在 Actions 手动运行「Release desktop installers」工作流，会在 macOS / Windows runner 上构建全部产物并自动发布到 Releases。端口与 RouterOS 连接参数可用数据目录里的 `.env` 覆盖（模板 `config.example.env`）；Intel Mac 把 `build/stage.js` 里的 `darwin-arm64` 改成 `darwin-x64` 重新构建即可。
 
 **Docker 映射与变量（要点）**
 
@@ -114,7 +131,7 @@ npm run build:desktop
 
 **监控负载说明**：真实在线模式下，服务端每秒只请求一次 `/system/resource/print`；接口速率走 `/interface/monitor-traffic` 长连接推送（可用 `TRAFFIC_STREAM=0` 退回轮询）；连接表默认每 5 秒刷新一次（`CONN_POLL_INTERVAL_MS`）。拓扑页每 2.5 秒读取的是服务端内存快照，**不会额外访问 RouterOS**。该频率对主路由的负载很小，不需要再降频。
 
-#### 方式三：本机直接运行
+#### 方式四：本机直接运行
 
 ```bash
 git clone https://github.com/BackspaceM/ros-center.git
@@ -245,13 +262,30 @@ docker compose up -d
 # Use local source build instead: docker compose up -d --build
 ```
 
-**Desktop portable build (macOS / Windows, no installation):**
+**Desktop apps (GitHub Releases: installers + portable builds):**
+
+Download the matching file from [Releases](https://github.com/BackspaceM/ros-center/releases). Everything is self-contained — **the target machine needs neither Node.js nor `npm install`**.
+
+| Platform | Installer | Portable |
+| --- | --- | --- |
+| macOS Apple Silicon | `ROS-Center-*-macos-arm64.pkg` or `.dmg` | `ros-center-macos-arm64.zip` |
+| Windows x64 | `ROS-Center-*-windows-x64-setup.exe` (NSIS wizard, uninstallable) | `ros-center-windows-x64.zip` |
+
+- **macOS**: double-click the `.pkg` to install into `/Applications`, or open the `.dmg` and drag `ROS Center.app` into Applications. It opens `http://localhost:10086` automatically (the port auto-increments if busy). Config and data live in `~/Library/Application Support/ROS Center/`; stop the service with `pkill -f "[R]OS Center.app/Contents/Resources/bin/node"`.
+- **Windows**: run `*-setup.exe`; it creates Start Menu / Desktop shortcuts and an uninstaller (Settings → Apps, or `Uninstall.exe` in the install folder). Config and data live in `%LOCALAPPDATA%\ROS Center\` and survive uninstall.
+- **Portable**: unzip and double-click `Start.command` / `Start.bat`; config and data stay in the unzipped `data/` folder — delete the folder to uninstall.
+- Builds are unsigned: on macOS right-click → Open (or `xattr -dr com.apple.quarantine "/Applications/ROS Center.app"`); on Windows choose "More info → Run anyway" if SmartScreen appears.
+- Each asset ships a `.sha256` checksum; the Release also contains a combined `SHA256SUMS.txt`.
+
+Build them yourself (portable builds work on any host, installers must be built on their target OS):
 
 ```bash
-npm run build:desktop
+npm run build:desktop          # macOS + Windows portable ZIPs
+npm run build:mac-installer    # on macOS: .pkg + .dmg (pkgbuild / productbuild / hdiutil)
+npm run build:win-installer    # on Windows: .exe (NSIS 3)
 ```
 
-Artifacts land in `dist/`: `ros-center-macos-arm64.zip` (Apple Silicon) and `ros-center-windows-x64.zip` (Windows x64), each with a `.sha256` checksum. The first build downloads the matching official Node.js runtime from nodejs.org into `dist/base/`, so later builds work offline. Unzip and double-click `Start.command` / `Start.bat`; the app starts a local service and opens the browser. The runtime is bundled, so **the target machine needs neither Node.js nor `npm install`**. Config, devices and traffic history live in the unzipped `data/` folder — deleting the folder uninstalls it. Override the port and RouterOS credentials with a `.env` file (see `README.txt` and `config.example.env` inside the package). For Intel Macs change `darwin-arm64` to `darwin-x64` in `build/desktop.js` and rebuild.
+The first build downloads the official Node.js runtime from nodejs.org into `dist/base/` so later builds work offline. Pushing a `v*` tag — or manually running the "Release desktop installers" workflow — builds every artifact on macOS / Windows runners and publishes them to Releases. Override the port and RouterOS credentials with a `.env` in the data directory (template: `config.example.env`). For Intel Macs change `darwin-arm64` to `darwin-x64` in `build/stage.js` and rebuild.
 
 **Docker mounts and variables (quick reference)**
 

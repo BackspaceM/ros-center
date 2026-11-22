@@ -1,5 +1,7 @@
 'use strict';
-/* 由同一套图形生成 PNG favicon（无第三方依赖）：public/favicon.png / apple-touch-icon.png */
+/* 由同一套图形生成 PNG favicon 与原始 RGBA 像素（无第三方依赖）。
+   直接运行：生成 public/favicon.png / apple-touch-icon.png
+   被 build/make-icons.js 复用：生成 macOS .icns 与 Windows .ico */
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -27,7 +29,9 @@ function blend(px, size, x, y, color, alpha) {
   for (let k = 0; k < 3; k++) px[i + k] = Math.round(px[i + k] * (1 - alpha) + color[k] * alpha);
   px[i + 3] = Math.max(px[i + 3], Math.round(alpha * 255));
 }
-function render(size) {
+
+/* 返回 RGBA 像素（size*size*4） */
+function renderRaw(size) {
   const px = Buffer.alloc(size * size * 4);
   const s = size / 64;
   const bars = [
@@ -43,6 +47,11 @@ function render(size) {
       }
     }
   }
+  return px;
+}
+
+function renderPNG(size) {
+  const px = renderRaw(size);
   const raw = Buffer.alloc((size * 4 + 1) * size);
   for (let y = 0; y < size; y++) px.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
   const ihdr = Buffer.alloc(13);
@@ -53,7 +62,11 @@ function render(size) {
     chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0)),
   ]);
 }
-for (const [name, size] of [['favicon.png', 64], ['apple-touch-icon.png', 180]]) {
-  fs.writeFileSync(path.join(OUT, name), render(size));
-  console.log('generated', name, size + 'x' + size);
+
+if (require.main === module) {
+  for (const [name, size] of [['favicon.png', 64], ['apple-touch-icon.png', 180]]) {
+    fs.writeFileSync(path.join(OUT, name), renderPNG(size));
+    console.log('generated', name, size + 'x' + size);
+  }
 }
+module.exports = { renderPNG, renderRaw };

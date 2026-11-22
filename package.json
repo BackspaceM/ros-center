@@ -7,6 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "favicon": "node build/make-favicon.js",
-    "build:desktop": "node build/desktop.js"
+    "icons": "node build/make-icons.js",
+    "build:desktop": "node build/desktop.js",
+    "build:mac-installer": "node build/macos-installer.js",
+    "build:win-installer": "node build/windows-installer.js"
   }
 }

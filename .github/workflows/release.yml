@@ -1,0 +1,148 @@
+name: Release desktop installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.0.0"
+        required: true
+        default: "v1.0.0"
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  portable:
+    name: Portable ZIP (macOS / Windows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/cache@v4
+        with:
+          path: dist/base
+          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
+      - run: npm run build:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+
+  macos:
+    name: macOS .pkg + .dmg
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/cache@v4
+        with:
+          path: dist/base
+          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
+      - run: node build/macos-installer.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installers
+          if-no-files-found: error
+          path: |
+            dist/*.pkg
+            dist/*.pkg.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256
+
+  windows:
+    name: Windows .exe installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Ensure NSIS is available
+        shell: pwsh
+        run: |
+          $paths = @("C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe")
+          if (-not ($paths | Where-Object { Test-Path $_ })) {
+            choco install nsis -y --no-progress
+          }
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /VERSION
+      - uses: actions/cache@v4
+        with:
+          path: dist/base
+          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
+      - run: node build/windows-installer.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.exe.sha256
+
+  release:
+    name: Publish GitHub Release
+    needs: [portable, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Compose checksums and release notes
+        run: |
+          set -euo pipefail
+          cat dist/*.sha256 > dist/SHA256SUMS.txt
+          cat > /tmp/release-notes.md <<'EOF'
+          ## ROS Center 桌面版
+
+          开箱即用：内置 Node.js 运行时，目标机器无需安装 Node.js 或执行 `npm install`。
+          启动后自动打开浏览器访问 `http://localhost:10086`（端口占用会自动顺延）。
+
+          | 平台 | 安装包 | 绿色版 |
+          | --- | --- | --- |
+          | macOS (Apple Silicon) | `.pkg` / `.dmg` | `ros-center-macos-arm64.zip` |
+          | Windows (x64) | `*-setup.exe`（NSIS 安装向导，带卸载） | `ros-center-windows-x64.zip` |
+
+          **macOS**：双击 `.pkg` 按向导安装到 `/Applications`，或双击 `.dmg` 把 App 拖进 Applications。
+          程序未签名，首次打开请右键 → 打开，或执行
+          `xattr -dr com.apple.quarantine "/Applications/ROS Center.app"`。
+          数据与配置在 `~/Library/Application Support/ROS Center/`。
+
+          **Windows**：运行 `*-setup.exe`，可创建开始菜单/桌面快捷方式，并可通过「设置 → 应用」或安装目录里的
+          `Uninstall.exe` 卸载。数据与配置在 `%LOCALAPPDATA%\ROS Center\`。
+          未签名程序如出现 SmartScreen，点「更多信息 → 仍要运行」。
+
+          **绿色版**：解压后双击 `Start.command` / `Start.bat`，删除文件夹即卸载。
+
+          首次使用请在「系统管理 → 设备管理」添加 RouterOS 设备（API 端口 8728，建议只读账号）。
+          `SHA256SUMS.txt` 为所有产物的校验和，`*.sha256` 为单文件校验和。
+          EOF
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing assets."
+          else
+            gh release create "$TAG" --title "ROS Center $TAG" \
+              --notes-file /tmp/release-notes.md --target "$GITHUB_SHA"
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          echo "--- release assets ---"
+          gh release view "$TAG" --json tagName,url,assets \
+            --jq '.tagName, .url, (.assets[].name)'
