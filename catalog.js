@@ -297,14 +297,14 @@ const seed = {
   dashboard: [], traffic: [],
   connections: [
     { '.id': '*C1', 'src-address': '10.0.0.23:51244', 'dst-address': '223.5.5.5:53', protocol: 'udp', 'connection-state': 'established', bytes: '184320' },
-    { '.id': '*C2', 'src-address': '10.0.0.31:44318', 'dst-address': '142.250.78.14:443', protocol: 'tcp', 'connection-state': 'established', bytes: '9421824' },
+    { '.id': '*C2', 'src-address': '10.0.0.31:44318', 'dst-address': '142.250.78.14:443', protocol: 'tcp', flags: 'SAC', 'tcp-state': 'established', 'orig-bytes': '1048576', 'repl-bytes': '8373248' },
     { '.id': '*C3', 'src-address': '10.0.0.45:33891', 'dst-address': '10.0.0.1:53', protocol: 'udp', 'connection-state': 'new', bytes: '2048' },
-    { '.id': '*C4', 'src-address': '10.0.0.18:60122', 'dst-address': '1.12.0.36:443', protocol: 'tcp', 'connection-state': 'established', bytes: '2048812' },
+    { '.id': '*C4', 'src-address': '10.0.0.18:60122', 'dst-address': '1.12.0.36:443', protocol: 'tcp', flags: 'SA', 'tcp-state': 'established', 'orig-bytes': '409600', 'repl-bytes': '1639212' },
     { '.id': '*C5', 'src-address': '10.0.0.52:52301', 'dst-address': '151.101.1.69:443', protocol: 'tcp', 'connection-state': 'time-wait', bytes: '632144' },
   ],
   connections6: [
     { '.id': '*D1', 'src-address': '[2408:xxxx:1:2::23]:51244', 'dst-address': '[2400:3200::1]:53', protocol: 'udp', 'connection-state': 'established', bytes: '98304' },
-    { '.id': '*D2', 'src-address': '[2408:xxxx:1:2::31]:44320', 'dst-address': '[2606:4700::6810:1234]:443', protocol: 'tcp', 'connection-state': 'established', bytes: '5242880' },
+    { '.id': '*D2', 'src-address': '[2408:xxxx:1:2::31]:44320', 'dst-address': '[2606:4700::6810:1234]:443', protocol: 'tcp', flags: 'SAC', 'tcp-state': 'established', 'orig-bytes': '524288', 'repl-bytes': '4718592' },
     { '.id': '*D3', 'src-address': '[fe80::1]:546', 'dst-address': '[ff02::1:2]:547', protocol: 'udp', 'connection-state': 'new', bytes: '1024' },
   ],
   interfaces: [

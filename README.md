@@ -20,7 +20,7 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 ### 功能亮点
 
 - **多设备管控**：顶栏下拉切换；设备增删改查、测试连接、设为主设备、重连；配置持久化到 `data/devices.json`
-- **仪表盘**：实时流量来自 RouterOS 原生 `monitor-traffic` 流式监听（设备每秒主动推送，无需反复查询）；总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口类型分布（按真实接口类型统计，无编造数据）、接口与连接排行。运行时间取自路由器 `/system/resource` 的真实 uptime。**标题右侧的「速率接口」选择器可指定单个网口**（带搜索与实时速率，按设备记住选择），上下行卡片、趋势曲线与峰值同步切换；历史采样保留每接口速率，刷新页面后趋势不会串回全部接口。流量统计页的网口设置同步改为药丸式多选
+- **仪表盘**：实时流量来自 RouterOS 原生 `monitor-traffic` 流式监听（设备每秒主动推送，无需反复查询）；总下载/上传/活跃接口/峰值卡片、双曲线趋势图、接口类型分布（按真实接口类型统计，无编造数据）、接口与连接排行。运行时间取自路由器 `/system/resource` 的真实 uptime。**标题右侧的「速率接口」选择器可指定单个网口**（带搜索与实时速率，按设备记住选择），上下行卡片、趋势曲线与峰值同步切换；历史采样保留每接口速率，刷新页面后趋势不会串回全部接口。流量统计页的网口设置同步改为药丸式多选。连接状态 IPv4 / IPv6 表格同时兼容 RouterOS v6 的 `bytes` / `connection-state` 与 v7 的 `orig-bytes` + `repl-bytes` / `tcp-state`（自动归一化为「状态」「字节」两列）
 - **连接状态**：真实读取 RouterOS 连接表，分别统计 IPv4 / IPv6 / 汇总，且 TCP、UDP 各自再分 IPv4/IPv6（每 5 秒刷新），卡片按「总数 → IPv4 / IPv6 两组短卡片」紧凑排列、可横向滑动，趋势图展示总数与双栈历史；另设 IPv4、IPv6 两个连接明细分类
 - **流量统计（真实 · 实时 · 按网口按天）**：只取 RouterOS `/interface/print` 的 `rx-byte` / `tx-byte` 真实累计计数器，每秒采样、按网口求差分，写入「网口 × 小时」和「网口 × 天」桶；不估算、不灌假数据，演示/离线不累计并明确标注。**重拨自动续计**：PPPoE 重拨、接口重建、路由重启清零计数器时，把清零后的值作为自清零以来的真实字节继续计入（页面显示清零次数），当天/当月不归零、不停记。**范围与网口联动**：今日 / 本周 / 本月 / 累计与网口多选合并为一条工具栏，趋势图只画「当前范围 + 当前网口」的真实数据（今日按小时、周/月按天、累计按月），副标题注明范围、粒度与网口；卡片每 2 秒刷新。页面只保留趋势图，不再列明细表。**网口多选**：真实网口 chip 点选即生效，另有通配符自定义（`pppoe-*`、`vlan??`）；建议只选 WAN 口避免 LAN + WAN 双算。历史按「日 × 网口」保存在 `data/usage.json`，旧版自动迁移；停机期间的真实差分只计入当日合计，不虚构小时分布
 
@@ -91,6 +91,14 @@ cp .env.example .env
 docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
 ```
+
+#### 方式三：桌面绿色版（macOS / Windows，免安装）
+
+```bash
+npm run build:desktop
+```
+
+产物在 `dist/`：`ros-center-macos-arm64.zip`（Apple Silicon）、`ros-center-windows-x64.zip`（Windows x64），并附带 `.sha256` 校验文件。首次构建会从 nodejs.org 下载对应平台的官方 Node.js 运行时并缓存到 `dist/base/`，之后可离线复现。解压后双击 `Start.command` / `Start.bat`，程序启动本地服务并自动打开浏览器。运行已内置在包里，**目标机器不需要安装 Node.js，也不需要 `npm install`**；配置、设备信息与流量统计都写在解压目录的 `data/` 下，整个目录删掉即卸载。端口与 RouterOS 连接参数可用 `.env` 覆盖（见包内 `README.txt` 与 `config.example.env`）。Intel Mac 把 `build/desktop.js` 里的 `darwin-arm64` 改成 `darwin-x64` 重新构建即可。
 
 **Docker 映射与变量（要点）**
 
@@ -183,7 +191,7 @@ ROS Center is a lightweight RouterOS control center with zero runtime npm depend
 ### Features
 
 - **Multi-router management**: switch devices from the top bar; add/edit/delete, test connection, set primary, reconnect; persisted in `data/devices.json`
-- **Dashboard**: live traffic from RouterOS native `monitor-traffic` streaming (the device pushes a fresh sample every second, no repeated polling); download/upload/active ports/peak cards, dual-line charts, interface-type distribution (from real interface types, no invented numbers), interface & connection rankings. Uptime comes from the router's real `/system/resource` uptime. **The "Rate source" picker in the page header selects a single interface** (with search and live rates, remembered per device); the uplink/downlink cards, trend chart and peak all follow it. History samples keep per-interface rates, so a reload does not revert the trend to the all-interface aggregate. The statistics page's interface selector now uses the matching pill-style multi-select
+- **Dashboard**: live traffic from RouterOS native `monitor-traffic` streaming (the device pushes a fresh sample every second, no repeated polling); download/upload/active ports/peak cards, dual-line charts, interface-type distribution (from real interface types, no invented numbers), interface & connection rankings. Uptime comes from the router's real `/system/resource` uptime. **The "Rate source" picker in the page header selects a single interface** (with search and live rates, remembered per device); the uplink/downlink cards, trend chart and peak all follow it. History samples keep per-interface rates, so a reload does not revert the trend to the all-interface aggregate. The statistics page's interface selector now uses the matching pill-style multi-select. The IPv4 / IPv6 connection tables accept both RouterOS v6 `bytes` / `connection-state` and v7 `orig-bytes` + `repl-bytes` / `tcp-state`, normalizing them into the State and Bytes columns.
 - **Connection status**: reads the real RouterOS connection table and reports IPv4 / IPv6 / total, with TCP and UDP each further split by IPv4/IPv6 (refreshed every 5s), shown as a compact card with the total on top and short, horizontally scrollable IPv4 / IPv6 groups below, plus a dual-stack history chart; separate IPv4 and IPv6 connection detail sections
 - **Traffic statistics (real, live, per interface per day)**: only the real cumulative `rx-byte` / `tx-byte` counters from RouterOS `/interface/print`, sampled every second and differenced per interface into "interface x hour" and "interface x day" buckets. No estimates or fake data; demo/offline never accumulates and is clearly labelled. **PPPoE redial carry-forward**: after a redial, interface re-creation or router reboot resets a counter, the post-reset value is counted as the real bytes since the reset (reset count shown), so day/month totals neither zero nor stop. **Range follows interface selection**: Today / This week / This month / All time and the interface picker share one toolbar; the chart draws only the current range + interfaces (hourly today, daily week/month, monthly all-time) and its subtitle states range, granularity and interfaces; cards refresh every 2s. Only the trend chart remains, no detail table. **Multi-select interfaces**: a chip per real interface, applied on click, plus a "Custom" wildcard field (`pppoe-*`, `vlan??`); pick only the WAN uplink to avoid double counting. History is stored per "day x interface" in `data/usage.json` with automatic migration; real deltas during downtime go to the day total only, never invented as hourly data
 
@@ -236,6 +244,14 @@ cp .env.example .env
 docker compose up -d
 # Use local source build instead: docker compose up -d --build
 ```
+
+**Desktop portable build (macOS / Windows, no installation):**
+
+```bash
+npm run build:desktop
+```
+
+Artifacts land in `dist/`: `ros-center-macos-arm64.zip` (Apple Silicon) and `ros-center-windows-x64.zip` (Windows x64), each with a `.sha256` checksum. The first build downloads the matching official Node.js runtime from nodejs.org into `dist/base/`, so later builds work offline. Unzip and double-click `Start.command` / `Start.bat`; the app starts a local service and opens the browser. The runtime is bundled, so **the target machine needs neither Node.js nor `npm install`**. Config, devices and traffic history live in the unzipped `data/` folder — deleting the folder uninstalls it. Override the port and RouterOS credentials with a `.env` file (see `README.txt` and `config.example.env` inside the package). For Intel Macs change `darwin-arm64` to `darwin-x64` in `build/desktop.js` and rebuild.
 
 **Docker mounts and variables (quick reference)**
 

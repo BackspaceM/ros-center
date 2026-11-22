@@ -1,8 +1,13 @@
 'use strict';
 
+/* 单文件/绿色桌面版把 .env / data 放在启动目录；源码与 Docker 仍用项目目录 */
+const DESKTOP = process.pkg || process.env.ROS_DESKTOP === '1';
+const APP_DIR = process.env.ROS_BASE_DIR ? require('path').resolve(process.env.ROS_BASE_DIR)
+  : (process.pkg ? require('path').dirname(process.execPath) : __dirname);
+
 /* 读取同目录 .env（零依赖），已存在的环境变量优先 */
 try {
-  const envPath = require('path').join(__dirname, '.env');
+  const envPath = require('path').join(APP_DIR, '.env');
   if (require('fs').existsSync(envPath)) {
     for (const line of require('fs').readFileSync(envPath, 'utf8').split(/\r?\n/)) {
       const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/i);
@@ -19,13 +24,13 @@ const fs = require('fs');
 const path = require('path');
 const { GROUPS, SECTIONS, SECTION_MAP, seed, makeLog } = require('./catalog');
 
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || (DESKTOP ? '127.0.0.1' : '0.0.0.0');
 const INTERVAL = Math.max(500, Number(process.env.POLL_INTERVAL_MS || 1000));
 /* 连接表计数较重：独立低频采集（默认 5 秒），不跟随每秒的流量轮询 */
 const CONN_INTERVAL = Math.max(3000, Number(envNum('CONN_POLL_INTERVAL_MS', 5000)));
 const HISTORY = Math.max(30, Number(envNum('HISTORY_POINTS', 180)));
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(APP_DIR, 'data');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
 const TOPOLOGY_FILE = path.join(DATA_DIR, 'topology.json');
@@ -723,7 +728,11 @@ for (const id of Object.keys(usageStore.devices)) {
 if (usageDirty) saveUsage(true);
 
 /* ================= 演示数据（每设备独立） ================= */
-function demoPrint(dev, sectionId) { return (dev.demoDB[sectionId] || []).map((r) => ({ ...r })); }
+function demoPrint(dev, sectionId) {
+  const rows = (dev.demoDB[sectionId] || []).map((r) => ({ ...r }));
+  return (sectionId === 'connections' || sectionId === 'connections6')
+    ? rows.map(normalizeConnectionRow) : rows;
+}
 function demoAdd(dev, sectionId, values) {
   const arr = dev.demoDB[sectionId] || (dev.demoDB[sectionId] = []);
   const row = { '.id': '*D' + (++dev.demoIdSeq), ...values };
@@ -761,12 +770,31 @@ function wordsFromValues(fields, values) {
   }
   return out;
 }
+/* RouterOS v7 连接表用 orig-bytes / repl-bytes + tcp-state，v6 用 bytes / connection-state。
+   统一成前端表格使用的字段名，避免真实设备里出现「状态 —」「字节 0」。 */
+function normalizeConnectionRow(row) {
+  const out = { ...row };
+  const sum = (v) => String(v == null ? '' : v).split('/')
+    .reduce((s, x) => s + (Number(String(x).trim()) || 0), 0);
+  const raw = row.bytes;
+  out.bytes = String(raw != null && raw !== '' ? sum(raw) : sum(row['orig-bytes']) + sum(row['repl-bytes']));
+  if (!out['connection-state']) {
+    const tcp = String(row['tcp-state'] || '').trim();
+    const flags = String(row.flags || row['.id'] || '').toUpperCase();
+    const replied = /^(true|yes|1)$/i.test(String(row['seen-reply'] || ''));
+    out['connection-state'] = tcp || (replied || /[SA]/.test(flags) ? 'established'
+      : /D/.test(flags) ? 'time-wait' : 'new');
+  }
+  return out;
+}
 async function rosPrint(dev, section) {
   if (dev.forceDemo) return demoPrint(dev, section.id);   // 仅用户显式开启的演示模式
   if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法读取真实配置 / Router offline - no real data available');
   const r = await dev.api.exec([`${section.path}/print`]);
   if (r.status.type === 'trap') throw new Error(r.status.message || '读取失败');
-  return r.re;
+  const rows = r.re || [];
+  return (section.id === 'connections' || section.id === 'connections6')
+    ? rows.map(normalizeConnectionRow) : rows;
 }
 async function rosWrite(dev, section, action, payload) {
   const { ids = [], values = {} } = payload || {};
@@ -1729,9 +1757,30 @@ server.on('upgrade', (req, socket) => {
   if (dev && dev.lastPacket) sendFrame(socket, JSON.stringify(snapshotOf(dev)));
 });
 
+/* 桌面版双击后自动打开浏览器；ROS_NO_BROWSER=1 可关闭 */
+function openBrowser(url) {
+  try {
+    const cp = require('child_process');
+    const cmd = process.platform === 'darwin' ? ['open', [url]]
+      : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]];
+    cp.spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).unref();
+  } catch (e) { /* 打不开浏览器不影响服务 */ }
+}
+/* 桌面版端口被占用时自动顺延，避免双击后无声失败 */
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE' && DESKTOP && PORT < 10110) {
+    PORT += 1;
+    setTimeout(() => server.listen(PORT, HOST), 200);
+    return;
+  }
+  console.error('[ui] listen failed:', e.message);
+  process.exit(1);
+});
 server.listen(PORT, HOST, () => {
   console.log(`[ui] http://localhost:${PORT}`);
   console.log(`[ui] ${devices.size} device(s), active=${activeDevice() ? activeDevice().name : 'none'}`);
+  if (DESKTOP && !process.env.ROS_NO_BROWSER) openBrowser(`http://localhost:${PORT}`);
 });
 for (const dev of devices.values()) { dev.ensureConnection(); pollDevice(dev); }
 setInterval(() => { for (const dev of devices.values()) pollDevice(dev); }, INTERVAL);

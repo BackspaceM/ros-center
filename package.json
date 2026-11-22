@@ -1,0 +1,12 @@
+{
+  "name": "ros-center",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RouterOS web UI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "favicon": "node build/make-favicon.js",
+    "build:desktop": "node build/desktop.js"
+  }
+}
