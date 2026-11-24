@@ -23,6 +23,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { GROUPS, SECTIONS, SECTION_MAP, seed, makeLog } = require('./catalog');
+const updates = require('./updates');
+const quicksetup = require('./quicksetup');
 
 const HOST = process.env.HOST || (DESKTOP ? '127.0.0.1' : '0.0.0.0');
 const INTERVAL = Math.max(500, Number(process.env.POLL_INTERVAL_MS || 1000));
@@ -1362,6 +1364,107 @@ function deviceList() {
   return [...devices.values()].map((d) => ({ ...d.snapshotCfg(), status: d.publicStatus() }));
 }
 
+/* ================= 检查更新 / 自动更新 =================
+   配置与检查结果落盘 data/update.json，服务端定时检查（不依赖浏览器常开）。
+   只做「检查 + 下载」，不替换自身进程或容器：桌面版需手动安装，Docker 版需外部 pull/recreate。 */
+const UPDATE_FILE = path.join(DATA_DIR, 'update.json');
+const UPDATE_DIR = path.join(DATA_DIR, 'updates');
+const updateState = { config: updates.normalizeConfig({}), status: null };
+try {
+  const raw = JSON.parse(fs.readFileSync(UPDATE_FILE, 'utf8'));
+  updateState.config = updates.normalizeConfig(raw.config || {});
+  if (raw.status && typeof raw.status === 'object') updateState.status = raw.status;
+} catch (e) { /* 首次启动使用默认配置 */ }
+/* 部署时可用环境变量预设，Docker 场景便于直接指定代理 / 镜像源 */
+try {
+  const env = process.env;
+  const cfg = { ...updateState.config };
+  if (env.ROS_UPDATE_ENABLED !== undefined && env.ROS_UPDATE_ENABLED !== '') cfg.enabled = env.ROS_UPDATE_ENABLED === '1';
+  if (env.ROS_UPDATE_SOURCE) cfg.source = String(env.ROS_UPDATE_SOURCE);
+  if (env.ROS_UPDATE_PROXY) cfg.proxy = String(env.ROS_UPDATE_PROXY);
+  if (env.ROS_UPDATE_ENDPOINT) cfg.endpoint = String(env.ROS_UPDATE_ENDPOINT);
+  if (env.ROS_UPDATE_IMAGE) cfg.image = String(env.ROS_UPDATE_IMAGE);
+  if (env.ROS_UPDATE_INTERVAL) cfg.intervalHours = Number(env.ROS_UPDATE_INTERVAL) || cfg.intervalHours;
+  updateState.config = updates.normalizeConfig(cfg);
+} catch (e) { /* 环境变量非法时保留默认 */ }
+
+function saveUpdateState() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(UPDATE_FILE, JSON.stringify(updateState, null, 2) + '\n', { mode: 0o600 });
+  } catch (e) { console.warn('[updates] save failed:', e.message); }
+}
+function runtimeInfo() {
+  let version = String(process.env.ROS_CENTER_VERSION || '').trim();
+  if (!version) { try { version = String(require('./package.json').version || ''); } catch (e) { /* no package.json */ } }
+  const docker = !DESKTOP && (!!process.env.DOCKER_IMAGE || fs.existsSync('/.dockerenv'));
+  return {
+    version: version || '0.0.0',
+    digest: String(process.env.ROS_CENTER_DIGEST || '').trim(),
+    runtime: DESKTOP ? 'desktop' : docker ? 'docker' : 'source',
+    platform: process.platform, arch: process.arch,
+  };
+}
+function publicUpdateConfig() {
+  return { ...updateState.config, proxy: updates.maskProxy(updateState.config.proxy), proxySet: !!updateState.config.proxy };
+}
+let updateChecking = false, updateTimer = null;
+
+async function downloadUpdateAsset(asset, automatic) {
+  const name = String(asset.name || '').replace(/[^A-Za-z0-9_.\-]/g, '');
+  if (!name || !asset.url) throw new Error('缺少可用资产 / no asset');
+  /* 仅允许下载本次检查结果中的资产，避免把接口变成任意 URL 代理 */
+  const listed = ((updateState.status && updateState.status.latest && updateState.status.latest.assets) || [])
+    .some((a) => a.url === asset.url && a.name === asset.name);
+  if (!listed) throw new Error('资产不在本次检查结果中，请重新检查更新');
+  const buf = await updates.downloadBinary(asset.url, { proxy: updateState.config.proxy });
+  fs.mkdirSync(UPDATE_DIR, { recursive: true });
+  const dest = path.join(UPDATE_DIR, name);
+  fs.writeFileSync(dest, buf);
+  const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+  const rec = { name, path: dest, size: buf.length, sha256, automatic: !!automatic, at: new Date().toISOString() };
+  if (updateState.status) { updateState.status.downloaded = rec; saveUpdateState(); }
+  console.log(`[updates] downloaded ${name} (${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
+  return rec;
+}
+async function performUpdateCheck(trigger) {
+  if (updateChecking) return updateState.status;
+  updateChecking = true;
+  const current = runtimeInfo();
+  const prev = updateState.status && updateState.status.ok
+    ? { lastUpdated: (updateState.status.latest || {}).publishedAt || '' } : {};
+  try {
+    const r = await updates.check(updateState.config, current, prev);
+    updateState.status = { ...r, trigger };
+    if (updateState.config.autoDownload && r.hasUpdate && current.runtime === 'desktop' && r.source === 'github') {
+      const asset = updates.chooseAsset(r.latest, current.platform, current.arch);
+      if (asset) downloadUpdateAsset(asset, true).catch((e) => console.warn('[updates] auto download:', e.message));
+    }
+  } catch (e) {
+    updateState.status = {
+      ok: false, error: e.message || String(e), checkedAt: new Date().toISOString(),
+      source: updateState.config.source,
+      endpoint: updates.safeEndpoint(updates.endpointFor(updateState.config)),
+      current, hasUpdate: false, trigger,
+    };
+  }
+  updateChecking = false;
+  saveUpdateState();
+  return updateState.status;
+}
+function scheduleUpdateChecks() {
+  if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
+  if (!updateState.config.enabled) return;
+  const ms = updateState.config.intervalHours * 3600 * 1000;
+  updateTimer = setInterval(() => { performUpdateCheck('auto').catch(() => {}); }, ms);
+  if (updateTimer.unref) updateTimer.unref();
+  const last = Date.parse((updateState.status || {}).checkedAt || '') || 0;
+  if (Date.now() - last >= ms) {
+    const t = setTimeout(() => { performUpdateCheck('startup').catch(() => {}); }, 6000);
+    if (t.unref) t.unref();
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
@@ -1734,6 +1837,104 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
 
+  /* ---- 一键配置（预览 / 下载脚本 / 执行） ---- */
+  if (p === '/api/quicksetup/preview' && req.method === 'POST') {
+    try {
+      const plan = quicksetup.buildPlan(await readBody(req), { preview: true });
+      return json(res, 200, { ok: true, summary: plan.summary, warnings: plan.warnings,
+        steps: plan.steps.length, script: plan.maskScript() });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/quicksetup/script' && req.method === 'POST') {
+    try {
+      const plan = quicksetup.buildPlan(await readBody(req));
+      return json(res, 200, { ok: true, name: 'ros-center-quicksetup', script: plan.script,
+        warnings: plan.warnings });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/quicksetup/apply' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      const plan = quicksetup.buildPlan(b);
+      const dev = reqDevice(req, url, b);
+      if (!dev) throw new Error('没有可用设备 / No device');
+      if (dev.forceDemo) {
+        return json(res, 200, { ok: true, demo: true, simulated: true, executed: 0, removed: 0,
+          credentialsSynced: false, summary: plan.summary, script: plan.maskScript(),
+          warnings: [...plan.warnings, '演示模式：仅生成脚本，不会对路由器写入任何配置'], errors: [] });
+      }
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未写入任何配置 / Router offline - nothing was changed');
+      /* 预检：读取相关菜单现有条目，用于幂等更新与清理 */
+      const prints = {};
+      for (const path of plan.preflightPaths) {
+        try {
+          const r = await dev.api.exec([`${path}/print`]);
+          if (r.status.type !== 'trap') prints[path] = r.re || [];
+        } catch (e) { /* 某些菜单在 v6 / 精简权限下不存在，跳过即可 */ }
+      }
+      const ex = quicksetup.resolveExecution(plan, prints, { clean: !!b.clean });
+      let executed = 0, removed = 0;
+      const errors = [];
+      for (const cmd of ex.removals) {
+        const r = await dev.api.exec(cmd);
+        if (r.status.type === 'trap') errors.push('删除旧配置失败: ' + (r.status.message || ''));
+        else removed++;
+      }
+      for (const s of ex.commands) {
+        const r = await dev.api.exec(s.cmd);
+        if (r.status.type === 'trap') errors.push(`${s.cmd[0]}: ${r.status.message || '失败'}`);
+        else executed++;
+      }
+      let credentialsSynced = false;
+      if (plan.adminChange && plan.adminChange.syncCredentials && executed > 0 && !errors.length) {
+        dev.cfg.user = plan.adminChange.newUser;
+        dev.cfg.password = plan.adminChange.newPassword;
+        saveDeviceRegistry();
+        dev.reconnectNow();
+        credentialsSynced = true;
+      }
+      console.log(`[quicksetup] ${dev.name} mode=${plan.mode} executed=${executed} removed=${removed} errors=${errors.length} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: errors.length === 0, executed, removed, skipped: ex.skipped.length,
+        credentialsSynced, errors, warnings: [...plan.warnings, ...ex.warnings], summary: plan.summary });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+
+  /* ---- 检查更新 / 自动更新 ---- */
+  if (p === '/api/update/status' && req.method === 'GET') {
+    return json(res, 200, {
+      config: publicUpdateConfig(), status: updateState.status, runtime: runtimeInfo(),
+      limits: { selfReplace: false, dockerCommand: 'docker pull backspacem/ros-center:latest && docker compose up -d' },
+    });
+  }
+  if (p === '/api/update/config' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      const cur = updateState.config;
+      const patch = { ...b };
+      if (patch.proxy === undefined || patch.proxy === updates.maskProxy(cur.proxy)) patch.proxy = cur.proxy;
+      updateState.config = updates.normalizeConfig({ ...cur, ...patch });
+      saveUpdateState();
+      scheduleUpdateChecks();
+      return json(res, 200, { ok: true, config: publicUpdateConfig() });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/update/check' && req.method === 'POST') {
+    const s = await performUpdateCheck('manual');
+    return json(res, 200, { ok: true, status: s, config: publicUpdateConfig() });
+  }
+  if (p === '/api/update/download' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      const latest = (updateState.status && updateState.status.latest) || {};
+      const asset = b.name ? (latest.assets || []).find((a) => a.name === b.name)
+        : updates.chooseAsset(latest, process.platform, process.arch);
+      if (!asset) throw new Error('没有匹配的安装包资产 / no matching asset');
+      if (runtimeInfo().runtime === 'docker') throw new Error('Docker 部署请直接拉取新镜像，无需下载安装包');
+      const downloaded = await downloadUpdateAsset(asset, false);
+      return json(res, 200, { ok: true, downloaded });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+
   return serveStatic(req, res, p);
 });
 
@@ -1783,6 +1984,7 @@ server.listen(PORT, HOST, () => {
   if (DESKTOP && !process.env.ROS_NO_BROWSER) openBrowser(`http://localhost:${PORT}`);
 });
 for (const dev of devices.values()) { dev.ensureConnection(); pollDevice(dev); }
+scheduleUpdateChecks();
 setInterval(() => { for (const dev of devices.values()) pollDevice(dev); }, INTERVAL);
 setInterval(() => { saveUsage(); }, 15000); // 每 15 秒把流量统计落盘
 process.on('SIGINT', () => { saveUsage(true); for (const d of devices.values()) if (d.api) d.api.close(); server.close(() => process.exit(0)); });

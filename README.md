@@ -180,6 +180,21 @@ node server.js          # Node.js 18+，无需 npm install
 /ip firewall filter add chain=input protocol=tcp dst-port=8728 src-address=10.0.0.0/24 action=accept place-before=0
 ```
 
+### 检查更新与一键配置
+
+**检查更新（系统管理 → 检查更新）**
+- 检测源可切换：GitHub Releases（源码 / 桌面版，默认）或 Docker Hub（镜像 tag）。
+- 访问受限时可填「镜像源 / 自定义 API 端点」（返回同结构 JSON 的完整地址）或「HTTP 代理」（`http://user:pass@host:port`，服务端走 HTTP CONNECT）；Docker 部署也可用 `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` 等环境变量预设，见 `.env.example` 与 `docker-compose.yml`。
+- 选项：自动检查开关与周期（1 小时 ~ 30 天）、发布通道、Docker 仓库/tag、发现新版本时自动下载匹配的安装包（仅桌面版）。代理密码读取时以 `***` 遮蔽，不会回显。
+- **边界**：WebUI 不能替换自己正在运行的进程，也不能重建容器。这里的自动更新 = 定时检查 + 可选自动下载；桌面版下载到 `data/updates/` 后手动安装，Docker 版执行 `docker pull backspacem/ros-center:latest && docker compose up -d`。Docker Hub 检测默认比对镜像 digest（可传 `ROS_CENTER_DIGEST`），否则以上次构建时间变化判定。
+
+**一键配置（系统管理 → 一键配置）**
+- 上网方式：PPPoE 拨号（账号/密码/MTU/MRU/服务名）、DHCP 自动获取、静态 IP；WAN / LAN 接口可填，LAN 可自动建桥并加入端口。
+- 内网网段自行填写（如 `192.168.88.1/24`、`10.20.0.254/16`），自动推算网络号、网关、地址池（也可手填起止）、租约、域名、上游 DNS 与下发给客户端的 DNS，并可直接关联「网络设置 → DHCP 选项集」。
+- 附带常用防火墙模板（input/forward、FastTrack、NAT 伪装、丢弃非法连接与 WAN 入站）、设备名、关闭 telnet/ftp 等不安全服务，以及修改管理员用户名/密码（可同步更新 ROS Center 连接凭据并自动重连）。
+- 先生成可审阅的 RouterOS 脚本（预览中密码遮蔽），可下载 `.rsc` 导入，或确认后「一键应用」。应用前建议先在运维工具导出配置备份。
+- 幂等：生成的条目都带 `ROS Center quick setup` 标记，重复应用按名称/comment 更新而非堆叠；可选「清理本工具旧条目」，且不会删除 LAN 地址与网桥（避免执行中把自己踢下线），也不会动手工添加的规则。只读账号无法修改用户/服务时，对应步骤会跳过并说明。
+
 ### 使用提示
 
 - 顶栏设备下拉切换当前查看的路由器；`?device=<ID>` 或 `?dev=<设备名>` 可深链直达指定设备
@@ -349,6 +364,12 @@ Settings saved in the Web UI take precedence over `.env`. `DEMO_MODE=0` is the d
 /ip service set api address=10.0.0.0/24
 /ip firewall filter add chain=input protocol=tcp dst-port=8728 src-address=10.0.0.0/24 action=accept place-before=0
 ```
+
+### Updates & quick setup
+
+**Updates (System → Updates)** — Check GitHub Releases (default, for source/desktop builds) or Docker Hub tags. If either API is blocked, set a **mirror / custom API endpoint** (full URL returning the same JSON shape) or an **HTTP CONNECT proxy** (`http://user:pass@host:port`); Docker deployments can also preset `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` (see `.env.example` and `docker-compose.yml`). Options include auto-check on/off with a 1h–30d interval, release channel, image/tag, and auto-downloading the matching installer (desktop only). Stored proxy credentials are masked on read. **Limit:** the WebUI cannot replace its own running process or recreate its container — auto-update means scheduled checking plus optional download. Desktop assets land in `data/updates/`; for Docker run `docker pull backspacem/ros-center:latest && docker compose up -d`. Docker Hub checks compare the image digest (pass `ROS_CENTER_DIGEST`) or fall back to build-time changes.
+
+**Quick setup (System → Quick setup)** — Choose PPPoE (username/password/MTU/MRU/service), DHCP, or static IP uplink; pick WAN/LAN interfaces and optionally create a LAN bridge. Enter any LAN CIDR (`192.168.88.1/24`, `10.20.0.254/16`, …); the network, gateway, pool (or custom range), lease, domain, upstream DNS and client DNS are derived automatically, and a DHCP option set can be attached. It also adds a common firewall template (input/forward, FastTrack, NAT masquerade, invalid/WAN drops), sets the device identity, disables insecure telnet/ftp services, and can change the admin username/password (optionally syncing ROS Center credentials and reconnecting). A reviewable RouterOS script is generated first (passwords masked in preview), downloadable as `.rsc` or applied after confirmation — export a config backup before applying. Entries are tagged `ROS Center quick setup` and re-applying updates them in place instead of stacking; optional cleanup never removes the LAN address/bridge or manually added rules.
 
 ### Tips
 

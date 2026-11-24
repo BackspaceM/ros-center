@@ -447,8 +447,9 @@ document.addEventListener('keydown', (e) => {
 /* 按分类 id 匹配图标，未命中时按名称关键字兜底 */
 const SECTION_ICONS = {
   dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link',
+  quickSetup: 'sliders', updates: 'package',
   interfaces: 'ethernet', ipAddresses: 'ip', dhcpClients: 'monitor', dhcpServers: 'server',
-  dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dns: 'globe', dnsStatic: 'pin',
+  dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dhcpOptions: 'tag', dhcpOptionSets: 'clipboard', dns: 'globe', dnsStatic: 'pin',
   routes: 'route', pools: 'database', neighbors: 'radar',
   firewallFilter: 'filter', firewallNat: 'nat', firewallMangle: 'tag', addressLists: 'addressBook', servicePorts: 'ports',
   firewall6Filter: 'filter', firewall6Mangle: 'tag', addressLists6: 'addressBook', servicePorts6: 'ports',
@@ -858,6 +859,8 @@ function renderPage() {
   if (sec.id === 'trafficStats') return renderTrafficStats();
   if (sec.id === 'systemTools') return renderTools();
   if (sec.id === 'topology') return window.renderTopologyPage ? window.renderTopologyPage() : undefined;
+  if (sec.id === 'quickSetup') return window.renderQuickSetupPage ? window.renderQuickSetupPage() : undefined;
+  if (sec.id === 'updates') return window.renderUpdatesPage ? window.renderUpdatesPage() : undefined;
   if (sec.id === 'connectionSettings') return renderConnectionSettings();
   if (sec.path) return sec.singleton ? renderSingletonPage(sec) : renderConfigPage(sec);
 }
@@ -997,6 +1000,16 @@ async function boot() {
   connect();
   // 预加载连接数据供仪表盘 TOP 表格使用
   api('/api/config?section=connections').then((d) => { state.connRows = d.rows || []; if (state.section === 'dashboard') renderDashboard(); }).catch(() => {});
+  /* 侧栏更新徽标：仅在服务端检查到新版本时出现 */
+  const badge = $('updateBadge');
+  if (badge) {
+    badge.onclick = () => navigate('updates');
+    api('/api/update/status').then((d) => {
+      const on = !!(d.status && d.status.ok && d.status.hasUpdate);
+      badge.hidden = !on;
+      if (on) badge.title = L('发现新版本 ', 'Update available ') + (d.status.latest || {}).version;
+    }).catch(() => {});
+  }
 }
 
 /* boot 由最后加载的 config.js 调用，确保所有函数已定义 */

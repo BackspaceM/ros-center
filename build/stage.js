@@ -190,7 +190,7 @@ function stage(t, stageDir) {
   fs.chmodSync(path.join(dir, 'bin', t.bin), 0o755);
   fs.rmSync(tmp, { recursive: true, force: true });
 
-  for (const f of ['server.js', 'catalog.js']) {
+  for (const f of ['server.js', 'catalog.js', 'updates.js', 'quicksetup.js', 'package.json']) {
     fs.copyFileSync(path.join(ROOT, f), path.join(dir, 'app', f));
   }
   copyDir(path.join(ROOT, 'public'), path.join(dir, 'app', 'public'));

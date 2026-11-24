@@ -1,7 +1,7 @@
 FROM node:22-alpine
 
 WORKDIR /app
-COPY server.js catalog.js ./
+COPY server.js catalog.js updates.js quicksetup.js package.json ./
 COPY public ./public
 RUN mkdir -p /app/data && chown -R node:node /app/data
 USER node
