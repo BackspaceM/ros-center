@@ -76,7 +76,8 @@
     if (!s.checkedAt) {
       state = `<div class="upd-state empty">${badge(L('尚未检查', 'Not checked'))}<span>${esc(L('点「立即检查」开始', 'Click "Check now" to start'))}</span></div>`;
     } else if (!s.ok) {
-      state = `<div class="upd-state bad">${badge(L('检查失败', 'Check failed'), 'bad')}<span class="upd-err">${esc(s.error || '')}</span></div>`;
+      state = `<div class="upd-state bad">${badge(L('检查失败', 'Check failed'), 'bad')}<span class="upd-err">${esc(s.error || '')}</span>
+        <span class="topo-hint">${esc(L('网络受限时，在下方「网络与高级选项」里填代理或镜像源后重试。', 'If blocked, set a proxy or mirror under "Network & advanced" and retry.'))}</span></div>`;
     } else if (s.hasUpdate) {
       state = `<div class="upd-state new">${badge(L('发现新版本', 'Update available'), 'new')}<span>${esc(L('发布于', 'Published'))} ${esc(fmtTime(s.latest && s.latest.publishedAt))} · ${esc(s.reason || '')}</span></div>`;
     } else {

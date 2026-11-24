@@ -55,6 +55,25 @@ function maskProxy(proxy) {
 function safeEndpoint(url) {
   return String(url || '').replace(/(\/\/[^/@:]+):[^@]*@/, '$1:***@');
 }
+/* Node 22 的 net/tls 在多地址全部连接失败时会抛 AggregateError，
+   其 message 常为空，直接显示就是「AggregateError」。展开成可操作信息。 */
+function friendlyError(e, depth = 0) {
+  if (!e) return '未知错误';
+  if (depth > 3) return '网络请求失败';
+  if ((typeof AggregateError !== 'undefined' && e instanceof AggregateError) || (Array.isArray(e.errors) && e.errors.length)) {
+    const parts = (e.errors || []).map((x) => {
+      if (!x) return '';
+      const code = x.code ? String(x.code) : '';
+      const msg = x.message ? String(x.message) : '';
+      return (code + (code && msg ? ': ' : '') + msg).trim();
+    }).filter(Boolean);
+    const uniq = [...new Set(parts)];
+    return '网络连接失败' + (uniq.length ? '（' + uniq.slice(0, 3).join('；') + '）' : '')
+      + ' · 请检查网络，或配置代理 / 镜像源';
+  }
+  if (e.cause && e.cause !== e) return friendlyError(e.cause, depth + 1);
+  return e.message || String(e);
+}
 
 /* ---------- 极简 HTTP/1.1 客户端：直连或 HTTP CONNECT 代理、重定向、chunked、gzip ---------- */
 function parseHead(head) {
@@ -108,7 +127,8 @@ function rawGet(urlStr, opts = {}) {
       settled = true;
       clearTimeout(timer);
       try { if (active) active.destroy(); else if (socket) socket.destroy(); } catch (e) { /* ignore */ }
-      err ? reject(err) : resolve(val);
+      const isAgg = typeof AggregateError !== 'undefined' && err instanceof AggregateError;
+      err ? reject((err instanceof Error && !isAgg) ? err : new Error(friendlyError(err))) : resolve(val);
     }
     function send(stream, requestTarget) {
       const h = [
@@ -322,7 +342,7 @@ async function check(cfg, current = {}, previous = {}) {
 }
 
 module.exports = {
-  REPO, DEFAULT_CONFIG, normalizeConfig, maskProxy, safeEndpoint,
+  REPO, DEFAULT_CONFIG, normalizeConfig, maskProxy, safeEndpoint, friendlyError,
   httpGet, fetchJson, downloadBinary, compareVersion, endpointFor,
   parseGithub, parseDockerHub, chooseAsset, chooseAppBundle, check,
 };

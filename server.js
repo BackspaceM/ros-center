@@ -1547,7 +1547,7 @@ async function performUpdateCheck(trigger) {
     }
   } catch (e) {
     updateState.status = {
-      ok: false, error: e.message || String(e), checkedAt: new Date().toISOString(),
+      ok: false, error: updates.friendlyError(e), checkedAt: new Date().toISOString(),
       source: derivedSource(),
       endpoint: updates.safeEndpoint(updates.endpointFor(runtimeUpdateConfig())),
       current, hasUpdate: false, trigger,
@@ -2198,7 +2198,7 @@ const server = http.createServer(async (req, res) => {
       saveUpdateState();
       scheduleUpdateChecks();
       return json(res, 200, { ok: true, config: publicUpdateConfig() });
-    } catch (e) { return json(res, 400, { error: e.message }); }
+    } catch (e) { return json(res, 400, { error: updates.friendlyError(e) }); }
   }
   if (p === '/api/update/check' && req.method === 'POST') {
     const s = await performUpdateCheck('manual');
@@ -2214,7 +2214,7 @@ const server = http.createServer(async (req, res) => {
       if (runtimeInfo().runtime === 'docker') throw new Error('Docker 部署请直接拉取新镜像，无需下载安装包');
       const downloaded = await downloadUpdateAsset(asset, false);
       return json(res, 200, { ok: true, downloaded });
-    } catch (e) { return json(res, 400, { error: e.message }); }
+    } catch (e) { return json(res, 400, { error: updates.friendlyError(e) }); }
   }
 
   /* ---- 自更新：Docker 经 docker.sock 重建容器 / 桌面替换 app 并自动重启 ---- */
@@ -2222,13 +2222,13 @@ const server = http.createServer(async (req, res) => {
     try {
       const force = url.searchParams.get('refresh') === '1';
       return json(res, 200, { ok: true, ...(await selfCapabilities(force)) });
-    } catch (e) { return json(res, 200, { ok: false, kind: runtimeInfo().selfUpdate, available: false, reason: e.message }); }
+    } catch (e) { return json(res, 200, { ok: false, kind: runtimeInfo().selfUpdate, available: false, reason: updates.friendlyError(e) }); }
   }
   if (p === '/api/update/self/apply' && req.method === 'POST') {
     try {
       const b = await readBody(req);
       return json(res, 200, { ok: true, ...(await applySelfUpdate(b || {})) });
-    } catch (e) { return json(res, 400, { error: e.message }); }
+    } catch (e) { return json(res, 400, { error: updates.friendlyError(e) }); }
   }
   if (p === '/api/update/self/result' && req.method === 'GET') {
     const rt = runtimeInfo();
@@ -2243,7 +2243,7 @@ const server = http.createServer(async (req, res) => {
       selfUpdateBusy = false; selfUpdateStartedAt = 0; lastAutoApplyKey = '';
       selfCapCache = { at: 0, value: null };
       return json(res, 200, { ok: true });
-    } catch (e) { return json(res, 400, { error: e.message }); }
+    } catch (e) { return json(res, 400, { error: updates.friendlyError(e) }); }
   }
 
   return serveStatic(req, res, p);
