@@ -821,9 +821,31 @@ tr.row-fail td { color: var(--red); }
 .topo-warn { color: var(--amber); cursor: help; }
 .topo-empty { padding: 90px 20px; text-align: center; color: var(--muted); font-size: 12.5px; }
 .topo-icon-img { clip-path: inset(0 round 5px); }
-.topo-icon-picker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.topo-icon-picker input[type=file] { font-size: 11.5px; color: var(--muted); }
-.topo-icon-preview { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; border: 1px solid var(--line); }
+.topo-icon-picker { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.topo-icon-preview { width: 36px; height: 36px; flex: none; border-radius: 6px; object-fit: contain; border: 1px solid var(--line); background: var(--soft); }
+.topo-icon-current { display: flex; align-items: center; gap: 10px; }
+.topo-icon-current-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.topo-icon-current-txt b { font-size: 12px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-icon-current-txt small, .topo-icon-lib-head small, .topo-icon-upload .topo-hint { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
+.topo-icon-lib-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 600; color: var(--ink); }
+.topo-icon-lib-head .btn { padding: 2px 9px; font-size: 10.5px; }
+.topo-icon-lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; max-height: 196px; overflow: auto; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.topo-icon-lib-empty { grid-column: 1/-1; padding: 14px; text-align: center; color: var(--muted); font-size: 11px; }
+.topo-icon-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 5px 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); cursor: pointer; min-width: 0; transition: border-color .15s, box-shadow .15s; }
+.topo-icon-item:hover { border-color: var(--blue); }
+.topo-icon-item.selected { border-color: var(--blue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 22%, transparent); }
+.topo-icon-item img { width: 34px; height: 34px; object-fit: contain; border-radius: 6px; }
+.topo-icon-item-label { max-width: 100%; font-size: 10.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-icon-item-use { position: absolute; left: 5px; top: 4px; font-size: 9px; padding: 1px 4px; border-radius: 6px; background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
+.topo-icon-item-ops { position: absolute; right: 3px; top: 3px; display: none; gap: 2px; }
+.topo-icon-item:hover .topo-icon-item-ops { display: flex; }
+.topo-icon-item-ops button { border: 0; background: var(--soft); color: var(--muted); border-radius: 5px; width: 17px; height: 17px; line-height: 15px; font-size: 11px; cursor: pointer; padding: 0; }
+.topo-icon-item-ops button:hover { color: var(--ink); }
+.topo-icon-rename-input { width: 100%; box-sizing: border-box; font-size: 10.5px; padding: 1px 3px; border: 1px solid var(--blue); border-radius: 4px; background: var(--card); color: var(--ink); outline: 0; }
+.topo-icon-upload { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.topo-icon-upload input[type=text] { flex: 1; min-width: 150px; max-width: 260px; }
+.topo-icon-upload label.btn { cursor: pointer; }
+.topo-icon-upload .topo-hint { flex-basis: 100%; }
 
 /* 端口与端口连线静态显示，不再做弹出动画 */
 @keyframes portPop { from { opacity: 0; transform: scale(.4) translateY(-6px); } }
@@ -921,3 +943,16 @@ tr.row-fail td { color: var(--red); }
 .qs-warn ul, .qs-result ul { margin:5px 0 0; padding-left:18px; }
 .qs-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
 @media (max-width:900px) { .upd-meta { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+/* ---------- 19. 应用内自动更新（Docker / 桌面） ---------- */
+.upd-self-meta > div b { font-size:12px; }
+.upd-self-progress, .upd-self-result {
+  margin-top:10px; font-size:11.5px; line-height:1.6; border-radius:9px; padding:9px 12px;
+  border:1px solid var(--line); background:var(--soft); color:var(--ink); word-break:break-word;
+}
+.upd-self-progress.ok { border-color:var(--green); }
+.upd-self-progress.bad, .upd-self-result.bad { border-color:var(--red); color:var(--red); }
+.upd-self-result.ok { border-color:var(--green); }
+.upd-self-help { margin-top:10px; font-size:11.5px; line-height:1.7; color:var(--muted); border-left:3px solid var(--blue); padding-left:10px; }
+.upd-self-meta > div b[title] { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+.upd-self-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }

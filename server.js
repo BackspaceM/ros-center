@@ -25,6 +25,7 @@ const path = require('path');
 const { GROUPS, SECTIONS, SECTION_MAP, seed, makeLog } = require('./catalog');
 const updates = require('./updates');
 const quicksetup = require('./quicksetup');
+const selfupdate = require('./selfupdate');
 
 const HOST = process.env.HOST || (DESKTOP ? '127.0.0.1' : '0.0.0.0');
 const INTERVAL = Math.max(500, Number(process.env.POLL_INTERVAL_MS || 1000));
@@ -327,6 +328,60 @@ function customTopology(dev) {
   if (!dev || !topoStore.devices[dev.id]) return [];
   const v = topoStore.devices[dev.id].nodes;
   return Array.isArray(v) ? v : [];
+}
+
+/* ================= 拓扑图标库 =================
+   图标统一放在 data/topology-icons/：WebUI 上传，或直接把图片拷进该目录也会被识别。
+   index.json 存显示名与内容哈希；上传按 sha256 去重，多台设备可复用同一个图标文件。 */
+const ICON_INDEX_FILE = path.join(TOPO_ICON_DIR, 'index.json');
+const ICON_NAME_RE = /^[A-Za-z0-9_-]+\.(png|jpe?g|webp|gif)$/i;
+function readIconIndex() {
+  try {
+    const d = JSON.parse(fs.readFileSync(ICON_INDEX_FILE, 'utf8'));
+    return d && d.icons && typeof d.icons === 'object' ? d : { icons: {} };
+  } catch (e) { return { icons: {} }; }
+}
+function saveIconIndex(idx) {
+  try {
+    fs.mkdirSync(TOPO_ICON_DIR, { recursive: true });
+    const tmp = ICON_INDEX_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(idx, null, 2) + '\n', { mode: 0o600 });
+    fs.renameSync(tmp, ICON_INDEX_FILE);
+    return true;
+  } catch (e) { console.warn('[topology] cannot save icon index:', e.message); return false; }
+}
+function iconLabel(v, fallback) {
+  const s = String(v == null ? '' : v).replace(/[\r\n\t\0-\x1f]/g, ' ').trim().slice(0, 40);
+  return s || fallback;
+}
+function iconUsage() {
+  const used = {};
+  for (const store of Object.values(topoStore.devices || {})) {
+    for (const n of (store && store.nodes) || []) {
+      const url = String((n && n.icon) || '');
+      if (!url) continue;
+      const name = url.split('/').pop();
+      (used[name] = used[name] || []).push(String((n && n.name) || (n && n.id) || ''));
+    }
+  }
+  return used;
+}
+function listTopoIcons() {
+  const idx = readIconIndex(), used = iconUsage();
+  let files = [];
+  try { files = fs.readdirSync(TOPO_ICON_DIR).filter((f) => ICON_NAME_RE.test(f)); } catch (e) { /* 目录尚未创建 */ }
+  return files.map((name) => {
+    let st;
+    try { st = fs.statSync(path.join(TOPO_ICON_DIR, name)); } catch (e) { return null; }
+    const meta = idx.icons[name] || {};
+    return {
+      name, url: '/api/topology/icon/' + name,
+      label: iconLabel(meta.label, name.replace(/\.[^.]+$/, '')),
+      sha256: String(meta.sha256 || ''),
+      size: st.size, mtime: st.mtime.toISOString(),
+      usedBy: used[name] || [], managed: !!(meta.sha256 || meta.label),
+    };
+  }).filter(Boolean).sort((a, b) => (b.usedBy.length - a.usedBy.length) || b.mtime.localeCompare(a.mtime));
 }
 
 function usageBucket(dev) {
@@ -1385,6 +1440,7 @@ try {
   if (env.ROS_UPDATE_ENDPOINT) cfg.endpoint = String(env.ROS_UPDATE_ENDPOINT);
   if (env.ROS_UPDATE_IMAGE) cfg.image = String(env.ROS_UPDATE_IMAGE);
   if (env.ROS_UPDATE_INTERVAL) cfg.intervalHours = Number(env.ROS_UPDATE_INTERVAL) || cfg.intervalHours;
+  if (env.ROS_UPDATE_AUTO_APPLY !== undefined && env.ROS_UPDATE_AUTO_APPLY !== '') cfg.autoApply = env.ROS_UPDATE_AUTO_APPLY === '1';
   updateState.config = updates.normalizeConfig(cfg);
 } catch (e) { /* 环境变量非法时保留默认 */ }
 
@@ -1394,8 +1450,16 @@ function saveUpdateState() {
     fs.writeFileSync(UPDATE_FILE, JSON.stringify(updateState, null, 2) + '\n', { mode: 0o600 });
   } catch (e) { console.warn('[updates] save failed:', e.message); }
 }
+function appliedVersion() {
+  /* 应用内更新成功后由 launcher 写入结果文件，启动时以此为准，避免一直提示更新 */
+  try {
+    const r = selfupdate.readJson(path.join(DATA_DIR, selfupdate.APP_UPDATE_RESULT), null);
+    if (r && r.ok && r.verified && !r.rolledBack && r.version) return String(r.version);
+  } catch (e) { /* ignore */ }
+  try { return String(JSON.parse(fs.readFileSync(path.join(__dirname, 'version.json'), 'utf8')).version || ''); } catch (e) { return ''; }
+}
 function runtimeInfo() {
-  let version = String(process.env.ROS_CENTER_VERSION || '').trim();
+  let version = String(process.env.ROS_CENTER_VERSION || '').trim() || appliedVersion();
   if (!version) { try { version = String(require('./package.json').version || ''); } catch (e) { /* no package.json */ } }
   const docker = !DESKTOP && (!!process.env.DOCKER_IMAGE || fs.existsSync('/.dockerenv'));
   return {
@@ -1403,6 +1467,7 @@ function runtimeInfo() {
     digest: String(process.env.ROS_CENTER_DIGEST || '').trim(),
     runtime: DESKTOP ? 'desktop' : docker ? 'docker' : 'source',
     platform: process.platform, arch: process.arch,
+    selfUpdate: DESKTOP ? 'desktop' : docker ? 'docker' : 'source',
   };
 }
 function publicUpdateConfig() {
@@ -1440,6 +1505,11 @@ async function performUpdateCheck(trigger) {
       const asset = updates.chooseAsset(r.latest, current.platform, current.arch);
       if (asset) downloadUpdateAsset(asset, true).catch((e) => console.warn('[updates] auto download:', e.message));
     }
+    if (updateState.config.autoApply && r.hasUpdate && lastAutoApplyKey !== (r.latest.version + '|' + (r.latest.digest || ''))) {
+      lastAutoApplyKey = r.latest.version + '|' + (r.latest.digest || '');
+      const t = setTimeout(() => applySelfUpdate({ trigger: 'auto' }).catch((e) => console.warn('[updates] auto apply:', e.message)), 6000);
+      if (t.unref) t.unref();
+    }
   } catch (e) {
     updateState.status = {
       ok: false, error: e.message || String(e), checkedAt: new Date().toISOString(),
@@ -1452,6 +1522,109 @@ async function performUpdateCheck(trigger) {
   saveUpdateState();
   return updateState.status;
 }
+/* ---------- 自更新：Docker 重建容器 / 桌面替换 app 并重启 ---------- */
+const SELF_PROGRESS_FILE = path.join(DATA_DIR, 'self-update-progress.json');
+let selfUpdateBusy = false, lastAutoApplyKey = '', selfUpdateStartedAt = 0, selfCapCache = { at: 0, value: null };
+
+function selfProgress(stage, message) {
+  const rec = { stage, message, at: new Date().toISOString() };
+  try { selfupdate.writeJson(SELF_PROGRESS_FILE, rec); } catch (e) { /* ignore */ }
+  console.log('[self-update]', stage, message);
+  return rec;
+}
+function selfResult(kind) {
+  const file = kind === 'docker' ? selfupdate.DOCKER_UPDATE_RESULT : selfupdate.APP_UPDATE_RESULT;
+  return selfupdate.readJson(path.join(DATA_DIR, file), null);
+}
+function latestAssets() { return ((updateState.status && updateState.status.latest) || {}).assets || []; }
+function latestVersion() {
+  const v = String((updateState.status && updateState.status.latest && updateState.status.latest.version) || '');
+  return v.replace(/^v/i, '');
+}
+
+async function selfCapabilities() {
+  const rt = runtimeInfo();
+  const kind = rt.selfUpdate;
+  const desktop = selfupdate.desktopCapabilities({ appDir: __dirname, dataDir: DATA_DIR, desktop: !!DESKTOP });
+  let docker = null;
+  if (kind === 'docker') {
+    if (Date.now() - selfCapCache.at < 30000 && selfCapCache.value) docker = selfCapCache.value;
+    else {
+      docker = await selfupdate.dockerCapabilities();
+      selfCapCache = { at: Date.now(), value: docker };
+    }
+  }
+  const bundleInfo = updates.chooseAppBundle((updateState.status && updateState.status.latest) || {});
+  const reason = kind === 'source' ? '源码运行无需自更新，直接 git pull 后重启即可'
+    : kind === 'docker' ? (docker.canAutoUpdate ? '' : (docker.reason || 'Docker socket 不可用'))
+      : (desktop.available ? '' : (desktop.reason || '当前安装方式不支持应用内更新'));
+  return {
+    kind, available: kind === 'docker' ? !!docker.canAutoUpdate : kind === 'desktop' ? desktop.available : false,
+    reason, desktop, docker, busy: selfUpdateBusy,
+    runtime: rt, autoApply: !!updateState.config.autoApply,
+    bundle: bundleInfo ? { name: bundleInfo.zip.name, size: bundleInfo.zip.size, url: bundleInfo.zip.url, checksum: !!bundleInfo.checksum } : null,
+    progress: selfupdate.readJson(SELF_PROGRESS_FILE, null),
+    result: selfResult(kind === 'docker' ? 'docker' : 'desktop'),
+  };
+}
+
+async function applySelfUpdate(o = {}) {
+  /* 若上一个任务已超过 3 分钟仍卡住（helper 未能重建容器），视为陈旧并允许重试 */
+  if (selfUpdateBusy && Date.now() - selfUpdateStartedAt < 180000) throw new Error('已有更新任务正在进行');
+  selfUpdateBusy = false;
+  const cap = await selfCapabilities();
+  if (!cap.available) throw new Error(cap.reason || '当前环境不支持自动应用更新');
+  const status = updateState.status;
+  if (o.force !== true && !(status && status.ok && status.hasUpdate)) {
+    throw new Error('当前没有检测到新版本，请先检查更新');
+  }
+  const ver = latestVersion();
+  selfUpdateBusy = true;
+  selfUpdateStartedAt = Date.now();
+  /* 正常情况下容器/进程已被重建，这个定时器不会执行；仅用于异常时避免按钮永久禁用 */
+  const stale = setTimeout(() => { selfUpdateBusy = false; }, 190000);
+  if (stale.unref) stale.unref();
+  try {
+    if (cap.kind === 'desktop') {
+      const picked = updates.chooseAppBundle((status && status.latest) || {});
+      if (!picked) throw new Error('该版本未提供应用内更新包（ros-center-app-*.zip），请手动下载安装包');
+      selfProgress('download', '正在下载应用更新包 ' + picked.zip.name);
+      const buf = await updates.downloadBinary(picked.zip.url, { proxy: updateState.config.proxy });
+      let checksum = '';
+      if (picked.checksum) {
+        const r = await updates.httpGet(picked.checksum.url, { proxy: updateState.config.proxy, timeout: 30000 });
+        if (r.status < 200 || r.status >= 300) throw new Error('校验和文件下载失败 HTTP ' + r.status);
+        checksum = r.body.toString('utf8').trim();
+      }
+      selfProgress('verify', '正在校验并暂存更新包');
+      const pending = selfupdate.stageDesktopBundle(buf, {
+        dataDir: DATA_DIR, appDir: __dirname, expectedSha256: checksum, version: ver,
+      });
+      selfProgress('restart', `更新包已就绪（${pending.version}），服务即将自动重启`);
+      const out = { ok: true, mode: 'desktop', version: pending.version, files: pending.files, restartInMs: 1500 };
+      setTimeout(() => { try { process.exit(selfupdate.RESTART_CODE); } catch (e) { process.exit(0); } }, 1500);
+      return out;
+    }
+    if (cap.kind === 'docker') {
+      const image = o.image || ((updateState.config.source === 'dockerhub')
+        ? `${updateState.config.image}:${updateState.config.tag}` : cap.docker.image || 'backspacem/ros-center:latest');
+      selfProgress('pull', '正在拉取最新镜像并准备重建容器');
+      const r = await selfupdate.dockerApply({
+        dataDir: DATA_DIR, image, tag: o.tag || '', version: ver,
+        onProgress: (stage, message) => selfProgress(stage, message),
+      });
+      selfProgress('switch', '助手容器已接管，容器即将重建，服务短暂中断');
+      return { ok: true, mode: 'docker', ...r };
+    }
+    throw new Error('源码运行请直接 git pull 后重启');
+  } catch (e) {
+    clearTimeout(stale);
+    selfUpdateBusy = false;
+    selfProgress('error', e.message || String(e));
+    throw e;
+  }
+}
+
 function scheduleUpdateChecks() {
   if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
   if (!updateState.config.enabled) return;
@@ -1687,6 +1860,9 @@ const server = http.createServer(async (req, res) => {
     return json(res, 405, { error: '不支持的请求方法' });
   }
   /* 设备图标：仅常见位图，拒绝 SVG 防脚本注入；读取时强制图片 MIME + nosniff */
+  if (p === '/api/topology/icons' && req.method === 'GET') {
+    return json(res, 200, { ok: true, icons: listTopoIcons(), dir: 'data/topology-icons/' });
+  }
   if (p === '/api/topology/icon' && req.method === 'POST') {
     try {
       const dev = activeDevice(); if (!dev) throw new Error('没有可用设备');
@@ -1696,15 +1872,76 @@ const server = http.createServer(async (req, res) => {
       const buf = Buffer.from(m[3], 'base64');
       if (!buf.length || buf.length > 900 * 1024) throw new Error('图片大小需在 900KB 以内');
       const rawExt = m[2].toLowerCase(); const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
-      const name = String(dev.id).replace(/[^A-Za-z0-9_-]/g, '_') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+      const hash = crypto.createHash('sha256').update(buf).digest('hex');
+      const label = iconLabel(b.label || b.fileName, '');
       fs.mkdirSync(TOPO_ICON_DIR, { recursive: true });
+      const idx = readIconIndex();
+      /* 1) 已登记图标按内容哈希去重：两部一样的手机只存一份 */
+      for (const [name, meta] of Object.entries(idx.icons)) {
+        if (meta && meta.sha256 === hash && fs.existsSync(path.join(TOPO_ICON_DIR, name))) {
+          return json(res, 200, { ok: true, reused: true, name, url: '/api/topology/icon/' + name,
+            label: iconLabel(meta.label, name), icons: listTopoIcons() });
+        }
+      }
+      /* 2) 手动拷进目录的图片没有登记信息，补算哈希后再比对一次 */
+      for (const it of listTopoIcons()) {
+        if (idx.icons[it.name] && idx.icons[it.name].sha256) continue;
+        const h = crypto.createHash('sha256').update(fs.readFileSync(path.join(TOPO_ICON_DIR, it.name))).digest('hex');
+        idx.icons[it.name] = { label: it.label, sha256: h, size: it.size, createdAt: it.mtime };
+        if (h === hash) {
+          saveIconIndex(idx);
+          return json(res, 200, { ok: true, reused: true, name: it.name, url: it.url,
+            label: it.label, icons: listTopoIcons() });
+        }
+      }
+      /* 3) 确实是新图标：文件名带内容哈希前缀，天然避免重复 */
+      const name = String(dev.id).replace(/[^A-Za-z0-9_-]/g, '_') + '_' + hash.slice(0, 12) + '.' + ext;
       fs.writeFileSync(path.join(TOPO_ICON_DIR, name), buf, { mode: 0o644 });
-      return json(res, 200, { ok: true, url: '/api/topology/icon/' + name });
+      idx.icons[name] = { label: label || iconLabel((b.fileName || '').replace(/\.[^.]+$/, ''), 'Icon'),
+        sha256: hash, size: buf.length, createdAt: new Date().toISOString() };
+      saveIconIndex(idx);
+      return json(res, 200, { ok: true, reused: false, name, url: '/api/topology/icon/' + name,
+        label: idx.icons[name].label, icons: listTopoIcons() });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/topology/icon/rename' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      const name = String(b.name || '');
+      if (!ICON_NAME_RE.test(name) || !fs.existsSync(path.join(TOPO_ICON_DIR, name))) throw new Error('图标不存在');
+      const label = iconLabel(b.label, name);
+      const idx = readIconIndex();
+      idx.icons[name] = { ...(idx.icons[name] || {}), label };
+      saveIconIndex(idx);
+      return json(res, 200, { ok: true, icons: listTopoIcons() });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/topology/icon/delete' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      const name = String(b.name || '');
+      if (!ICON_NAME_RE.test(name)) throw new Error('无效图标名');
+      const usedBy = iconUsage()[name] || [];
+      if (usedBy.length && !b.force) {
+        return json(res, 409, { error: `还有 ${usedBy.length} 台设备在使用该图标：${usedBy.slice(0, 5).join('、')}`, usedBy });
+      }
+      const idx = readIconIndex();
+      fs.rmSync(path.join(TOPO_ICON_DIR, name), { force: true });
+      delete idx.icons[name];
+      saveIconIndex(idx);
+      if (b.force && usedBy.length) {
+        const url = '/api/topology/icon/' + name;
+        for (const store of Object.values(topoStore.devices || {})) {
+          for (const n of (store && store.nodes) || []) if (n.icon === url) n.icon = '';
+        }
+        saveTopology();
+      }
+      return json(res, 200, { ok: true, clearedNodes: b.force ? usedBy.length : 0, icons: listTopoIcons() });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p.startsWith('/api/topology/icon/') && req.method === 'GET') {
     const name = decodeURIComponent(p.slice('/api/topology/icon/'.length));
-    if (!/^[A-Za-z0-9_-]+\.(png|jpe?g|webp|gif)$/i.test(name)) return json(res, 400, { error: '无效图标名' });
+    if (!ICON_NAME_RE.test(name)) return json(res, 400, { error: '无效图标名' });
     try {
       const buf = fs.readFileSync(path.join(TOPO_ICON_DIR, name));
       const ext = name.split('.').pop().toLowerCase();
@@ -1903,7 +2140,11 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/update/status' && req.method === 'GET') {
     return json(res, 200, {
       config: publicUpdateConfig(), status: updateState.status, runtime: runtimeInfo(),
-      limits: { selfReplace: false, dockerCommand: 'docker pull backspacem/ros-center:latest && docker compose up -d' },
+      limits: {
+        selfReplace: runtimeInfo().selfUpdate !== 'source',
+        selfUpdateKind: runtimeInfo().selfUpdate,
+        dockerCommand: 'docker pull backspacem/ros-center:latest && docker compose up -d',
+      },
     });
   }
   if (p === '/api/update/config' && req.method === 'POST') {
@@ -1932,6 +2173,32 @@ const server = http.createServer(async (req, res) => {
       if (runtimeInfo().runtime === 'docker') throw new Error('Docker 部署请直接拉取新镜像，无需下载安装包');
       const downloaded = await downloadUpdateAsset(asset, false);
       return json(res, 200, { ok: true, downloaded });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+
+  /* ---- 自更新：Docker 经 docker.sock 重建容器 / 桌面替换 app 并自动重启 ---- */
+  if (p === '/api/update/self/status' && req.method === 'GET') {
+    try { return json(res, 200, { ok: true, ...(await selfCapabilities()) }); }
+    catch (e) { return json(res, 200, { ok: false, kind: runtimeInfo().selfUpdate, available: false, reason: e.message }); }
+  }
+  if (p === '/api/update/self/apply' && req.method === 'POST') {
+    try {
+      const b = await readBody(req);
+      return json(res, 200, { ok: true, ...(await applySelfUpdate(b || {})) });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/update/self/result' && req.method === 'GET') {
+    const rt = runtimeInfo();
+    return json(res, 200, { ok: true, kind: rt.selfUpdate, runtime: rt,
+      progress: selfupdate.readJson(SELF_PROGRESS_FILE, null),
+      result: selfResult(rt.selfUpdate === 'docker' ? 'docker' : 'desktop') });
+  }
+  if (p === '/api/update/self/clear' && req.method === 'POST') {
+    try {
+      for (const f of [SELF_PROGRESS_FILE, path.join(DATA_DIR, selfupdate.DOCKER_UPDATE_RESULT),
+        path.join(DATA_DIR, selfupdate.DOCKER_UPDATE_PENDING)]) fs.rmSync(f, { force: true });
+      selfUpdateBusy = false; selfUpdateStartedAt = 0; lastAutoApplyKey = '';
+      return json(res, 200, { ok: true });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
 
@@ -1982,6 +2249,15 @@ server.listen(PORT, HOST, () => {
   console.log(`[ui] http://localhost:${PORT}`);
   console.log(`[ui] ${devices.size} device(s), active=${activeDevice() ? activeDevice().name : 'none'}`);
   if (DESKTOP && !process.env.ROS_NO_BROWSER) openBrowser(`http://localhost:${PORT}`);
+  /* 服务成功起来后确认应用内更新，launcher 之后不会再按「启动失败」回滚 */
+  setTimeout(() => {
+    try {
+      if (selfupdate.markDesktopVerified({ dataDir: DATA_DIR })) {
+        const r = selfupdate.readJson(path.join(DATA_DIR, selfupdate.APP_UPDATE_RESULT), null);
+        console.log('[self-update] app update verified:', r && r.version);
+      }
+    } catch (e) { /* ignore */ }
+  }, 2500).unref?.();
 });
 for (const dev of devices.values()) { dev.ensureConnection(); pollDevice(dev); }
 scheduleUpdateChecks();

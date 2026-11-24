@@ -53,6 +53,15 @@ const README = `ROS Center 桌面版
   macOS 若提示「无法打开」，右键 App 选「打开」，或执行：
     xattr -dr com.apple.quarantine "/Applications/ROS Center.app"
   Windows 若出现 SmartScreen，点「更多信息 → 仍要运行」（开源程序未签名）。
+
+应用内更新
+  「系统管理 → 检查更新 → 应用内自动更新」点一次即可升级程序，
+  无需重新下载安装包：只替换 app/ 里的程序文件并自动重启，data/ 数据完全保留。
+  macOS / Windows 安装版首次启动会把程序源码同步到数据目录，以便后续更新。
+
+网络拓扑图标
+  图标统一放在 数据目录/topology-icons/，网页上传或直接把图片拷进该目录都会被识别。
+  编辑设备时可从图标库点选复用；内容相同的图片只保存一份，多台设备可共用。
 `;
 
 /* macOS 目标按架构构造：同一个 macOS runner 上可同时打出 arm64 与 x64 版本，
@@ -66,7 +75,7 @@ function macTarget(arch) {
     url: `https://nodejs.org/dist/v${NODE_V}/${base}.tar.gz`,
     member: `${base}/bin/node`,
     bin: 'node', launcherName: 'Start.command', zip: `ros-center-macos-${a}.zip`,
-    launcher: '#!/bin/sh\ncd "$(dirname "$0")"\nexport ROS_BASE_DIR="$(pwd)"\nexport ROS_DESKTOP=1\nexport HOST=127.0.0.1\nexec ./bin/node ./app/server.js\n',
+    launcher: '#!/bin/sh\ncd "$(dirname "$0")"\nexport ROS_BASE_DIR="$(pwd)"\nexport ROS_DESKTOP=1\nexport HOST=127.0.0.1\nexec ./bin/node ./app/launcher.js\n',
   };
 }
 
@@ -79,7 +88,7 @@ const TARGETS = [
     url: `https://nodejs.org/dist/v${NODE_V}/node-v${NODE_V}-win-x64.zip`,
     member: `node-v${NODE_V}-win-x64/node.exe`,
     bin: 'node.exe', launcherName: 'Start.bat', zip: 'ros-center-windows-x64.zip',
-    launcher: '@echo off\r\ncd /d "%~dp0"\r\nset ROS_BASE_DIR=%CD%\r\nset ROS_DESKTOP=1\r\nset HOST=127.0.0.1\r\nbin\\node.exe app\\server.js\r\n',
+    launcher: '@echo off\r\ncd /d "%~dp0"\r\nset ROS_BASE_DIR=%CD%\r\nset ROS_DESKTOP=1\r\nset HOST=127.0.0.1\r\nbin\\node.exe app\\launcher.js\r\n',
   },
 ];
 
@@ -190,10 +199,13 @@ function stage(t, stageDir) {
   fs.chmodSync(path.join(dir, 'bin', t.bin), 0o755);
   fs.rmSync(tmp, { recursive: true, force: true });
 
-  for (const f of ['server.js', 'catalog.js', 'updates.js', 'quicksetup.js', 'package.json']) {
+  for (const f of ['server.js', 'catalog.js', 'updates.js', 'quicksetup.js', 'selfupdate.js', 'launcher.js', 'package.json']) {
     fs.copyFileSync(path.join(ROOT, f), path.join(dir, 'app', f));
   }
   copyDir(path.join(ROOT, 'public'), path.join(dir, 'app', 'public'));
+  /* 版本标记：应用内更新后用 data/app-update-result.json 覆盖，见 selfupdate.js */
+  fs.writeFileSync(path.join(dir, 'app', 'version.json'),
+    JSON.stringify({ version: VERSION, tag: 'v' + VERSION, builtAt: new Date().toISOString() }, null, 2) + '\n');
 
   fs.writeFileSync(path.join(dir, t.launcherName), t.launcher, { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'README.txt'), README);

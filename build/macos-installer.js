@@ -40,20 +40,34 @@ const INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `;
 
-/* .app 主可执行文件：启动本地服务并打开浏览器 */
+/* .app 主可执行文件：把 app 源码同步到可写的用户数据目录，再交给 launcher 启动。
+   这样「应用内更新」替换的是数据目录里的 app/，无需改动 /Applications 里的安装包。 */
 const LAUNCHER = `#!/bin/sh
 set -eu
 RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
 DATA="$HOME/Library/Application Support/ROS Center"
+APP="$DATA/app"
+STAMP="$DATA/.installed-app-stamp"
 mkdir -p "$DATA"
 if [ ! -f "$DATA/config.example.env" ]; then
   cp "$RES/config.example.env" "$DATA/config.example.env" 2>/dev/null || true
 fi
+NEED=0
+if [ ! -f "$APP/server.js" ]; then
+  NEED=1
+elif [ ! -f "$STAMP" ] || ! cmp -s "$RES/app/version.json" "$STAMP"; then
+  NEED=1
+fi
+if [ "$NEED" = "1" ]; then
+  mkdir -p "$APP"
+  cp -R "$RES/app/." "$APP/"
+  cp "$RES/app/version.json" "$STAMP"
+fi
 export ROS_BASE_DIR="$DATA"
 export ROS_DESKTOP=1
 export HOST=127.0.0.1
-cd "$RES"
-exec "$RES/bin/node" "$RES/app/server.js"
+cd "$APP"
+exec "$RES/bin/node" "$APP/launcher.js"
 `;
 
 /* 终端里手动停止服务用（放在 Resources，便于排查） */

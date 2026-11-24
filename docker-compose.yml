@@ -8,6 +8,9 @@ services:
       - "${WEB_PORT:-10086}:${CONTAINER_PORT:-10086}"
     volumes:
       - ./data:/app/data
+      # 可选：允许网页里「一键更新」自动重建容器。映射 docker.sock 等于把宿主机
+      # Docker 控制权交给容器（root 级权限），不需要应用内更新就不要打开这一行。
+      # - /var/run/docker.sock:/var/run/docker.sock
     environment:
       PORT: ${CONTAINER_PORT:-10086}
       HOST: 0.0.0.0
@@ -31,5 +34,8 @@ services:
       ROS_UPDATE_ENDPOINT: ${ROS_UPDATE_ENDPOINT:-}
       ROS_UPDATE_IMAGE: ${ROS_UPDATE_IMAGE:-}
       ROS_UPDATE_INTERVAL: ${ROS_UPDATE_INTERVAL:-}
+      ROS_UPDATE_AUTO_APPLY: ${ROS_UPDATE_AUTO_APPLY:-}
+      ROS_DOCKER_SOCKET: ${ROS_DOCKER_SOCKET:-/var/run/docker.sock}
+      ROS_DOCKER_CONTAINER: ${ROS_DOCKER_CONTAINER:-}
       ROS_CENTER_VERSION: ${ROS_CENTER_VERSION:-}
       ROS_CENTER_DIGEST: ${ROS_CENTER_DIGEST:-}

@@ -30,7 +30,7 @@ ROS Center 通过 RouterOS API（8728 / 8729）只读取实时数据，并按需
 - **中英双语**：右上角一键切换，界面、表单、提示、错误全部双语
 - **自动刷新与快捷搜索**：顶栏语言按钮后「自动刷新」开关（默认开、记忆偏好）统一控制各页刷新，新增设备后状态自动跟进；`⌘ K`（Win/Linux 为 `Ctrl K`）聚焦侧栏搜索并展开侧栏，Enter 跳首个结果、Esc 清空，搜索匹配分组名。仅演示模式显示 DEMO 提示
 - **配色 × 深浅 双轴主题**：14 套配色（默认 **UniFi 风格**：浅色侧栏、白卡细边框、克制品牌蓝、大留白；另含经典蓝、毛玻璃、青花瓷、液态玻璃等）与浅色/深色/跟随系统三种明暗**可任意组合**；深浅模式用顶栏 ☀/☾/◐ 日月图标一键切换，配色下拉独立选择。**主题完整覆盖侧边栏**：底色、hover、选中高亮、图标、logo、侧栏纹样都随配色与深浅一起变化；图表与 SVG 同步换色。青花瓷主题改为白瓷地 + 钴蓝团花/缠枝纹（浅色）与夜蓝釉（深色），卡片与顶栏带青花描边，登录页同步
-- **网络拓扑图**：「系统概览 → 网络拓扑」独立页面。自动读取 RouterOS 邻居表（LLDP/MNDP）与 DHCP 租约，层级**完全按用户填写的上下级关系推导**（可给主路由再挂光猫等上级设备，不再固定根节点），同层自动排布不重叠。固定上下分层布局、可一键切换左右视图（左右时最上级在左、下级在右、同级竖排一列）、滚轮缩放、拖拽平移、透明画布；颜色图例居中显示在画布上方，发现/自定义数量与当前点击动画显示在标题下方。所有设备都可自由拖动，只要不与其它设备重叠即可；**双击设备始终编辑该设备本身**（同 ID 覆盖，不会新增副本），编辑弹窗可填写「本层排序」（每层从 1 开始）直接指定同层左右顺序。多口交换机可登记「本机网口」，下挂设备标注「上级端口」（如 `ether3`）；端口信息只在编辑表单里维护，图中不再显示端口方块。可为节点上传图标并在卡片右侧显示实时速率（上行在上、下行在下）；速率优先取节点自带的接口，其次取填写的「上级端口」（如 `ether3`）对应接口的实时速率，因此手工添加的设备也有上下行数据。**每个设备可单独指定点击动画**（无 / 节点脉冲 / 链路流动 / 涟漪扩散），在拓扑页「动画设置」中配置；点击谁就播放谁的动画，并持续到点击另一台设备（已移除端口展开动画）。**双击设备编辑，选中后点工具栏「删除设备」移除**（自动发现的节点会被隐藏，删除其覆盖版本即可恢复）。上级 → 下级连线的涌动方向固定为父到子，速度按**下级设备的下行速率**对数比例调节（下级无速率则静止），因此后添加的上级设备也能正常涌动。**流量计算模式**：无法直接采集的设备（光猫、交换机等）可多选若干下级设备，按其速率之和显示，存在包含关系的选项自动互斥。配置按设备持久化到 `data/topology.json`，图标存于 `data/topology-icons/`（图标位于 `data/topology-icons/`，随 `./data` 卷一起持久化）
+- **网络拓扑图**：「系统概览 → 网络拓扑」独立页面。自动读取 RouterOS 邻居表（LLDP/MNDP）与 DHCP 租约，层级**完全按用户填写的上下级关系推导**（可给主路由再挂光猫等上级设备，不再固定根节点），同层自动排布不重叠。固定上下分层布局、可一键切换左右视图（左右时最上级在左、下级在右、同级竖排一列）、滚轮缩放、拖拽平移、透明画布；颜色图例居中显示在画布上方，发现/自定义数量与当前点击动画显示在标题下方。所有设备都可自由拖动，只要不与其它设备重叠即可；**双击设备始终编辑该设备本身**（同 ID 覆盖，不会新增副本），编辑弹窗可填写「本层排序」（每层从 1 开始）直接指定同层左右顺序。多口交换机可登记「本机网口」，下挂设备标注「上级端口」（如 `ether3`）；端口信息只在编辑表单里维护，图中不再显示端口方块。可为节点上传图标并在卡片右侧显示实时速率（上行在上、下行在下）；速率优先取节点自带的接口，其次取填写的「上级端口」（如 `ether3`）对应接口的实时速率，因此手工添加的设备也有上下行数据。**每个设备可单独指定点击动画**（无 / 节点脉冲 / 链路流动 / 涟漪扩散），在拓扑页「动画设置」中配置；点击谁就播放谁的动画，并持续到点击另一台设备（已移除端口展开动画）。**双击设备编辑，选中后点工具栏「删除设备」移除**（自动发现的节点会被隐藏，删除其覆盖版本即可恢复）。上级 → 下级连线的涌动方向固定为父到子，速度按**下级设备的下行速率**对数比例调节（下级无速率则静止），因此后添加的上级设备也能正常涌动。**流量计算模式**：无法直接采集的设备（光猫、交换机等）可多选若干下级设备，按其速率之和显示，存在包含关系的选项自动互斥。配置按设备持久化到 `data/topology.json`，图标存于 `data/topology-icons/`（图标位于 `data/topology-icons/`，随 `./data` 卷一起持久化）。**图标库**：所有图标集中在该目录，网页上传或直接把图片拷进去都会被识别；编辑设备时可从图标库点选复用、重命名、删除，并看到每个图标被几台设备引用。上传按内容 SHA256 去重 —— 两部一样的 iPhone 只需传一次，多台设备共用同一个文件，不会重复占空间
 - **运维工具**：系统信息、备份配置、网络诊断三块（网络诊断在下方，结果框固定大小、预留约 5 行并可向上滚动查看历史）；ICMP 回复逐条实时写入表格，包数量不设上限，目标地址默认留空，可随时停止；配置备份改为**导出 `.rsc` 文件由浏览器下载到当前设备**（电脑/手机），不在 RouterOS 上生成备份文件
 - **可选动效**：顶栏 ✦ 按钮一键开关动画（节点入场、连线流动、选中脉冲、弹窗与按钮微交互、主题过渡），偏好记忆在 `localStorage`，并遵循系统「减少动态效果」设置
 - **侧栏折叠**：分组整体折叠/展开、单个分组折叠、侧栏收窄为图标条、拖动调整宽度
@@ -92,6 +92,11 @@ docker compose up -d
 # 如需用本地源码构建，则改用：docker compose up -d --build
 ```
 
+启用网页内「一键重建容器」：在 `docker-compose.yml` 的 `volumes` 下取消注释
+`- /var/run/docker.sock:/var/run/docker.sock` 这一行，再 `docker compose up -d`。
+程序会通过 Docker Engine API 拉取新镜像并按原配置重建容器（仅 `restart` 不会换镜像）。
+注意映射 docker.sock 相当于把宿主机 Docker 控制权交给容器，请自行评估；`./data` 卷必须保留。
+
 #### 方式三：桌面版（Releases 安装包 / 绿色版）
 
 直接从 [GitHub Releases](https://github.com/BackspaceM/ros-center/releases) 下载对应平台文件即可，**目标机器不需要安装 Node.js，也不需要 `npm install`**：
@@ -109,12 +114,14 @@ macOS 请选择与芯片一致的版本（Apple Silicon 用 `arm64`，Intel 用 
 - **绿色版**：解压后双击 `Start.command` / `Start.bat`，配置与数据在解压目录的 `data/` 下，删掉文件夹即卸载。
 - 程序未签名：macOS 首次打开请右键 → 打开，或执行 `xattr -dr com.apple.quarantine "/Applications/ROS Center.app"`；Windows 出现 SmartScreen 时点「更多信息 → 仍要运行」。
 - 每个产物附 `.sha256`，Release 里另有汇总的 `SHA256SUMS.txt`。
+- **应用内更新**：v1.1.0 起桌面版带 `launcher.js`，以后升级不必再下载安装包 —— 在「系统管理 → 检查更新」点「一键更新并重启」，程序会自动下载几百 KB 的 `ros-center-app-*.zip`（仅源码）、校验后替换程序文件并重启，`data/` 不变，失败自动回滚。已装 v1.0.0 的用户需手动安装一次新版，之后即可永久应用内更新。
 
 自行构建（绿色版任意平台都能打，安装包需在对应系统上生成）：
 
 ```bash
 npm run build:desktop                 # macOS arm64 + Windows 绿色版 ZIP
 node build/desktop.js --mac-x64       # 追加 macOS x64 绿色版 ZIP
+npm run build:app-bundle              # 应用内更新包 ros-center-app-*.zip（仅源码）
 npm run build:mac-installer -- --arch=all   # macOS 上生成 arm64 + x64 的 .pkg + .dmg
 npm run build:win-installer           # Windows 上生成 .exe（需 NSIS 3）
 ```
@@ -185,8 +192,11 @@ node server.js          # Node.js 18+，无需 npm install
 **检查更新（系统管理 → 检查更新）**
 - 检测源可切换：GitHub Releases（源码 / 桌面版，默认）或 Docker Hub（镜像 tag）。
 - 访问受限时可填「镜像源 / 自定义 API 端点」（返回同结构 JSON 的完整地址）或「HTTP 代理」（`http://user:pass@host:port`，服务端走 HTTP CONNECT）；Docker 部署也可用 `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` 等环境变量预设，见 `.env.example` 与 `docker-compose.yml`。
-- 选项：自动检查开关与周期（1 小时 ~ 30 天）、发布通道、Docker 仓库/tag、发现新版本时自动下载匹配的安装包（仅桌面版）。代理密码读取时以 `***` 遮蔽，不会回显。
-- **边界**：WebUI 不能替换自己正在运行的进程，也不能重建容器。这里的自动更新 = 定时检查 + 可选自动下载；桌面版下载到 `data/updates/` 后手动安装，Docker 版执行 `docker pull backspacem/ros-center:latest && docker compose up -d`。Docker Hub 检测默认比对镜像 digest（可传 `ROS_CENTER_DIGEST`），否则以上次构建时间变化判定。
+- 选项：自动检查开关与周期（1 小时 ~ 30 天）、发布通道、Docker 仓库/tag、自动下载匹配安装包（仅桌面版）、**自动应用更新**（发现新版本直接完成更新）。代理密码读取时以 `***` 遮蔽，不会回显。
+- **应用内自动更新（无需重装，系统管理 → 检查更新 → 应用内自动更新）**
+  - **桌面版 macOS / Windows**：程序是「内置 Node 运行时 + 纯 JS 源码」结构，所以不必重新下载 pkg/dmg/exe。点「一键更新并重启」后，服务端下载几百 KB 的 `ros-center-app-*.zip`（仅源码），校验 SHA256 与逐文件 manifest，暂存后主动退出；`launcher.js` 监管进程在文件句柄释放后替换 `app/` 并自动重启。`data/` 完全不动，新版本起不来会自动回滚到备份。安装版（pkg/exe）首次启动会把源码同步到用户数据目录，绕开只读的 Applications / Program Files。**只需安装一次带 launcher 的版本（v1.1.0+），之后所有更新都在网页里点一下完成。**
+  - **Docker 版**：在 `docker-compose.yml` 的 `volumes` 里额外映射 `/var/run/docker.sock`，即可点「拉取新镜像并重建容器」。程序经 Docker Engine API 拉取新镜像、读取自身配置，再创建一次性助手容器完成「停旧 → 删旧 → 以原名称/端口/卷/环境变量重建 → 启动」，页面自动重连。注意：`docker restart` 只重启进程、仍用旧镜像，**必须重建容器**；`/app/data` 未挂载到宿主机时会拒绝执行（防止删容器丢配置）；映射 docker.sock 等同赋予容器宿主机 root 级权限，请自行评估。不映射时仍可手动 `docker pull backspacem/ros-center:latest && docker compose up -d`。
+  - Docker Hub 检测默认比对镜像 digest（可传 `ROS_CENTER_DIGEST`），否则以上次构建时间变化判定；重建时会自动把新 digest / 版本写入环境变量，避免反复触发更新。
 
 **一键配置（系统管理 → 一键配置）**
 - 上网方式：PPPoE 拨号（账号/密码/MTU/MRU/服务名）、DHCP 自动获取、静态 IP；WAN / LAN 接口可填，LAN 可自动建桥并加入端口。
@@ -237,7 +247,7 @@ If streaming is unavailable (older RouterOS or restricted networks), the app fal
 - **Bilingual UI**: one-click Chinese/English switch across labels, forms, hints and errors
 - **Auto-refresh & quick search**: an "Auto refresh" toggle next to the language button (on by default, remembered) drives page refreshes; new devices pick up their status automatically. `Cmd+K` (`Ctrl+K` on Windows/Linux) focuses the sidebar search and expands a collapsed sidebar; Enter jumps to the first result, Esc clears it. Only demo mode shows a DEMO hint
 - **Dual-axis color × lightness themes**: 14 color schemes. **UniFi is the new default** (light sidebar, white cards with hairline borders, restrained brand blue and generous whitespace); classic blue, glass, porcelain and liquid glass remain available. All schemes combine freely with light / dark / system lightness; light/dark is a one-click sun/moon icon in the top bar, color scheme is a separate dropdown. **Themes fully cover the sidebar** — background, hover, active highlight, icons, logo and sidebar texture all follow the chosen color scheme and lightness; charts and SVGs follow as well. The porcelain theme is now white porcelain with cobalt-blue floral / vine patterns (a night-blue glaze in dark mode), with blue trim on cards and the top bar; the sign-in page matches
-- **Network topology**: a standalone page under **Overview → Network topology**, built from RouterOS neighbour discovery (LLDP/MNDP) and DHCP leases. Levels are derived entirely from parent/child links — you can put an ONT above the router; same-level nodes are spread out without overlap. Fixed top-down layout with a one-click horizontal view (leftmost = top level, children to the right, same-level devices stacked vertically), scroll zoom, drag-to-pan and a transparent canvas; the colour legend is centred above the canvas, while discovery/custom counts and the current click effect sit below the title. Every device can be dragged freely as long as it does not overlap another one; **double-clicking a device always edits that same device** (same ID override, never a duplicate), and the editor offers "Order in level" (starting at 1) for explicit ordering within a layer. Switches declare local ports and downstream devices tag their parent port (e.g. `ether3`); port badges are no longer drawn on the canvas. Nodes can carry uploaded icons and show live rates on the right side of the card (uplink on top, downlink below); the rate comes from the node's interface first, then from the declared parent port (e.g. `ether3`), so manually added devices also show uplink/downlink values. **Each device can bind its own click animation** (none / node pulse / link flow / ripple) from the topology page's **Animations** button; it stays active until another device is clicked (the expand-ports animation was removed). **Double-click a device to edit; select it and click "Delete device" in the toolbar to remove it** (discovered nodes are hidden — remove their override to restore). Link flow always runs parent → child and its speed follows the **child's downlink rate** on a log scale (no flow when the child has no rate), so a parent added later still animates correctly. **Traffic calculation mode**: devices that cannot be measured directly (ONT, switches) can sum the rates of multiple selected downstream devices; overlapping selections are mutually exclusive. Per-device config in `data/topology.json`, icons in `data/topology-icons/` (icons live in `data/topology-icons/` and are persisted with the `./data` volume)
+- **Network topology**: a standalone page under **Overview → Network topology**, built from RouterOS neighbour discovery (LLDP/MNDP) and DHCP leases. Levels are derived entirely from parent/child links — you can put an ONT above the router; same-level nodes are spread out without overlap. Fixed top-down layout with a one-click horizontal view (leftmost = top level, children to the right, same-level devices stacked vertically), scroll zoom, drag-to-pan and a transparent canvas; the colour legend is centred above the canvas, while discovery/custom counts and the current click effect sit below the title. Every device can be dragged freely as long as it does not overlap another one; **double-clicking a device always edits that same device** (same ID override, never a duplicate), and the editor offers "Order in level" (starting at 1) for explicit ordering within a layer. Switches declare local ports and downstream devices tag their parent port (e.g. `ether3`); port badges are no longer drawn on the canvas. Nodes can carry uploaded icons and show live rates on the right side of the card (uplink on top, downlink below); the rate comes from the node's interface first, then from the declared parent port (e.g. `ether3`), so manually added devices also show uplink/downlink values. **Each device can bind its own click animation** (none / node pulse / link flow / ripple) from the topology page's **Animations** button; it stays active until another device is clicked (the expand-ports animation was removed). **Double-click a device to edit; select it and click "Delete device" in the toolbar to remove it** (discovered nodes are hidden — remove their override to restore). Link flow always runs parent → child and its speed follows the **child's downlink rate** on a log scale (no flow when the child has no rate), so a parent added later still animates correctly. **Traffic calculation mode**: devices that cannot be measured directly (ONT, switches) can sum the rates of multiple selected downstream devices; overlapping selections are mutually exclusive. Per-device config in `data/topology.json`, icons in `data/topology-icons/` (icons live in `data/topology-icons/` and are persisted with the `./data` volume). **Icon library**: every icon in that directory — uploaded from the web or simply copied there — is listed in the device editor, where you can pick an existing icon to reuse, rename it, delete it, and see how many devices reference it. Uploads are deduplicated by content SHA256, so two identical iPhones need one upload and share a single file
 - **Tools**: system info, backup and network diagnosis (diagnosis is the wide panel below, with a fixed result area showing about five rows and scrollable history); ICMP replies stream into the table with no packet-count limit and an empty target address by default; configuration backup now **exports a `.rsc` file downloaded by the browser to the current device** (computer or phone) instead of storing a backup on RouterOS
 - **Optional motion**: the ✦ button in the top bar toggles animations (node entrance, flowing links, selection pulse, modal/button polish and theme transitions). Preference is remembered in `localStorage` and the OS "reduce motion" setting is respected
 - **Liquid glass & smooth transitions**: the liquid glass theme is rebuilt in Apple's style; dark mode now uses neutral deep-grey glass instead of a blue/purple wash, and light/dark or palette changes animate over 320ms
@@ -281,6 +291,11 @@ docker compose up -d
 # Use local source build instead: docker compose up -d --build
 ```
 
+To enable one-click container recreation from the web UI, uncomment
+`- /var/run/docker.sock:/var/run/docker.sock` under `volumes` in `docker-compose.yml` and run `docker compose up -d` again.
+A plain `restart` keeps the old image, so the container must be **recreated**. Mounting docker.sock grants
+host-root-equivalent Docker access — evaluate the risk, and keep the `./data` volume mounted.
+
 **Desktop apps (GitHub Releases: installers + portable builds):**
 
 Download the matching file from [Releases](https://github.com/BackspaceM/ros-center/releases). Everything is self-contained — **the target machine needs neither Node.js nor `npm install`**.
@@ -298,12 +313,14 @@ Pick the macOS build matching your chip (`arm64` for Apple Silicon, `x64` for In
 - **Portable**: unzip and double-click `Start.command` / `Start.bat`; config and data stay in the unzipped `data/` folder — delete the folder to uninstall.
 - Builds are unsigned: on macOS right-click → Open (or `xattr -dr com.apple.quarantine "/Applications/ROS Center.app"`); on Windows choose "More info → Run anyway" if SmartScreen appears.
 - Each asset ships a `.sha256` checksum; the Release also contains a combined `SHA256SUMS.txt`.
+- **In-app updates**: v1.1.0+ ships `launcher.js`, so future upgrades no longer need a new installer. In System → Updates, click "Update & restart": a ~200 KB `ros-center-app-*.zip` (source only) is downloaded, verified, swapped in and restarted automatically; `data/` is untouched and a failed boot rolls back. Users on v1.0.0 need to reinstall once, then every later update is one click.
 
 Build them yourself (portable builds work on any host, installers must be built on their target OS):
 
 ```bash
 npm run build:desktop                        # macOS arm64 + Windows portable ZIPs
 node build/desktop.js --mac-x64              # additionally build the macOS x64 ZIP
+npm run build:app-bundle                     # in-app update bundle ros-center-app-*.zip
 npm run build:mac-installer -- --arch=all    # on macOS: arm64 + x64 .pkg + .dmg
 npm run build:win-installer                  # on Windows: .exe (NSIS 3)
 ```
@@ -367,7 +384,13 @@ Settings saved in the Web UI take precedence over `.env`. `DEMO_MODE=0` is the d
 
 ### Updates & quick setup
 
-**Updates (System → Updates)** — Check GitHub Releases (default, for source/desktop builds) or Docker Hub tags. If either API is blocked, set a **mirror / custom API endpoint** (full URL returning the same JSON shape) or an **HTTP CONNECT proxy** (`http://user:pass@host:port`); Docker deployments can also preset `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` (see `.env.example` and `docker-compose.yml`). Options include auto-check on/off with a 1h–30d interval, release channel, image/tag, and auto-downloading the matching installer (desktop only). Stored proxy credentials are masked on read. **Limit:** the WebUI cannot replace its own running process or recreate its container — auto-update means scheduled checking plus optional download. Desktop assets land in `data/updates/`; for Docker run `docker pull backspacem/ros-center:latest && docker compose up -d`. Docker Hub checks compare the image digest (pass `ROS_CENTER_DIGEST`) or fall back to build-time changes.
+**Updates (System → Updates)** — Check GitHub Releases (default, for source/desktop builds) or Docker Hub tags. If either API is blocked, set a **mirror / custom API endpoint** (full URL returning the same JSON shape) or an **HTTP CONNECT proxy** (`http://user:pass@host:port`); Docker deployments can also preset `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` (see `.env.example` and `docker-compose.yml`). Options include auto-check on/off with a 1h–30d interval, release channel, image/tag, auto-downloading the matching installer (desktop only), and **auto-apply** (finish the update unattended). Stored proxy credentials are masked on read.
+
+**In-app updates — no reinstall** (System → Updates → Apply update in place):
+- **macOS / Windows desktop**: the app is a bundled Node runtime plus plain JS sources, so there is no need to download another pkg/dmg/exe. Clicking once downloads a ~200 KB `ros-center-app-*.zip` (source only), verifies its SHA256 and per-file manifest, stages it and exits; the `launcher.js` supervisor then swaps `app/` (all file handles already released) and restarts automatically. `data/` is never touched, and a build that fails to boot is rolled back automatically. Installer builds sync the sources into the user data directory on first launch to avoid read-only Applications / Program Files. **Install a launcher-enabled build once (v1.1.0+); every later update is one click in the browser.**
+- **Docker**: additionally mount `/var/run/docker.sock` in `docker-compose.yml`, then click "Pull & recreate container". The app pulls the new image over the Docker Engine API, inspects its own config, and spawns a one-shot helper container that stops → removes → recreates (same name, ports, volumes, env) → starts it; the page reconnects automatically. A plain `docker restart` keeps the old image, so **recreation is required**. Self-update is refused when `/app/data` is not mounted (otherwise deleting the container would lose your config). Mounting docker.sock grants host-root-equivalent access — evaluate the risk. Without it, run `docker pull backspacem/ros-center:latest && docker compose up -d` manually.
+
+Docker Hub checks compare the image digest (pass `ROS_CENTER_DIGEST`) or fall back to build-time changes; the recreated container receives the new digest/version in its env so updates do not loop.
 
 **Quick setup (System → Quick setup)** — Choose PPPoE (username/password/MTU/MRU/service), DHCP, or static IP uplink; pick WAN/LAN interfaces and optionally create a LAN bridge. Enter any LAN CIDR (`192.168.88.1/24`, `10.20.0.254/16`, …); the network, gateway, pool (or custom range), lease, domain, upstream DNS and client DNS are derived automatically, and a DHCP option set can be attached. It also adds a common firewall template (input/forward, FastTrack, NAT masquerade, invalid/WAN drops), sets the device identity, disables insecure telnet/ftp services, and can change the admin username/password (optionally syncing ROS Center credentials and reconnecting). A reviewable RouterOS script is generated first (passwords masked in preview), downloadable as `.rsc` or applied after confirmation — export a config backup before applying. Entries are tagged `ROS Center quick setup` and re-applying updates them in place instead of stacking; optional cleanup never removes the LAN address/bridge or manually added rules.
 

@@ -13,18 +13,29 @@ const OUT = path.join(DIST, `ROS-Center-${VERSION}-windows-x64-setup.exe`);
 const ICON = path.join(DIST, 'icons', 'appicon.ico');
 const NSI_TEMPLATE = path.join(__dirname, 'installer.nsi');
 
-/* 安装版启动器：数据目录指向 %LOCALAPPDATA%，避免写入 Program Files */
+/* 安装版启动器：Program Files 只读，把 app 源码同步到 %LOCALAPPDATA% 后再启动，
+   使网页里的「应用内更新」可以替换数据目录中的 app/ 并自动重启。 */
 const START_BAT = [
   '@echo off',
   'setlocal',
   'set "ROSDATA=%LOCALAPPDATA%\\ROS Center"',
+  'set "APPDIR=%ROSDATA%\\app"',
+  'set "STAMP=%ROSDATA%\\.installed-app-stamp"',
   'if not exist "%ROSDATA%" mkdir "%ROSDATA%"',
   'if not exist "%ROSDATA%\\config.example.env" copy "%~dp0config.example.env" "%ROSDATA%\\config.example.env" >nul',
+  'if not exist "%APPDIR%\\server.js" goto :sync',
+  'fc /b "%~dp0app\\version.json" "%STAMP%" >nul 2>&1',
+  'if not errorlevel 1 goto :run',
+  ':sync',
+  'if not exist "%APPDIR%" mkdir "%APPDIR%"',
+  'xcopy /E /Y /I /Q "%~dp0app\\*" "%APPDIR%\\" >nul',
+  'copy /Y "%~dp0app\\version.json" "%STAMP%" >nul',
+  ':run',
   'set "ROS_BASE_DIR=%ROSDATA%"',
   'set "ROS_DESKTOP=1"',
   'set "HOST=127.0.0.1"',
-  'cd /d "%~dp0"',
-  '"%~dp0bin\\node.exe" "%~dp0app\\server.js"',
+  'cd /d "%APPDIR%"',
+  '"%~dp0bin\\node.exe" "%APPDIR%\\launcher.js"',
   '',
 ].join('\r\n');
 

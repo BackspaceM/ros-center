@@ -14,7 +14,7 @@
   const ANIM_ZH = { none: '无（只选中）', pulse: '节点脉冲', flow: '链路流动', ripple: '涟漪扩散' };
   const ANIM_EN = { none: 'None (select only)', pulse: 'Node pulse', flow: 'Link flow', ripple: 'Ripple' };
   const NODE_W = 190, NODE_H = 62, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
-  let data = null, loading = false, iconUrl = '';
+  let data = null, loading = false, iconUrl = '', iconLib = [], iconLabel = '';
   let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
   let selectedId = null, drag = null, panDrag = null, rates = new Map(), rateTimer = null;
@@ -448,19 +448,118 @@
     } catch (e) { toast(e.message, 'err'); return false; }
   }
 
-  async function uploadIcon(file, preview) {
+  /* ---------- 图标库：列出已上传图标，点击即可复用（同图不重复上传） ---------- */
+  async function loadIconLib() {
+    try {
+      const d = await api('/api/topology/icons');
+      iconLib = Array.isArray(d.icons) ? d.icons : [];
+      if (!iconLabel && iconUrl) {
+        const hit = iconLib.find((x) => x.url === iconUrl);
+        iconLabel = hit ? hit.label : '';
+      }
+    } catch (e) { iconLib = []; toast(e.message, 'err'); }
+    renderIconLib();
+  }
+  function renderIconLib() {
+    const box = $('tnIconLib'); if (!box) return;
+    if (!iconLib.length) {
+      box.innerHTML = `<div class="topo-icon-lib-empty">${esc(L('图标库为空。上传一张图片，或直接把图片放进 data/topology-icons/ 目录后点「刷新」。', 'Library is empty. Upload an image, or drop files into data/topology-icons/ and click Refresh.'))}</div>`;
+      return;
+    }
+    box.innerHTML = iconLib.map((it) => `
+      <div class="topo-icon-item${it.url === iconUrl ? ' selected' : ''}" data-icon-url="${esc(it.url)}" data-icon-label="${esc(it.label)}" title="${esc(it.label + (it.usedBy.length ? ' · ' + it.usedBy.length + ' ' + L('台设备在用', 'devices') : ''))}">
+        <img src="${esc(it.url)}" alt="" loading="lazy">
+        <span class="topo-icon-item-label">${esc(it.label)}</span>
+        ${it.usedBy.length ? `<span class="topo-icon-item-use">×${it.usedBy.length}</span>` : ''}
+        <span class="topo-icon-item-ops">
+          <button type="button" data-icon-rename="${esc(it.name)}" title="${esc(L('重命名', 'Rename'))}">✎</button>
+          <button type="button" data-icon-del="${esc(it.name)}" title="${esc(L('删除', 'Delete'))}">×</button>
+        </span>
+      </div>`).join('');
+  }
+  function selectIcon(url, label) {
+    iconUrl = url || ''; iconLabel = label || '';
+    const img = $('tnIconPreview'), lab = $('tnIconLabel');
+    if (img) { if (iconUrl) { img.src = iconUrl; img.hidden = false; } else img.hidden = true; }
+    if (lab) lab.textContent = iconLabel || L('未选择（显示类型图标）', 'None (type badge shown)');
+    renderIconLib();
+  }
+  async function uploadIcon(file) {
     if (!file) return;
     if (file.size > 900 * 1024) { toast(L('图片需小于 900KB', 'Image must be under 900KB'), 'err'); return; }
+    const label = (($('tnIconName') && $('tnIconName').value) || '').trim();
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const d = await api('/api/topology/icon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: reader.result }) });
-        iconUrl = d.url; if (preview) { preview.src = d.url; preview.hidden = false; }
-        toast(L('图标已上传', 'Icon uploaded'), 'ok');
+        const d = await api('/api/topology/icon', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: reader.result, label, fileName: file.name }) });
+        iconLib = d.icons || iconLib;
+        selectIcon(d.url, d.label);
+        const n = $('tnIconName'); if (n) n.value = '';
+        toast(d.reused
+          ? L('内容相同，已复用图标库中的现有图标', 'Identical image — reused the existing icon')
+          : L('图标已上传，可直接给其它设备复用', 'Icon uploaded — reusable by other devices'), 'ok');
       } catch (e) { toast(e.message, 'err'); }
     };
     reader.onerror = () => toast(L('读取图片失败', 'Cannot read image'), 'err');
     reader.readAsDataURL(file);
+  }
+  async function renameIcon(name, el) {
+    const item = el.closest('.topo-icon-item');
+    const old = (iconLib.find((x) => x.name === name) || {}).label || name;
+    const span = item && item.querySelector('.topo-icon-item-label');
+    if (!span) return;
+    const input = document.createElement('input');
+    input.className = 'topo-icon-rename-input';
+    input.value = old; input.maxLength = 40;
+    span.replaceWith(input); input.focus(); input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return; done = true;
+      const value = input.value.trim();
+      let text = old;
+      if (save && value && value !== old) {
+        try {
+          const d = await api('/api/topology/icon/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, label: value }) });
+          iconLib = d.icons || iconLib;
+          const hit = iconLib.find((x) => x.name === name);
+          text = hit ? hit.label : value;
+          if (item) item.dataset.iconLabel = text;
+          if (hit && hit.url === iconUrl) {
+            iconLabel = hit.label;
+            const lab = $('tnIconLabel'); if (lab) lab.textContent = hit.label;
+          }
+        } catch (e) { toast(e.message, 'err'); }
+      }
+      /* 只把输入框换回标签，不重建整个图标库 —— 否则会吞掉同一次点击（例如删除按钮） */
+      const span = document.createElement('span');
+      span.className = 'topo-icon-item-label';
+      span.textContent = text;
+      if (input.parentNode) input.replaceWith(span);
+    };
+    input.onblur = () => finish(true);
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+  }
+  async function deleteIcon(name) {
+    const it = iconLib.find((x) => x.name === name) || {};
+    const used = it.usedBy || [];
+    let force = false;
+    if (used.length) {
+      if (!window.confirm(L('该图标正被以下设备使用：', 'Used by: ') + used.slice(0, 6).join('、') + '\n' +
+        L('删除后会清空这些设备的图标，继续？', 'Deleting will clear the icon on those devices. Continue?'))) return;
+      force = true;
+    } else if (!window.confirm(L('从图标库删除这个图标？', 'Delete this icon from the library?'))) return;
+    try {
+      const d = await api('/api/topology/icon/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, force }) });
+      iconLib = d.icons || [];
+      if (iconUrl && iconUrl.endsWith('/' + name)) selectIcon('', '');
+      else renderIconLib();
+      toast(force ? L('图标已删除，相关设备已恢复默认图标', 'Icon deleted; devices reverted to default badge')
+        : L('图标已删除', 'Icon deleted'), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
   }
 
   /* 拖动落点持久化；自动节点会生成同 id 的 custom 覆盖版本 */
@@ -520,6 +619,7 @@
     const others = nodes.filter((n) => (!node || n.id !== node.id));
     const parentOpts = others.map((n) => `<option value="${esc(n.id)}"${node && node.parent === n.id ? ' selected' : ''}>${esc(n.name)}</option>`).join('');
     iconUrl = (node && node.icon) || '';
+    iconLabel = (iconLib.find((x) => x.url === iconUrl) || {}).label || '';
     const relationDefault = !node ? 'child' : (node.parent ? 'child' : 'top');
     const portsText = Array.isArray(node && node.ports) ? node.ports.join(', ') : '';
     const calcList = descendantsOf(node ? node.id : '');
@@ -542,7 +642,23 @@
         <div class="calc-list">${calcRows || `<div class="form-hint">${esc(L('该设备暂无下级设备', 'No downstream devices yet'))}</div>`}</div>
       </div></div>
       <div class="form-row"><label>${esc(L('点击动画', 'Click animation'))}</label><div><select id="tnAnim">${ANIMS.map((a) => `<option value="${a}"${(node && (node.anim || 'none') || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select><p class="form-hint">${esc(L('点击此设备时触发；持续到点击另一台设备，「无」表示只选中', 'Played on click until another device is clicked; None selects only'))}</p></div></div>
-      <div class="form-row"><label>${esc(L('设备图标', 'Device icon'))}</label><div class="topo-icon-picker"><input id="tnIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"><img id="tnIconPreview" class="topo-icon-preview" ${iconUrl ? `src="${esc(iconUrl)}"` : 'hidden'} alt="preview"><button class="btn btn-sm" id="tnIconClear" type="button">${esc(L('移除图标', 'Remove icon'))}</button></div></div>
+      <div class="form-row"><label>${esc(L('设备图标', 'Device icon'))}</label><div class="topo-icon-picker">
+        <div class="topo-icon-current">
+          <img id="tnIconPreview" class="topo-icon-preview" ${iconUrl ? `src="${esc(iconUrl)}"` : 'hidden'} alt="preview">
+          <div class="topo-icon-current-txt"><b id="tnIconLabel">${esc(iconLabel || L('未选择（显示类型图标）', 'None (type badge shown)'))}</b>
+            <small>${esc(L('同一个图标可给多台设备复用，无需重复上传', 'One icon can be reused by many devices — no duplicate uploads'))}</small></div>
+          <button class="btn btn-sm" id="tnIconClear" type="button">${esc(L('移除图标', 'Remove icon'))}</button>
+        </div>
+        <div class="topo-icon-lib-head"><span>${esc(L('图标库', 'Icon library'))}<small> · ${esc(L('点击选择；也可把图片直接放进 data/topology-icons/', 'Click to pick; files dropped into data/topology-icons/ also appear'))}</small></span>
+          <button class="btn btn-sm" id="tnIconRefresh" type="button">${esc(L('刷新', 'Refresh'))}</button></div>
+        <div class="topo-icon-lib" id="tnIconLib"><div class="topo-icon-lib-empty">${esc(L('加载中…', 'Loading…'))}</div></div>
+        <div class="topo-icon-upload">
+          <input id="tnIconName" type="text" maxlength="40" placeholder="${esc(L('图标名称（可选，如 iPhone）', 'Icon name (optional, e.g. iPhone)'))}">
+          <label class="btn btn-sm" for="tnIconFile">＋ ${esc(L('上传新图标', 'Upload new'))}</label>
+          <input id="tnIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+          <span class="topo-hint">${esc(L('PNG/JPEG/WebP/GIF，<900KB；内容相同的图片自动复用，不会重复保存', 'PNG/JPEG/WebP/GIF, <900KB; identical images are reused instead of stored twice'))}</span>
+        </div>
+      </div></div>
       <div class="form-row"><label>${esc(L('备注', 'Note'))}</label><input id="tnNote" type="text" maxlength="120" value="${esc(node ? node.note : '')}"></div>`;
     const foot = `<button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="tnSave" type="button">${esc(L('保存', 'Save'))}</button>`;
     openModal(isNew ? L('添加网络设备', 'Add network device') : L('编辑网络设备', 'Edit network device'), body, foot, () => {
@@ -554,8 +670,18 @@
           });
         };
       });
-      $('tnIconFile').onchange = (e) => uploadIcon(e.target.files[0], $('tnIconPreview'));
-      $('tnIconClear').onclick = () => { iconUrl = ''; $('tnIconPreview').hidden = true; $('tnIconFile').value = ''; };
+      $('tnIconFile').onchange = (e) => uploadIcon(e.target.files[0]);
+      $('tnIconClear').onclick = () => selectIcon('', '');
+      $('tnIconRefresh').onclick = () => loadIconLib();
+      $('tnIconLib').onclick = (e) => {
+        const ren = e.target.closest('[data-icon-rename]');
+        if (ren) { e.stopPropagation(); renameIcon(ren.dataset.iconRename, ren); return; }
+        const del = e.target.closest('[data-icon-del]');
+        if (del) { e.stopPropagation(); deleteIcon(del.dataset.iconDel); return; }
+        const item = e.target.closest('.topo-icon-item');
+        if (item) selectIcon(item.dataset.iconUrl, item.dataset.iconLabel);
+      };
+      loadIconLib();
       $('tnParent').onchange = () => {
         const p = map.get($('tnParent').value);
         $('tnKnownPorts').innerHTML = ((p && p.ports) || []).map((x) => `<option value="${esc(x)}"></option>`).join('');

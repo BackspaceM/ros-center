@@ -11,6 +11,7 @@ const REPO = 'BackspaceM/ros-center';
 const DEFAULT_CONFIG = {
   enabled: true,
   autoDownload: false,
+  autoApply: false,
   source: 'github',
   intervalHours: 24,
   endpoint: '',
@@ -36,6 +37,7 @@ function normalizeConfig(input) {
   return {
     enabled: !!b.enabled,
     autoDownload: !!b.autoDownload,
+    autoApply: !!b.autoApply,
     source,
     intervalHours: Math.min(720, Math.max(1, Math.floor(Number(b.intervalHours) || 24))),
     endpoint,
@@ -257,6 +259,13 @@ function chooseAsset(latest, platform = process.platform, arch = process.arch) {
   const wanted = platform === 'win32' ? /\.exe$/i : /\.pkg$/i;
   return list.find((a) => a.name.includes(key) && wanted.test(a.name) && a.url) || null;
 }
+/* 桌面「应用内更新包」（仅源码，几百 KB）及其校验和资产 */
+function chooseAppBundle(latest) {
+  const list = (latest && latest.assets) || [];
+  const zip = list.find((a) => /^ros-center-app-[A-Za-z0-9_.\-]+\.zip$/i.test(a.name) && a.url);
+  if (!zip) return null;
+  return { zip, checksum: list.find((a) => a.name === zip.name + '.sha256' && a.url) || null };
+}
 
 async function check(cfg, current = {}, previous = {}) {
   const opts = { proxy: cfg.proxy, timeout: 15000 };
@@ -292,5 +301,5 @@ async function check(cfg, current = {}, previous = {}) {
 module.exports = {
   REPO, DEFAULT_CONFIG, normalizeConfig, maskProxy, safeEndpoint,
   httpGet, fetchJson, downloadBinary, compareVersion, endpointFor,
-  parseGithub, parseDockerHub, chooseAsset, check,
+  parseGithub, parseDockerHub, chooseAsset, chooseAppBundle, check,
 };

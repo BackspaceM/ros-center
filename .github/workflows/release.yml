@@ -31,6 +31,10 @@ jobs:
           path: dist/base
           key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
       - run: node build/desktop.js --mac-x64
+      - name: Build in-app update bundle (source only)
+        run: node build/app-bundle.js
+        env:
+          ROS_RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
       - uses: actions/upload-artifact@v4
         with:
           name: portable
@@ -131,6 +135,14 @@ jobs:
           未签名程序如出现 SmartScreen，点「更多信息 → 仍要运行」。
 
           **绿色版**：解压后双击 `Start.command` / `Start.bat`，删除文件夹即卸载。
+
+          **应用内更新**：`ros-center-app-*.zip` 是仅含程序源码的轻量更新包（约 200KB），由
+          「系统管理 → 检查更新 → 应用内自动更新」自动下载，无需手动处理。
+          - 桌面版：装好本版（含 `launcher.js`）后，后续更新点一次按钮即可自动替换程序文件并重启，
+            不再需要重新下载 pkg/dmg/exe；数据目录不动，启动失败会自动回滚。
+          - Docker 版：在 compose 里额外映射 `/var/run/docker.sock` 后，可一键拉取新镜像并按原配置
+            重建容器（映射 docker.sock 会赋予容器宿主机 Docker 控制权，请自行评估）。
+          - 已安装 v1.0.0 的用户需手动安装一次本版，之后即可永久应用内更新。
 
           首次使用请在「系统管理 → 设备管理」添加 RouterOS 设备（API 端口 8728，建议只读账号）。
           `SHA256SUMS.txt` 为所有产物的校验和，`*.sha256` 为单文件校验和。
