@@ -298,10 +298,22 @@ async function dockerPull(repo, tag, onProgress) {
     timeout: 600000, registryAuth: auth || undefined,
   });
   assertOk(r, '拉取镜像');
-  /* NDJSON 进度里若包含 error 需抛出 */
+  /* NDJSON 进度：逐层转发下载百分比，并检出 error */
   for (const line of r.text.split('\n')) {
     if (!line.trim()) continue;
-    try { const j = JSON.parse(line); if (j.error) throw new Error('拉取镜像失败: ' + j.error); } catch (e) {
+    try {
+      const j = JSON.parse(line);
+      if (j.error) throw new Error('拉取镜像失败: ' + j.error);
+      if (onProgress && j.status) {
+        const d = j.progressDetail || {};
+        const cur = Number(d.current), tot = Number(d.total);
+        const extra = Number.isFinite(cur) && cur > 0
+          ? { layer: String(j.id || ''), loaded: cur, total: Number.isFinite(tot) ? tot : 0,
+              percent: Number.isFinite(tot) && tot > 0 ? Math.min(99, Math.round(cur * 100 / tot)) : -1 }
+          : {};
+        onProgress('pull', String(j.status), extra);
+      }
+    } catch (e) {
       if (e.message.startsWith('拉取镜像失败')) throw e;
     }
   }

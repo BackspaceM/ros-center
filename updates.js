@@ -124,8 +124,28 @@ function rawGet(urlStr, opts = {}) {
     }
     function collect(stream) {
       let buf = Buffer.alloc(0);
+      let bodyStart = -1, total = 0, lastAt = 0, lastLoaded = 0;
+      function report(done) {
+        if (typeof opts.onProgress !== 'function' || bodyStart < 0) return;
+        const loaded = Math.max(0, buf.length - bodyStart);
+        const now = Date.now();
+        if (!done && (now - lastAt < 100 || loaded - lastLoaded < 16 * 1024)) return;
+        lastAt = now; lastLoaded = loaded;
+        try {
+          opts.onProgress({ loaded, total: total || loaded, percent: done ? 100 : (total > 0 ? Math.min(99, Math.round(loaded * 100 / total)) : -1), done: !!done });
+        } catch (e) { /* 进度回调失败不影响下载 */ }
+      }
       stream.on('data', (c) => {
         buf = Buffer.concat([buf, c]);
+        if (bodyStart < 0) {
+          const i = buf.indexOf('\r\n\r\n');
+          if (i >= 0) {
+            bodyStart = i + 4;
+            const head = parseHead(buf.toString('latin1', 0, i));
+            total = Number(head.headers['content-length']) || 0;
+          }
+        }
+        report(false);
         if (buf.length > maxBytes) finish(new Error('响应超过大小限制 / response too large'));
       });
       stream.on('end', () => {
@@ -133,6 +153,7 @@ function rawGet(urlStr, opts = {}) {
         if (i < 0) return finish(new Error('HTTP 响应格式错误'));
         const { status, headers } = parseHead(buf.toString('latin1', 0, i));
         let body = buf.subarray(i + 4);
+        report(true);
         if (/chunked/i.test(headers['transfer-encoding'] || '')) body = dechunk(body);
         if (/gzip/i.test(headers['content-encoding'] || '')) {
           try { body = zlib.gunzipSync(body); } catch (e) { return finish(new Error('响应解压失败')); }
@@ -192,7 +213,9 @@ async function fetchJson(url, opts) {
   try { return JSON.parse(r.body.toString('utf8')); } catch (e) { throw new Error('返回内容不是 JSON'); }
 }
 async function downloadBinary(url, opts = {}) {
-  const r = await httpGet(url, { proxy: opts.proxy, timeout: 180000, maxBytes: 200 * 1024 * 1024 });
+  const r = await httpGet(url, {
+    proxy: opts.proxy, timeout: 180000, maxBytes: 200 * 1024 * 1024, onProgress: opts.onProgress,
+  });
   if (r.status < 200 || r.status >= 300) throw new Error('下载失败 HTTP ' + r.status);
   return r.body;
 }

@@ -34,6 +34,7 @@ const CONN_INTERVAL = Math.max(3000, Number(envNum('CONN_POLL_INTERVAL_MS', 5000
 const HISTORY = Math.max(30, Number(envNum('HISTORY_POINTS', 180)));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(APP_DIR, 'data');
+const APP_RUNTIME_FILE = path.join(DATA_DIR, 'app-runtime.json');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
 const TOPOLOGY_FILE = path.join(DATA_DIR, 'topology.json');
@@ -1470,8 +1471,13 @@ function runtimeInfo() {
     selfUpdate: DESKTOP ? 'desktop' : docker ? 'docker' : 'source',
   };
 }
+/* 检测源随运行方式固定：Docker 对 Docker Hub，桌面 / 源码对 GitHub Releases。
+   镜像源端点与代理仍可自定义，但「检测哪一个源」不再让用户选错。 */
+function derivedSource() { return runtimeInfo().selfUpdate === 'docker' ? 'dockerhub' : 'github'; }
+function runtimeUpdateConfig() { return { ...updateState.config, source: derivedSource() }; }
 function publicUpdateConfig() {
-  return { ...updateState.config, proxy: updates.maskProxy(updateState.config.proxy), proxySet: !!updateState.config.proxy };
+  const cfg = runtimeUpdateConfig();
+  return { ...cfg, proxy: updates.maskProxy(cfg.proxy), proxySet: !!cfg.proxy };
 }
 let updateChecking = false, updateTimer = null;
 
@@ -1499,7 +1505,7 @@ async function performUpdateCheck(trigger) {
   const prev = updateState.status && updateState.status.ok
     ? { lastUpdated: (updateState.status.latest || {}).publishedAt || '' } : {};
   try {
-    const r = await updates.check(updateState.config, current, prev);
+    const r = await updates.check(runtimeUpdateConfig(), current, prev);
     updateState.status = { ...r, trigger };
     if (updateState.config.autoDownload && r.hasUpdate && current.runtime === 'desktop' && r.source === 'github') {
       const asset = updates.chooseAsset(r.latest, current.platform, current.arch);
@@ -1513,8 +1519,8 @@ async function performUpdateCheck(trigger) {
   } catch (e) {
     updateState.status = {
       ok: false, error: e.message || String(e), checkedAt: new Date().toISOString(),
-      source: updateState.config.source,
-      endpoint: updates.safeEndpoint(updates.endpointFor(updateState.config)),
+      source: derivedSource(),
+      endpoint: updates.safeEndpoint(updates.endpointFor(runtimeUpdateConfig())),
       current, hasUpdate: false, trigger,
     };
   }
@@ -1526,8 +1532,8 @@ async function performUpdateCheck(trigger) {
 const SELF_PROGRESS_FILE = path.join(DATA_DIR, 'self-update-progress.json');
 let selfUpdateBusy = false, lastAutoApplyKey = '', selfUpdateStartedAt = 0, selfCapCache = { at: 0, value: null };
 
-function selfProgress(stage, message) {
-  const rec = { stage, message, at: new Date().toISOString() };
+function selfProgress(stage, message, extra) {
+  const rec = { stage, message, at: new Date().toISOString(), ...(extra && typeof extra === 'object' ? extra : {}) };
   try { selfupdate.writeJson(SELF_PROGRESS_FILE, rec); } catch (e) { /* ignore */ }
   console.log('[self-update]', stage, message);
   return rec;
@@ -1588,8 +1594,12 @@ async function applySelfUpdate(o = {}) {
     if (cap.kind === 'desktop') {
       const picked = updates.chooseAppBundle((status && status.latest) || {});
       if (!picked) throw new Error('该版本未提供应用内更新包（ros-center-app-*.zip），请手动下载安装包');
-      selfProgress('download', '正在下载应用更新包 ' + picked.zip.name);
-      const buf = await updates.downloadBinary(picked.zip.url, { proxy: updateState.config.proxy });
+      const dlMsg = '正在下载应用更新包 ' + picked.zip.name;
+      selfProgress('download', dlMsg, { loaded: 0, total: Number(picked.zip.size) || 0, percent: 0 });
+      const buf = await updates.downloadBinary(picked.zip.url, {
+        proxy: updateState.config.proxy,
+        onProgress: (p) => selfProgress('download', dlMsg, p),
+      });
       let checksum = '';
       if (picked.checksum) {
         const r = await updates.httpGet(picked.checksum.url, { proxy: updateState.config.proxy, timeout: 30000 });
@@ -1606,12 +1616,13 @@ async function applySelfUpdate(o = {}) {
       return out;
     }
     if (cap.kind === 'docker') {
-      const image = o.image || ((updateState.config.source === 'dockerhub')
-        ? `${updateState.config.image}:${updateState.config.tag}` : cap.docker.image || 'backspacem/ros-center:latest');
+      const cfg = runtimeUpdateConfig();
+      const image = o.image || ((cfg.source === 'dockerhub')
+        ? `${cfg.image}:${cfg.tag}` : cap.docker.image || 'backspacem/ros-center:latest');
       selfProgress('pull', '正在拉取最新镜像并准备重建容器');
       const r = await selfupdate.dockerApply({
         dataDir: DATA_DIR, image, tag: o.tag || '', version: ver,
-        onProgress: (stage, message) => selfProgress(stage, message),
+        onProgress: (stage, message, extra) => selfProgress(stage, message, extra),
       });
       selfProgress('switch', '助手容器已接管，容器即将重建，服务短暂中断');
       return { ok: true, mode: 'docker', ...r };
@@ -1643,7 +1654,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   /* ---- 登录：无需鉴权 ---- */
-  if (p === '/api/health') return json(res, 200, { ok: true, ts: Date.now() });
+  if (p === '/api/health') return json(res, 200, { ok: true, app: 'ros-center', pid: process.pid, port: PORT, ts: Date.now() });
   if (p === '/login' || p === '/login.html') return serveStatic(req, res, '/login.html');
   if (p === '/api/auth' && req.method === 'GET') {
     return json(res, 200, { enabled: authEnabled(), authenticated: !authEnabled() || !!sessionUser(req),
@@ -2143,6 +2154,7 @@ const server = http.createServer(async (req, res) => {
       limits: {
         selfReplace: runtimeInfo().selfUpdate !== 'source',
         selfUpdateKind: runtimeInfo().selfUpdate,
+        source: derivedSource(),
         dockerCommand: 'docker pull backspacem/ros-center:latest && docker compose up -d',
       },
     });
@@ -2153,7 +2165,7 @@ const server = http.createServer(async (req, res) => {
       const cur = updateState.config;
       const patch = { ...b };
       if (patch.proxy === undefined || patch.proxy === updates.maskProxy(cur.proxy)) patch.proxy = cur.proxy;
-      updateState.config = updates.normalizeConfig({ ...cur, ...patch });
+      updateState.config = updates.normalizeConfig({ ...cur, ...patch, source: derivedSource() });
       saveUpdateState();
       scheduleUpdateChecks();
       return json(res, 200, { ok: true, config: publicUpdateConfig() });
@@ -2228,6 +2240,17 @@ server.on('upgrade', (req, socket) => {
   if (dev && dev.lastPacket) sendFrame(socket, JSON.stringify(snapshotOf(dev)));
 });
 
+/* 写运行态文件：launcher 再次被点击时据此找到已在运行的实例与真实端口
+   （端口可能被用户改过，也可能因占用自动顺延） */
+function writeAppRuntime() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const rec = { app: 'ros-center', pid: process.pid, port: PORT, url: `http://localhost:${PORT}`, at: new Date().toISOString() };
+    const tmp = APP_RUNTIME_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(rec));
+    fs.renameSync(tmp, APP_RUNTIME_FILE);
+  } catch (e) { /* 写失败不影响服务 */ }
+}
 /* 桌面版双击后自动打开浏览器；ROS_NO_BROWSER=1 可关闭 */
 function openBrowser(url) {
   try {
@@ -2251,6 +2274,7 @@ server.on('error', (e) => {
 server.listen(PORT, HOST, () => {
   console.log(`[ui] http://localhost:${PORT}`);
   console.log(`[ui] ${devices.size} device(s), active=${activeDevice() ? activeDevice().name : 'none'}`);
+  writeAppRuntime();
   if (DESKTOP && !process.env.ROS_NO_BROWSER) openBrowser(`http://localhost:${PORT}`);
   /* 服务成功起来后确认应用内更新，launcher 之后不会再按「启动失败」回滚 */
   setTimeout(() => {

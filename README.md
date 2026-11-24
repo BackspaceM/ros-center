@@ -190,13 +190,15 @@ node server.js          # Node.js 18+，无需 npm install
 ### 检查更新与一键配置
 
 **检查更新（系统管理 → 检查更新）**
-- 检测源可切换：GitHub Releases（源码 / 桌面版，默认）或 Docker Hub（镜像 tag）。
+- 检测源随运行方式自动固定，页面只展示对应内容：Docker 版 → Docker Hub（比镜像 tag/digest），桌面版 / 源码运行 → GitHub Releases。端点与代理仍可自定义。
 - 访问受限时可填「镜像源 / 自定义 API 端点」（返回同结构 JSON 的完整地址）或「HTTP 代理」（`http://user:pass@host:port`，服务端走 HTTP CONNECT）；Docker 部署也可用 `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` 等环境变量预设，见 `.env.example` 与 `docker-compose.yml`。
 - 选项：自动检查开关与周期（1 小时 ~ 30 天）、发布通道、Docker 仓库/tag、自动下载匹配安装包（仅桌面版）、**自动应用更新**（发现新版本直接完成更新）。代理密码读取时以 `***` 遮蔽，不会回显。
+- 页面把版本、检查状态、更新操作与进度汇总在一张总览卡里；点更新后会显示真实下载进度（字节数 / 百分比，Docker 拉取逐层显示），完成后自动重连并提示结果。
 - **应用内自动更新（无需重装，系统管理 → 检查更新 → 应用内自动更新）**
   - **桌面版 macOS / Windows**：程序是「内置 Node 运行时 + 纯 JS 源码」结构，所以不必重新下载 pkg/dmg/exe。点「一键更新并重启」后，服务端下载几百 KB 的 `ros-center-app-*.zip`（仅源码），校验 SHA256 与逐文件 manifest，暂存后主动退出；`launcher.js` 监管进程在文件句柄释放后替换 `app/` 并自动重启。`data/` 完全不动，新版本起不来会自动回滚到备份。安装版（pkg/exe）首次启动会把源码同步到用户数据目录，绕开只读的 Applications / Program Files。**只需安装一次带 launcher 的版本（v1.1.0+），之后所有更新都在网页里点一下完成。**
   - **Docker 版**：在 `docker-compose.yml` 的 `volumes` 里额外映射 `/var/run/docker.sock`，即可点「拉取新镜像并重建容器」。程序经 Docker Engine API 拉取新镜像、读取自身配置，再创建一次性助手容器完成「停旧 → 删旧 → 以原名称/端口/卷/环境变量重建 → 启动」，页面自动重连。注意：`docker restart` 只重启进程、仍用旧镜像，**必须重建容器**；`/app/data` 未挂载到宿主机时会拒绝执行（防止删容器丢配置）；映射 docker.sock 等同赋予容器宿主机 root 级权限，请自行评估。不映射时仍可手动 `docker pull backspacem/ros-center:latest && docker compose up -d`。
   - **已映射 socket 却提示「无权访问」**：旧镜像以 `USER node`（uid/gid 1000）运行，而宿主机 socket 通常是 `srw-rw---- root:docker`（GID 因发行版 / NAS 而异，群晖常见 999/1000/998）。在宿主机用 `stat -c '%g' /var/run/docker.sock`（或 `ls -ln`）查到 GID，然后在 compose 里二选一：`user: "0:0"`（最简单）或 `group_add: ["<该 GID>"]`（保留非 root），再 `docker compose up -d --force-recreate`；页面点「重新检测」可立即复查。新版镜像的入口脚本会自动把运行用户加入该组，重新 `docker pull` 后无需任何额外配置。
+  - **再次点击 App 图标**：launcher 先读取 `data/app-runtime.json` 探测已有实例；若服务在运行，只在**当前真实端口**（用户改过或占用顺延后的端口）打开 WebUI 并退出，不会启动第二个服务。
   - Docker Hub 检测默认比对镜像 digest（可传 `ROS_CENTER_DIGEST`），否则以上次构建时间变化判定；重建时会自动把新 digest / 版本写入环境变量，避免反复触发更新。
 
 **一键配置（系统管理 → 一键配置）**
@@ -385,11 +387,13 @@ Settings saved in the Web UI take precedence over `.env`. `DEMO_MODE=0` is the d
 
 ### Updates & quick setup
 
-**Updates (System → Updates)** — Check GitHub Releases (default, for source/desktop builds) or Docker Hub tags. If either API is blocked, set a **mirror / custom API endpoint** (full URL returning the same JSON shape) or an **HTTP CONNECT proxy** (`http://user:pass@host:port`); Docker deployments can also preset `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` (see `.env.example` and `docker-compose.yml`). Options include auto-check on/off with a 1h–30d interval, release channel, image/tag, auto-downloading the matching installer (desktop only), and **auto-apply** (finish the update unattended). Stored proxy credentials are masked on read.
+**Updates (System → Updates)** — The check source follows the runtime and only the matching section is shown: Docker → Docker Hub (tag/digest), desktop / source → GitHub Releases. If either API is blocked, set a **mirror / custom API endpoint** (full URL returning the same JSON shape) or an **HTTP CONNECT proxy** (`http://user:pass@host:port`); Docker deployments can also preset `ROS_UPDATE_PROXY` / `ROS_UPDATE_ENDPOINT` (see `.env.example` and `docker-compose.yml`). Options include auto-check on/off with a 1h–30d interval, release channel, image/tag, auto-downloading the matching installer (desktop only), and **auto-apply** (finish the update unattended). Stored proxy credentials are masked on read. Version, check result, the update action and a real download progress bar (bytes / percent, per-layer for Docker) are merged into one overview card; the page reconnects automatically when the service is back.
 
 **In-app updates — no reinstall** (System → Updates → Apply update in place):
 - **macOS / Windows desktop**: the app is a bundled Node runtime plus plain JS sources, so there is no need to download another pkg/dmg/exe. Clicking once downloads a ~200 KB `ros-center-app-*.zip` (source only), verifies its SHA256 and per-file manifest, stages it and exits; the `launcher.js` supervisor then swaps `app/` (all file handles already released) and restarts automatically. `data/` is never touched, and a build that fails to boot is rolled back automatically. Installer builds sync the sources into the user data directory on first launch to avoid read-only Applications / Program Files. **Install a launcher-enabled build once (v1.1.0+); every later update is one click in the browser.**
 - **Docker**: additionally mount `/var/run/docker.sock` in `docker-compose.yml`, then click "Pull & recreate container". The app pulls the new image over the Docker Engine API, inspects its own config, and spawns a one-shot helper container that stops → removes → recreates (same name, ports, volumes, env) → starts it; the page reconnects automatically. A plain `docker restart` keeps the old image, so **recreation is required**. Self-update is refused when `/app/data` is not mounted (otherwise deleting the container would lose your config). Mounting docker.sock grants host-root-equivalent access — evaluate the risk. Without it, run `docker pull backspacem/ros-center:latest && docker compose up -d` manually.
+
+- **Clicking the app icon again**: the launcher reads `data/app-runtime.json` and probes the existing instance. If it is running, the WebUI is opened on the **actual current port** (including a user-changed or auto-incremented port) and the launcher exits — no second service is started.
 
 Docker Hub checks compare the image digest (pass `ROS_CENTER_DIGEST`) or fall back to build-time changes; the recreated container receives the new digest/version in its env so updates do not loop.
 

@@ -9,11 +9,13 @@
    这样桌面版更新只需在网页里点一次，无需重新下载安装包装载。 */
 const { spawn } = require('child_process');
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 
 const APP_DIR = __dirname;
 const BASE_DIR = process.env.ROS_BASE_DIR ? path.resolve(process.env.ROS_BASE_DIR) : path.dirname(APP_DIR);
 const DATA_DIR = path.join(BASE_DIR, 'data');
+const RUNTIME_FILE = path.join(DATA_DIR, 'app-runtime.json');
 const SERVER = path.join(APP_DIR, 'server.js');
 const RESTART_CODE = 75;
 
@@ -95,5 +97,46 @@ process.on('SIGINT', () => forward('SIGINT'));
 process.on('SIGTERM', () => forward('SIGTERM'));
 process.on('SIGHUP', () => forward('SIGHUP'));
 
-console.log('[launcher] ROS Center starting (app=' + APP_DIR + ', data=' + DATA_DIR + ')');
-run();
+/* 再次双击 App / 快捷方式时：若已有实例在运行，只在真实端口上打开 WebUI，
+   不再启动第二个服务（否则端口顺延，用户会打开到另一个实例） */
+function readRuntime() {
+  try {
+    const r = JSON.parse(fs.readFileSync(RUNTIME_FILE, 'utf8'));
+    return r && r.app === 'ros-center' && Number(r.port) > 0 ? r : null;
+  } catch (e) { return null; }
+}
+function ping(port) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; try { req.destroy(); } catch (e) { /* ignore */ } resolve(v); };
+    const req = http.get({ host: '127.0.0.1', port: Number(port), path: '/api/health', timeout: 1500 }, (res) => {
+      let s = '';
+      res.on('data', (c) => { s += c; });
+      res.on('end', () => { try { const j = JSON.parse(s); finish(!!(j.ok && j.app === 'ros-center')); } catch (e) { finish(false); } });
+    });
+    req.on('timeout', () => finish(false));
+    req.on('error', () => finish(false));
+  });
+}
+function openBrowser(url) {
+  if (process.env.ROS_NO_BROWSER === '1') return;
+  try {
+    const cmd = process.platform === 'darwin' ? ['open', [url]]
+      : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]];
+    spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).unref();
+  } catch (e) { /* 打不开浏览器不影响服务 */ }
+}
+async function bootstrap() {
+  const rt = readRuntime();
+  if (rt && await ping(rt.port)) {
+    const url = rt.url || ('http://localhost:' + rt.port);
+    console.log('[launcher] 已有实例运行在 ' + rt.port + '，打开 ' + url);
+    openBrowser(url);
+    process.exit(0);
+    return;
+  }
+  console.log('[launcher] ROS Center starting (app=' + APP_DIR + ', data=' + DATA_DIR + ')');
+  run();
+}
+bootstrap();

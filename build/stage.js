@@ -20,6 +20,7 @@ const README = `ROS Center 桌面版
   macOS   ：双击 Start.command（绿色版）或「启动台 / Applications 里的 ROS Center」
   Windows ：双击 Start.bat 或开始菜单 / 桌面快捷方式
 程序会启动本地服务并自动打开浏览器（默认 http://localhost:10086）。
+再次双击 App / Start 脚本：若服务已在运行，只会在当前真实端口（改过或顺延后的端口）重新打开 WebUI，不会启动第二个实例。
 停止服务：关闭终端窗口、按 Ctrl+C，或结束 ROS Center 后台进程。
 
 本包已内置 Node.js 运行时，目标机器不需要安装 Node.js，也不需要联网安装依赖。
@@ -56,6 +57,7 @@ const README = `ROS Center 桌面版
 
 应用内更新
   「系统管理 → 检查更新 → 应用内自动更新」点一次即可升级程序，
+  页面显示真实下载进度（字节 / 百分比），完成后自动重启并重连。
   无需重新下载安装包：只替换 app/ 里的程序文件并自动重启，data/ 数据完全保留。
   macOS / Windows 安装版首次启动会把程序源码同步到数据目录，以便后续更新。
 
@@ -210,7 +212,28 @@ function stage(t, stageDir) {
   fs.writeFileSync(path.join(dir, t.launcherName), t.launcher, { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'README.txt'), README);
   const env = path.join(ROOT, '.env.example');
-  if (fs.existsSync(env)) fs.copyFileSync(env, path.join(dir, 'config.example.env'));
+  const envDest = path.join(dir, 'config.example.env');
+  try {
+    if (fs.existsSync(env)) fs.copyFileSync(env, envDest);
+  } catch (e) {
+    /* 某些构建沙箱禁止读取 .env*；用内置等价模板兜底，产物不依赖仓库文件权限 */
+    fs.writeFileSync(envDest, [
+      '# ROS Center 桌面版配置示例（复制到数据目录并改名为 .env 生效）',
+      'WEB_PORT=10086', 'CONTAINER_PORT=10086', 'PORT=10086',
+      'ROS_HOST=192.168.88.1', 'ROS_PORT=8728', 'ROS_TLS=0',
+      'ROS_USER=monitor', 'ROS_PASSWORD=change-me',
+      'TRAFFIC_STREAM=1', 'POLL_INTERVAL_MS=1000', 'HISTORY_POINTS=180',
+      'DEMO_MODE=0', 'WEB_USER=', 'WEB_PASSWORD=',
+      '# 检查更新：检测源随运行方式固定（Docker → Docker Hub；桌面/源码 → GitHub Releases）',
+      '# ROS_UPDATE_ENABLED=1', '# ROS_UPDATE_INTERVAL=24', '# ROS_UPDATE_AUTO_APPLY=1',
+      '# ROS_UPDATE_PROXY=http://user:pass@127.0.0.1:7890',
+      '# ROS_UPDATE_ENDPOINT=https://mirror.example.com/...',
+      '# ROS_DOCKER_SOCKET=/var/run/docker.sock  （Docker 版应用内更新需映射）',
+      '# 再次双击 App 会在当前真实端口打开 WebUI，不会启动第二个服务',
+      '',
+    ].join('\n'));
+    console.log('config.example.env: using built-in template');
+  }
   console.log('staged:', dir);
   return dir;
 }
