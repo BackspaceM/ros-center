@@ -2,6 +2,8 @@
 
 /* 单文件/绿色桌面版把 .env / data 放在启动目录；源码与 Docker 仍用项目目录 */
 const DESKTOP = process.pkg || process.env.ROS_DESKTOP === '1';
+/* 本次进程启动时刻：用来区分「本次更新中」与「上次容器/进程遗留」的进度状态 */
+const BOOT_AT = Date.now();
 const APP_DIR = process.env.ROS_BASE_DIR ? require('path').resolve(process.env.ROS_BASE_DIR)
   : (process.pkg ? require('path').dirname(process.execPath) : __dirname);
 
@@ -1571,6 +1573,23 @@ function selfResult(kind) {
   const file = kind === 'docker' ? selfupdate.DOCKER_UPDATE_RESULT : selfupdate.APP_UPDATE_RESULT;
   return selfupdate.readJson(path.join(DATA_DIR, file), null);
 }
+/* 进度文件随 data 卷保留。容器/进程重建后，早于本次启动的「进行中」状态都是遗留，
+   否则页面会永远停在「切换版本」。error / done 是结论，保留供查看。 */
+const BUSY_PROGRESS = new Set(['download', 'pull', 'prepare', 'switch', 'restart']);
+function currentProgress() {
+  const p = selfupdate.readJson(SELF_PROGRESS_FILE, null);
+  if (p && p.at && BUSY_PROGRESS.has(p.stage) && Date.parse(p.at) < BOOT_AT) return null;
+  return p;
+}
+function clearStaleProgress() {
+  try {
+    const p = selfupdate.readJson(SELF_PROGRESS_FILE, null);
+    if (p && p.at && BUSY_PROGRESS.has(p.stage) && Date.parse(p.at) < BOOT_AT) {
+      fs.rmSync(SELF_PROGRESS_FILE, { force: true });
+      console.log('[self-update] cleared stale progress from previous process:', p.stage);
+    }
+  } catch (e) { /* ignore */ }
+}
 function latestAssets() { return ((updateState.status && updateState.status.latest) || {}).assets || []; }
 function latestVersion() {
   const v = String((updateState.status && updateState.status.latest && updateState.status.latest.version) || '');
@@ -1598,7 +1617,7 @@ async function selfCapabilities(force = false) {
     reason, desktop, docker, busy: selfUpdateBusy,
     runtime: rt, autoApply: !!updateState.config.autoApply,
     bundle: bundleInfo ? { name: bundleInfo.zip.name, size: bundleInfo.zip.size, url: bundleInfo.zip.url, checksum: !!bundleInfo.checksum } : null,
-    progress: selfupdate.readJson(SELF_PROGRESS_FILE, null),
+    progress: currentProgress(),
     result: selfResult(kind === 'docker' ? 'docker' : 'desktop'),
   };
 }
@@ -2233,7 +2252,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/update/self/result' && req.method === 'GET') {
     const rt = runtimeInfo();
     return json(res, 200, { ok: true, kind: rt.selfUpdate, runtime: rt,
-      progress: selfupdate.readJson(SELF_PROGRESS_FILE, null),
+      progress: currentProgress(),
       result: selfResult(rt.selfUpdate === 'docker' ? 'docker' : 'desktop') });
   }
   if (p === '/api/update/self/clear' && req.method === 'POST') {
@@ -2303,6 +2322,7 @@ server.on('error', (e) => {
 server.listen(PORT, HOST, () => {
   console.log(`[ui] http://localhost:${PORT}`);
   console.log(`[ui] ${devices.size} device(s), active=${activeDevice() ? activeDevice().name : 'none'}`);
+  clearStaleProgress();
   writeAppRuntime();
   if (DESKTOP && !process.env.ROS_NO_BROWSER) openBrowser(`http://localhost:${PORT}`);
   /* 服务成功起来后确认应用内更新，launcher 之后不会再按「启动失败」回滚 */
