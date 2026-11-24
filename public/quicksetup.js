@@ -212,7 +212,7 @@
               <div class="qs-divider"></div>
               <div class="form-row"><label>${esc(L('设备名称', 'Device identity'))}</label><div><input type="text" id="qsIdentity" placeholder="ROS-Center"></div></div>
               <div class="form-row"><label>${esc(L('关闭不安全服务', 'Disable insecure services'))}</label><div class="qs-checks-inline">
-                <label class="qs-check"><input type="checkbox" id="qsSvcTelnet" checked><span>telnet</span></label>
+                <label class="qs-check"><input type="checkbox" id="qsSvcTelnet"><span>telnet</span></label>
                 <label class="qs-check"><input type="checkbox" id="qsSvcFtp" checked><span>ftp</span></label>
                 <label class="qs-check"><input type="checkbox" id="qsSvcWww"><span>www</span></label></div></div>
               <div class="form-hint">${esc(L('API / SSH / WinBox 不会被禁用，避免把 ROS Center 自己踢下线。', 'API / SSH / WinBox are never disabled, so ROS Center stays connected.'))}</div>
