@@ -1483,11 +1483,15 @@ function saveUpdateState() {
   } catch (e) { console.warn('[updates] save failed:', e.message); }
 }
 function appliedVersion() {
-  /* 应用内更新成功后由 launcher 写入结果文件，启动时以此为准，避免一直提示更新 */
-  try {
-    const r = selfupdate.readJson(path.join(DATA_DIR, selfupdate.APP_UPDATE_RESULT), null);
-    if (r && r.ok && r.verified && !r.rolledBack && r.version) return String(r.version);
-  } catch (e) { /* ignore */ }
+  /* 桌面版：应用内更新成功后 launcher 写入结果文件，启动时以此为准，避免一直提示更新。
+     Docker/源码：版本只以镜像/代码自带的 version.json 或 package.json 为准，
+     绝不能被 data 卷里残留的 app-update-result.json 覆盖（否则升级后仍显示旧版本）。 */
+  if (DESKTOP) {
+    try {
+      const r = selfupdate.readJson(path.join(DATA_DIR, selfupdate.APP_UPDATE_RESULT), null);
+      if (r && r.ok && r.verified && !r.rolledBack && r.version) return String(r.version);
+    } catch (e) { /* ignore */ }
+  }
   try { return String(JSON.parse(fs.readFileSync(path.join(__dirname, 'version.json'), 'utf8')).version || ''); } catch (e) { return ''; }
 }
 function runtimeInfo() {
