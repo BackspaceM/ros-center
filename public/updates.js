@@ -62,6 +62,13 @@
     if (page) page.dataset.kind = kind;
     const chip = $('updKindChip');
     if (chip) chip.textContent = kindLabel(kind);
+    /* 源码运行不支持应用内更新，直接隐藏该项；Docker 用短文案 */
+    const applyRow = $('updAutoApplyRow');
+    if (applyRow) applyRow.style.display = kind === 'source' ? 'none' : '';
+    const applyLabel = $('updAutoApplyLabel');
+    if (applyLabel) applyLabel.textContent = kind === 'docker'
+      ? L('自动更新', 'Auto-update')
+      : L('发现新版本时自动应用（无需人工安装）', 'Auto-apply updates without manual install');
     const src = (d.limits && d.limits.source) || cfg.source || s.source || 'github';
     const srcLabel = src === 'dockerhub' ? 'Docker Hub' : 'GitHub Releases';
     const latestV = (s.latest && s.latest.version) || '—';
@@ -87,35 +94,6 @@
       </div>
       ${s.downloaded ? `<div class="upd-downloaded">${esc(L('已下载', 'Downloaded'))}: <b>${esc(s.downloaded.name)}</b> · ${esc(fmtSize(s.downloaded.size))}</div>` : ''}`;
 
-    const ab = $('updAssets');
-    if (ab) {
-      const assets = (s.latest && s.latest.assets) || [];
-      ab.innerHTML = assets.length ? assets.map((a) => `
-        <div class="upd-asset"><span class="upd-asset-name" title="${esc(a.name)}">${esc(a.name)}</span>
-          <span class="topo-hint">${esc(fmtSize(a.size))}</span>
-          <button class="btn btn-sm" data-upd-dl="${esc(a.name)}" type="button">${esc(L('下载', 'Download'))}</button></div>`).join('')
-        : `<div class="empty" style="padding:16px;text-align:center;color:var(--muted)">${esc(L('检查后显示可下载资产', 'Assets appear after checking'))}</div>`;
-      ab.querySelectorAll('[data-upd-dl]').forEach((btn) => {
-        btn.onclick = async () => {
-          btn.disabled = true;
-          try {
-            const r = await api('/api/update/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: btn.dataset.updDl }) });
-            toast(L('已下载到 data/updates/：', 'Saved to data/updates/: ') + r.downloaded.name, 'ok');
-            await reload();
-          } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
-        };
-      });
-    }
-    const notes = $('updNotes');
-    if (notes) notes.innerHTML = s.latest && s.latest.notes
-      ? `<pre class="upd-notes">${esc(s.latest.notes)}</pre>` : `<div class="topo-hint">—</div>`;
-    const link = $('updReleaseLink');
-    if (link) {
-      const href = s.latest && s.latest.url;
-      link.innerHTML = href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(L('打开发布页', 'Release notes'))} ↗</a>` : '';
-    }
-    const digest = $('updDigest');
-    if (digest) digest.textContent = (s.latest && s.latest.digest) || '—';
     const cmd = $('updDockerCmd');
     if (cmd) cmd.textContent = (d.limits && d.limits.dockerCommand) || '';
   }
@@ -307,7 +285,7 @@
           <div id="updSelfProgress"></div>
         </div></div>
 
-      <div class="grid-2 upd-grid" style="margin-top:14px">
+      <div class="upd-grid" style="margin-top:14px">
         <div class="panel"><div class="panel-head"><div><h2>${esc(L('更新设置', 'Settings'))}</h2>
           <p class="sub">${esc(L('服务端定时检查，结果不依赖浏览器常开。', 'Server-side schedule; no browser needed.'))}</p></div></div>
           <div class="panel-body">
@@ -317,7 +295,7 @@
                 <option value="12">12 ${esc(L('小时', 'h'))}</option><option value="24">24 ${esc(L('小时', 'h'))}</option>
                 <option value="168">7 ${esc(L('天', 'd'))}</option><option value="720">30 ${esc(L('天', 'd'))}</option></select></div>
             <label class="upd-check upd-only-desktop"><input type="checkbox" id="updAutoDownload"><span>${esc(L('发现新版本时自动下载安装包', 'Auto-download installer when available'))}</span></label>
-            <label class="upd-check"><input type="checkbox" id="updAutoApply"><span>${esc(L('发现新版本时自动应用（无需人工安装）', 'Auto-apply updates without manual install'))}</span></label>
+            <label class="upd-check" id="updAutoApplyRow"><input type="checkbox" id="updAutoApply"><span id="updAutoApplyLabel">${esc(L('自动更新', 'Auto-update'))}</span></label>
             <div class="upd-row upd-source-row"><span>${esc(L('检测源', 'Source'))}</span>
               <select id="updSource" class="upd-inline-sel" disabled><option value="github">GitHub Releases</option><option value="dockerhub">Docker Hub</option></select>
               <span class="topo-hint">${esc(L('随运行方式固定', 'fixed by runtime'))}</span></div>
@@ -339,21 +317,12 @@
               <button class="btn" id="updCheck2" type="button">${esc(L('保存并检查', 'Save & check'))}</button></div>
           </div></div>
 
-        <div class="panel upd-release"><div class="panel-head"><div><h2>${esc(L('版本详情', 'Release detail'))}</h2>
-          <p class="sub" id="updReleaseLink"></p></div></div>
-          <div class="panel-body">
-            <div id="updNotes" class="upd-notes-box"></div>
-            <div class="upd-docker-only upd-digest"><span>${esc(L('镜像 digest', 'Image digest'))}</span><b id="updDigest">—</b></div>
-            <div class="upd-desktop-only"><div class="form-row" style="margin-top:6px"><label>${esc(L('发布资产', 'Assets'))}</label></div>
-              <div id="updAssets" class="upd-assets"></div></div>
-            <div class="upd-docker-only"><div class="form-row" style="margin-top:6px"><label>${esc(L('手动更新', 'Manual update'))}</label></div>
-              <pre class="upd-cmd" id="updDockerCmd"></pre></div>
-          </div></div>
       </div>
 
       <details class="panel upd-help"><summary>${esc(L('工作原理与安全', 'How it works & safety'))}</summary>
         <div class="panel-body modal-note">
-          <div class="upd-docker-only"><b>Docker</b> · ${esc(L('映射 /var/run/docker.sock 后，程序经 Docker Engine API 拉取新镜像，由一次性助手容器完成「停旧 → 删旧 → 以原名称/端口/卷/环境变量重建 → 启动」；仅 restart 不会换镜像。/app/data 未挂载时会拒绝执行。映射 socket 等同宿主机 root 级权限。', 'With docker.sock mounted, the app pulls the new image and a helper container stops/removes/recreates/starts it with the same config. A plain restart keeps the old image. Refused when /app/data is not mounted. Socket access is host-root-equivalent.'))}</div>
+          <div class="upd-docker-only"><b>Docker</b> · ${esc(L('映射 /var/run/docker.sock 后，程序经 Docker Engine API 拉取新镜像，由一次性助手容器完成「停旧 → 删旧 → 以原名称/端口/卷/环境变量重建 → 启动」；仅 restart 不会换镜像。/app/data 未挂载时会拒绝执行。映射 socket 等同宿主机 root 级权限。手动更新命令：', 'With docker.sock mounted, the app pulls the new image and a helper container stops/removes/recreates/starts it with the same config. A plain restart keeps the old image. Refused when /app/data is not mounted. Socket access is host-root-equivalent. Manual update command:'))}
+            <pre class="upd-cmd" id="updDockerCmd"></pre></div>
           <div class="upd-desktop-only"><b>${esc(L('桌面版', 'Desktop'))}</b> · ${esc(L('launcher 监管进程在网页点一次后下载轻量 app 更新包（仅源码）→ 校验 SHA256 与逐文件清单 → 程序退出 → 替换 app/ 并自动重启；失败自动回滚。data/ 全程不动。再次点击 App 只会在当前真实端口打开 WebUI，不会启动第二个服务。', 'The launcher downloads a small source-only bundle, verifies SHA256 and per-file manifest, then swaps app/ and restarts with rollback. data/ is untouched. Clicking the app again opens the WebUI on the current port instead of starting a second service.'))}</div>
         </div></details>`;
 

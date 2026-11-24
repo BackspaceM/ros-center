@@ -635,6 +635,8 @@ class Device {
     this.monitorRetry = null;
     this.streamFlush = null;
     this.streamActive = false;
+    this.monitorFails = 0;        // 连续失败次数：退避重试 + 日志去重
+    this.lastStreamError = '';
     this.ifaceMeta = new Map();   // name -> { type, comment, running, disabled }
     this.lastRates = new Map();   // name -> { rxBps, txBps, rxPps, txPps }
     this.lastResource = null;
@@ -681,6 +683,7 @@ class Device {
     this.lastError = ''; this.mode = this.forceDemo ? 'demo' : 'connecting';
     this.ifaceTotals.clear(); this.history.length = 0; this.resourceHistory.length = 0;
     this.ifaceMeta.clear(); this.lastRates.clear(); this.lastResource = null;
+    this.monitorFails = 0; this.lastStreamError = '';
     this.ensureConnection();
   }
   ensureConnection() {
@@ -1100,22 +1103,47 @@ function emitStreamPacket(dev) {
 function streamFailed(dev, client, err) {
   if (dev.monitorApi === client) { client.close(); dev.monitorApi = null; }
   dev.streamActive = false;
-  console.warn(`[ros] ${dev.name} traffic stream unavailable: ${err && err.message ? err.message : err} - using polling`);
+  const msg = err && err.message ? err.message : String(err);
+  dev.monitorFails = (dev.monitorFails || 0) + 1;
+  const repeated = msg === dev.lastStreamError;
+  dev.lastStreamError = msg;
+  /* 同一错误只打印前两次、之后每 10 次打印一次，避免配置性错误每 10 秒刷屏 */
+  if (!repeated || dev.monitorFails <= 2 || dev.monitorFails % 10 === 0) {
+    console.warn(`[ros] ${dev.name} traffic stream unavailable: ${msg} - using polling${dev.monitorFails > 2 ? ` (${dev.monitorFails} failures)` : ''}`);
+  }
   if (!dev.forceDemo && dev.api && dev.api.connected && !dev.monitorRetry) {
-    dev.monitorRetry = setTimeout(() => { dev.monitorRetry = null; startTrafficStream(dev); }, envNum('TRAFFIC_STREAM_RETRY_MS', 10000));
+    /* 指数退避：10s → 20s → ... → 最长 10 分钟，轮询流量不受影响 */
+    const base = envNum('TRAFFIC_STREAM_RETRY_MS', 10000);
+    const delay = Math.min(600000, base * Math.pow(2, Math.min(5, dev.monitorFails - 1)));
+    dev.monitorRetry = setTimeout(() => { dev.monitorRetry = null; startTrafficStream(dev); }, delay);
   }
 }
-function startTrafficStream(dev) {
+async function startTrafficStream(dev) {
   if (dev.forceDemo || String(process.env.TRAFFIC_STREAM || '1') === '0' || !dev.api || !dev.api.connected || dev.monitorApi || dev.monitorRetry) return;
   const client = new RouterOSAPI({ ...dev.cfg });
-  client.connect().then(() => {
+  try {
+    await client.connect();
     if (!dev.api || !dev.api.connected || dev.monitorApi) { client.close(); return; }
     dev.monitorApi = client; dev.streamActive = true;
-    console.log(`[ros] ${dev.name} live traffic stream started (monitor-traffic)`);
-    client.exec(['/interface/monitor-traffic', '=interface=all'], {
+    /* RouterOS 的 monitor-traffic 不接受 interface=all（部分版本报
+       「input does not match any value of interface」），必须列出真实接口名。
+       首次连接时缓存尚未填充，先用专用连接读取接口列表。 */
+    let names = [...dev.ifaceMeta.entries()].filter(([, m]) => m.disabled !== 'true').map(([n]) => n);
+    if (!names.length) {
+      const ir = await client.exec(['/interface/print', '=.proplist=name,disabled']);
+      if (ir.status.type === 'trap') throw new Error(ir.status.message || '读取接口列表失败');
+      names = ir.re.filter((r) => r.name && r.disabled !== 'true').map((r) => r.name);
+    }
+    /* RouterOS 的 interface 参数最多 100 个元素，超过会被拒绝 */
+    names = names.slice(0, 100);
+    if (!names.length) throw new Error('没有可监控的接口');
+    console.log(`[ros] ${dev.name} live traffic stream started (monitor-traffic: ${names.length} interfaces)`);
+    const r = await client.exec(['/interface/monitor-traffic', '=interface=' + names.join(',')], {
       onRecord: (rec) => {
         const name = rec.name || rec.interface;
         if (!name) return;
+        /* 收到真实推送才确认流可用，重置退避与错误去重状态 */
+        if (dev.monitorFails || dev.lastStreamError) { dev.monitorFails = 0; dev.lastStreamError = ''; }
         dev.lastRates.set(name, {
           rxBps: num(rec['rx-bits-per-second']), txBps: num(rec['tx-bits-per-second']),
           rxPps: num(rec['rx-packets-per-second']), txPps: num(rec['tx-packets-per-second']),
@@ -1123,9 +1151,10 @@ function startTrafficStream(dev) {
         // 同一秒的多接口记录合并成一次完整快照，避免前端看到半更新数据
         if (!dev.streamFlush) dev.streamFlush = setTimeout(() => { dev.streamFlush = null; emitStreamPacket(dev); }, 80);
       },
-    }).then((r) => streamFailed(dev, client, new Error(r.status.type === 'trap' ? (r.status.message || 'monitor-traffic rejected') : 'monitor stream ended')))
-      .catch((e) => streamFailed(dev, client, e));
-  }).catch((e) => streamFailed(dev, client, e));
+    });
+    if (r.status.type === 'trap') throw new Error(r.status.message || 'monitor-traffic rejected');
+    streamFailed(dev, client, new Error('monitor stream ended'));
+  } catch (e) { streamFailed(dev, client, e); }
 }
 
 async function pollDevice(dev) {
