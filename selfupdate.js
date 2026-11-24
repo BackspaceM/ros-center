@@ -143,10 +143,41 @@ function selfContainerId() {
   return host;
 }
 
+function socketInfo(p) {
+  try {
+    const st = fs.statSync(p);
+    return { exists: true, isSocket: st.isSocket(), mode: st.mode & 0o777, uid: st.uid, gid: st.gid };
+  } catch (e) {
+    return { exists: false, isSocket: false, mode: 0, uid: -1, gid: -1, error: e.code || e.message };
+  }
+}
+function fixHint(si, proc) {
+  return `在 compose 里任选其一后执行 docker compose up -d --force-recreate：
+    user: "0:0"                        # 最简单，容器以 root 运行
+    group_add: ["${si.gid}"]           # 保留非 root；宿主机可执行 stat -c '%g' /var/run/docker.sock 核对 GID
+  新版镜像会在启动时自动把运行用户加入 socket 所属组（重新 pull 镜像即可）。`;
+}
+
 async function dockerCapabilities() {
-  const base = { available: false, socket: DOCKER_SOCKET, runtime: 'docker' };
-  try { fs.accessSync(DOCKER_SOCKET, fs.constants.R_OK | fs.constants.W_OK); }
-  catch (e) { return { ...base, reason: '未检测到可写的 ' + DOCKER_SOCKET + '（需在 compose 中映射 Docker socket）' }; }
+  const si = socketInfo(DOCKER_SOCKET);
+  const proc = {
+    uid: typeof process.getuid === 'function' ? process.getuid() : -1,
+    gid: typeof process.getgid === 'function' ? process.getgid() : -1,
+  };
+  /* 诊断信息随每次检测返回，方便 UI 给出可操作的提示 */
+  const base = {
+    available: false, canAutoUpdate: false, socket: DOCKER_SOCKET, runtime: 'docker',
+    socketExists: si.exists, socketIsSocket: si.isSocket, socketMode: si.mode,
+    socketUid: si.uid, socketGid: si.gid, processUid: proc.uid, processGid: proc.gid,
+  };
+  if (!si.exists) {
+    return { ...base, reason: `容器内找不到 ${DOCKER_SOCKET}（${si.error || 'not found'}）。请在 compose 的 volumes 里映射 - /var/run/docker.sock:/var/run/docker.sock 后重建容器。` };
+  }
+  if (!si.isSocket) {
+    return { ...base, reason: `${DOCKER_SOCKET} 存在但不是 Unix socket，请检查映射路径是否正确。` };
+  }
+  /* 不用 fs.accessSync(W_OK) 当门槛：容器里非 root 用户即使能连上也可能被 access(2) 拒绝，
+     反之某些 socket 权限宽松却仍应实测。真正以一次 /version 请求判定。 */
   try {
     const ver = assertOk(await dockerRequest('GET', '/version', { timeout: 10000 }), '连接 Docker');
     dockerApiVersion = String((ver.json && ver.json.ApiVersion) || '1.41');
@@ -166,16 +197,26 @@ async function dockerCapabilities() {
     const dataMounted = mounts.some((m) => m.Destination === '/app/data' && (m.Type === 'bind' || m.Type === 'volume'))
       || binds.some((b) => /(?:^|:)\/app\/data(?::|$)/.test(String(b)));
     return {
-      available: true, socket: DOCKER_SOCKET, apiVersion: dockerApiVersion,
+      ...base, available: true, canAutoUpdate: dataMounted,
+      socket: DOCKER_SOCKET, apiVersion: dockerApiVersion,
       containerId: d.Id, containerName: name,
       image: String((d.Config && d.Config.Image) || d.Image || ''),
       imageId: String(d.Image || ''),
       dataMounted, dataMount: (mounts.find((m) => m.Destination === '/app/data') || {}).Source || '',
       restartPolicy: (d.HostConfig && d.HostConfig.RestartPolicy && d.HostConfig.RestartPolicy.Name) || '',
       reason: dataMounted ? '' : '数据目录 /app/data 未挂载到宿主机，自动重建会丢失配置，请先添加 volume 映射',
-      canAutoUpdate: dataMounted,
+      socketUid: si.uid, socketGid: si.gid, socketMode: si.mode,
+      processUid: proc.uid, processGid: proc.gid,
     };
-  } catch (e) { return { ...base, reason: e.message }; }
+  } catch (e) {
+    const msg = e.message || String(e);
+    const denied = /EACCES|EPERM|permission denied|403|Forbidden|401|Unauthorized/i.test(msg);
+    if (denied) {
+      const mode = String(si.mode.toString(8)).padStart(3, '0');
+      return { ...base, reason: `${DOCKER_SOCKET} 已映射，但容器内当前用户无权访问（进程 uid=${proc.uid}/gid=${proc.gid}；socket 属 uid=${si.uid}/gid=${si.gid}，权限 0${mode}）。\n${fixHint(si, proc)}` };
+    }
+    return { ...base, reason: 'Docker API 连接失败：' + msg };
+  }
 }
 
 function splitImageRef(ref) {

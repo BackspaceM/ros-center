@@ -10,6 +10,8 @@ services:
       - ./data:/app/data
       # 可选：允许网页里「一键更新」自动重建容器。映射 docker.sock 等于把宿主机
       # Docker 控制权交给容器（root 级权限），不需要应用内更新就不要打开这一行。
+      # 新版镜像启动时会自动把运行用户加入 socket 所属组；若仍用旧镜像，
+      # 还需在本服务下加 user: "0:0"（或 group_add: ["<宿主机 socket 的 GID>"]）。
       # - /var/run/docker.sock:/var/run/docker.sock
     environment:
       PORT: ${CONTAINER_PORT:-10086}

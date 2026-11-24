@@ -956,3 +956,4 @@ tr.row-fail td { color: var(--red); }
 .upd-self-help { margin-top:10px; font-size:11.5px; line-height:1.7; color:var(--muted); border-left:3px solid var(--blue); padding-left:10px; }
 .upd-self-meta > div b[title] { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
 .upd-self-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.upd-self-diag { color:var(--ink); border-color:var(--red); margin:8px 0 0; max-height:190px; overflow:auto; }

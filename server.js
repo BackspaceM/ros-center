@@ -1542,13 +1542,13 @@ function latestVersion() {
   return v.replace(/^v/i, '');
 }
 
-async function selfCapabilities() {
+async function selfCapabilities(force = false) {
   const rt = runtimeInfo();
   const kind = rt.selfUpdate;
   const desktop = selfupdate.desktopCapabilities({ appDir: __dirname, dataDir: DATA_DIR, desktop: !!DESKTOP });
   let docker = null;
   if (kind === 'docker') {
-    if (Date.now() - selfCapCache.at < 30000 && selfCapCache.value) docker = selfCapCache.value;
+    if (!force && Date.now() - selfCapCache.at < 30000 && selfCapCache.value) docker = selfCapCache.value;
     else {
       docker = await selfupdate.dockerCapabilities();
       selfCapCache = { at: Date.now(), value: docker };
@@ -2178,8 +2178,10 @@ const server = http.createServer(async (req, res) => {
 
   /* ---- 自更新：Docker 经 docker.sock 重建容器 / 桌面替换 app 并自动重启 ---- */
   if (p === '/api/update/self/status' && req.method === 'GET') {
-    try { return json(res, 200, { ok: true, ...(await selfCapabilities()) }); }
-    catch (e) { return json(res, 200, { ok: false, kind: runtimeInfo().selfUpdate, available: false, reason: e.message }); }
+    try {
+      const force = url.searchParams.get('refresh') === '1';
+      return json(res, 200, { ok: true, ...(await selfCapabilities(force)) });
+    } catch (e) { return json(res, 200, { ok: false, kind: runtimeInfo().selfUpdate, available: false, reason: e.message }); }
   }
   if (p === '/api/update/self/apply' && req.method === 'POST') {
     try {
@@ -2198,6 +2200,7 @@ const server = http.createServer(async (req, res) => {
       for (const f of [SELF_PROGRESS_FILE, path.join(DATA_DIR, selfupdate.DOCKER_UPDATE_RESULT),
         path.join(DATA_DIR, selfupdate.DOCKER_UPDATE_PENDING)]) fs.rmSync(f, { force: true });
       selfUpdateBusy = false; selfUpdateStartedAt = 0; lastAutoApplyKey = '';
+      selfCapCache = { at: 0, value: null };
       return json(res, 200, { ok: true });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }

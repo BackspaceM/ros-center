@@ -98,15 +98,22 @@
       cells.push(`<div><small>${esc(L('应用目录', 'App directory'))}</small><b title="${esc(ds.appDir || '')}">${esc(ds.appDir || '—')}</b></div>`);
       cells.push(`<div><small>${esc(L('更新包', 'Update bundle'))}</small><b>${d.bundle ? esc(d.bundle.name) + ' · ' + esc(fmtSize(d.bundle.size)) : '—'}</b></div>`);
     }
-    let state, help = '';
+    let state, help = '', diag = '';
     if (!d.available) {
-      state = `<div class="upd-state bad">${badge(L('不可用', 'Unavailable'), 'bad')}<div class="upd-err">${esc(d.reason || '')}</div></div>`;
+      const reason = d.reason || '';
+      const reasonHtml = reason.includes('\n')
+        ? `<pre class="upd-cmd upd-self-diag">${esc(reason)}</pre>`
+        : `<div class="upd-err">${esc(reason)}</div>`;
+      state = `<div class="upd-state bad">${badge(L('不可用', 'Unavailable'), 'bad')}${reasonHtml}</div>`;
       if (d.kind === 'docker') {
-        help = `<pre class="upd-cmd"># docker-compose.yml 的 volumes: 里增加一行（会赋予容器宿主机 Docker 权限，请自行评估）
+        diag = `<div class="topo-hint" style="margin-top:8px">${esc(L('检测结果', 'Detection'))}: socket ${dk.socketExists ? esc(L('已映射', 'mapped')) : esc(L('未找到', 'not found'))}${dk.socketExists ? ` · mode=0${(Number(dk.socketMode) || 0).toString(8).padStart(3, '0')} · socket gid=${dk.socketGid} · ${esc(L('进程', 'process'))} uid/gid=${dk.processUid}/${dk.processGid}` : ''}</div>`;
+        if (!dk.socketExists) {
+          help = `<pre class="upd-cmd"># docker-compose.yml 的 volumes: 里增加一行（会赋予容器宿主机 Docker 权限，请自行评估）
     volumes:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
-# 然后 docker compose up -d 重建一次</pre>`;
+# 然后 docker compose up -d --force-recreate</pre>`;
+        }
       } else if (d.kind === 'desktop') {
         help = `<div class="upd-self-help">${esc(L('只需重新安装一次最新安装包（pkg/dmg/exe），之后所有更新都能在网页里一键完成。绿色版用户重新解压新版 ZIP 即可。', 'Reinstall the latest installer once (pkg/dmg/exe); from then on every update happens in the browser. Portable users just unzip the new ZIP once.'))}</div>`;
       }
@@ -127,7 +134,7 @@
     }
     const prog = d.progress && d.progress.stage !== 'restart'
       ? `<div class="upd-self-result">${esc(d.progress.stage)} · ${esc(d.progress.message)} · ${esc(fmtTime(d.progress.at))}</div>` : '';
-    box.innerHTML = `<div class="upd-meta upd-self-meta">${cells.join('')}</div>${state}${resultHtml}${prog}${help}`;
+    box.innerHTML = `<div class="upd-meta upd-self-meta">${cells.join('')}</div>${state}${diag}${resultHtml}${prog}${help}`;
     const btn = $('updSelfApply');
     if (btn) {
       btn.disabled = !d.available || !!d.busy;
@@ -136,10 +143,10 @@
         : L('一键更新并自动重启', 'Update & restart');
     }
     const reset = $('updSelfReset');
-    if (reset) reset.hidden = !d.busy && !d.result && !d.progress;
+    if (reset) reset.hidden = d.kind === 'source';
   }
-  async function loadSelf() {
-    try { paintSelf(await api('/api/update/self/status')); }
+  async function loadSelf(force = false) {
+    try { paintSelf(await api('/api/update/self/status' + (force ? '?refresh=1' : ''))); }
     catch (e) { setSelfProgress(e.message, 'bad'); }
   }
 
@@ -274,7 +281,7 @@
 
       <div class="panel" style="margin-top:14px"><div class="panel-head"><div><h2>${esc(L('应用内自动更新', 'Apply update in place'))}</h2>
         <p class="sub">${esc(L('不重新下载安装包装载：Docker 重建容器，桌面版只替换程序文件并自动重启。', 'No reinstall: Docker recreates the container, desktop swaps program files and restarts.'))}</p></div>
-        <div class="upd-self-actions"><button class="btn" id="updSelfReset" type="button" hidden>${esc(L('重置状态', 'Reset state'))}</button>
+        <div class="upd-self-actions"><button class="btn" id="updSelfReset" type="button">${esc(L('重新检测', 'Re-detect'))}</button>
         <button class="btn primary" id="updSelfApply" type="button">${esc(L('一键更新并重启', 'Update & restart'))}</button></div></div>
         <div class="panel-body"><div id="updSelfBox"><div class="empty">${esc(L('加载中…', 'Loading…'))}</div></div><div id="updSelfProgress"></div></div></div>
 
@@ -331,8 +338,8 @@
       try {
         await api('/api/update/self/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         const prog = $('updSelfProgress'); if (prog) prog.innerHTML = '';
-        await loadSelf();
-        toast(L('状态已重置', 'State reset'), 'ok');
+        await loadSelf(true);
+        toast(L('已重新检测', 'Re-detected'), 'ok');
       } catch (e) { toast(e.message, 'err'); }
     };
     reload(true);
