@@ -257,7 +257,9 @@ function compareVersion(a, b) {
 function endpointFor(cfg) {
   if (cfg.endpoint) return cfg.endpoint;
   if (cfg.source === 'dockerhub') {
-    return `https://hub.docker.com/v2/repositories/${cfg.image}/tags/${encodeURIComponent(cfg.tag)}`;
+    /* 查标签列表：既能拿到 latest 的 digest 用于更新判定，也能解析出真实版本号。
+       只查 tags/latest 时 name 恒为 "latest"，界面会误把 tag 名当版本显示。 */
+    return `https://hub.docker.com/v2/repositories/${cfg.image}/tags?page_size=100`;
   }
   return cfg.channel === 'all'
     ? `https://api.github.com/repos/${REPO}/releases?per_page=10`
@@ -282,10 +284,27 @@ function parseGithub(data, cfg) {
 }
 function parseDockerHub(data, cfg) {
   if (!data || typeof data !== 'object') throw new Error('Docker Hub 返回数据格式异常');
+  const list = Array.isArray(data.results) ? data.results : null;
+  /* 目标标签（默认 latest）：用于 digest / 更新时间判定 */
+  const target = list
+    ? (list.find((t) => t && String(t.name) === cfg.tag) || list[0] || {})
+    : data;
+  /* 真实版本号：从所有语义化版本标签里取最大的；没有则用目标标签名兜底 */
+  let version = '';
+  if (list) {
+    const semver = list.map((t) => String((t && t.name) || ''))
+      .filter((name) => /^v?\d+(\.\d+){1,3}$/i.test(name));
+    semver.sort((a, b) => compareVersion(a, b) || 0);
+    version = semver[semver.length - 1] || String(target.name || cfg.tag);
+  } else {
+    /* 自定义镜像源返回单条记录：name 已是版本号时直接用，否则宽泛地保留 */
+    const name = String(target.name || '');
+    version = /^v?\d+(\.\d+){1,3}$/i.test(name) ? name : String(cfg.tag);
+  }
   return {
-    version: String(data.name || cfg.tag),
-    digest: String(data.digest || ''),
-    publishedAt: String(data.last_updated || data.tag_last_pushed || ''),
+    version,
+    digest: String(target.digest || ''),
+    publishedAt: String(target.last_updated || target.tag_last_pushed || ''),
     url: `https://hub.docker.com/r/${cfg.image}/tags?name=${encodeURIComponent(cfg.tag)}`,
     notes: '',
     assets: [],
