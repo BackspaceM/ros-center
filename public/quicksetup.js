@@ -143,17 +143,20 @@
   }
 
   async function loadInterfaces() {
-    let names = [];
+    let names = [], live = false;
     try {
+      /* api() 自动带当前 state.deviceId：接口列表只来自当前选中的路由器，不会串到别的设备 */
       const d = await api('/api/config?section=interfaces');
-      names = (d.rows || []).map((r) => r.name).filter(Boolean);
+      if (!d.offline) { names = (d.rows || []).map((r) => r.name).filter(Boolean); live = names.length > 0; }
     } catch (e) { /* 离线/未连接：用默认接口列表 */ }
-    /* 合并默认项与真实接口并去重；无论是否连上路由器都要填菜单，否则下拉是空的 */
-    const all = [...new Set([...names, 'ether1', 'ether2', 'ether3', 'ether4', 'ether5', 'bridge-lan'])];
-    const dl = $('qsIfaceList');
-    if (dl) dl.innerHTML = all.map((n) => `<option value="${esc(n)}"></option>`).join('');
+    const cur = (state.devices || []).find((x) => x.id === state.deviceId) || {};
+    const devName = cur.name || L('当前设备', 'Current device');
+    /* 无真实接口时用常见默认值，菜单始终可用 */
+    const all = live ? [...new Set(names)] : [...new Set(['ether1', 'ether2', 'ether3', 'ether4', 'ether5', 'bridge-lan'])];
+    const head = `<div class="qs-combo-head">${esc(L('来自', 'From'))} <b>${esc(devName)}</b>${live ? '' : ' · ' + esc(L('未连接，显示常用接口', 'Offline — common ports'))}</div>`;
     document.querySelectorAll('[data-combo-menu]').forEach((menu) => {
-      menu.innerHTML = all.map((n) => `<button type="button" class="qs-combo-opt" data-val="${esc(n)}">${esc(n)}</button>`).join('');
+      menu.innerHTML = head + (all.map((n) => `<button type="button" class="qs-combo-opt" data-val="${esc(n)}">${esc(n)}</button>`).join('')
+        || `<div class="qs-combo-empty">${esc(L('没有扫描到接口，可直接输入', 'No interfaces found — type a name'))}</div>`);
     });
   }
 
@@ -184,7 +187,7 @@
   window.renderQuickSetupPage = function renderQuickSetupPage() {
     /* 组合控件：输入框可手填 + ▾ 按钮展开接口菜单（菜单由 loadInterfaces 填充，确保点一下就有反应） */
     const ifaceInput = (inputId, def, help) => `<div class="qs-combo" data-combo="${inputId}">
-      <input type="text" id="${inputId}" list="qsIfaceList" value="${def}" aria-label="${esc(L('接口名', 'Interface'))}"
+      <input type="text" id="${inputId}" value="${def}" aria-label="${esc(L('接口名', 'Interface'))}"
         placeholder="${esc(L('选择或输入接口名', 'Select or type an interface'))}" autocomplete="off">
       <button type="button" class="qs-combo-btn" data-combo-btn="${inputId}" aria-label="${esc(L('展开接口列表', 'Show interfaces'))}">▾</button>
       <div class="qs-combo-menu" data-combo-menu="${inputId}" hidden></div>
@@ -211,8 +214,6 @@
             [5, L('预览应用', 'Review'), L('检查并应用', 'Review & apply')],
           ].map(([n, t1, t2]) => `<button type="button" class="qs-step-tab" data-qs-step="${n}"><span class="qs-step-dot">${n}</span><span class="qs-step-txt"><b>${esc(t1)}</b><small>${esc(t2)}</small></span></button>`).join('')}
         </div>
-
-        <datalist id="qsIfaceList"><option value="ether1"><option value="ether2"><option value="ether3"><option value="ether4"><option value="ether5"><option value="bridge-lan"></datalist>
 
         <div class="qs-step-pane active" data-qs-step="1">
           <div class="qs-pane-head"><span class="qs-pane-num">1</span><div><h2>${esc(L('上网方式', 'WAN / uplink'))}</h2><p>${esc(L('选择路由器如何接入互联网', 'How the router connects to the internet'))}</p></div></div>

@@ -3,6 +3,7 @@
 (function () {
   const MARK_KEY = 'ros-self-updating';
   let applyingTimer = null;
+  let runCheck = null;   // 由 renderUpdatesPage 注入，paint 重写 DOM 后重新绑定「立即检查」
 
   function fmtTime(s) {
     if (!s) return '—';
@@ -103,7 +104,10 @@
           <div class="upd-focus-title">${esc(title)}</div>
           <div class="upd-focus-desc ${st === 'bad' ? 'is-err' : ''}">${esc(desc)}</div>
         </div>
-        <button class="btn primary upd-cta" id="updCta" type="button" hidden>${esc(L('立即更新', 'Update now'))}</button>
+        <div class="upd-focus-actions">
+          <button class="btn" id="updCheck" type="button">${esc(L('立即检查', 'Check now'))}</button>
+          <button class="btn primary upd-cta" id="updCta" type="button" hidden>${esc(L('立即更新', 'Update now'))}</button>
+        </div>
       </div>
       ${st === 'bad' ? `<div class="upd-check-hint">${esc(L('网络受限时，可在「网络与高级选项」填写代理或镜像源后重试。', 'If network is blocked, set a proxy or mirror under "Network & advanced" and retry.'))}</div>` : ''}
       <div class="upd-versions">
@@ -121,6 +125,8 @@
 
     const cta = $('updCta');
     if (cta) cta.onclick = applySelf;   // 可用性由 paintSelf 统一控制
+    const chk = $('updCheck');
+    if (chk && runCheck) chk.onclick = () => runCheck(chk);
     const cmd = $('updDockerCmd');
     if (cmd) cmd.textContent = (d.limits && d.limits.dockerCommand) || '';
   }
@@ -218,8 +224,9 @@
     try {
       await reload(true);
       await loadSelf();
-      setSelfProgress('', 'ok', { stage: 'done', message: L('更新完成，服务已恢复', 'Update finished — service is back') });
-      toast(L('已更新并自动重启完成', 'Updated and restarted'), 'ok');
+      setSelfProgress('', 'ok', { stage: 'done', message: L('更新完成，正在刷新页面…', 'Update finished — refreshing…') });
+      /* 更新完成后整页刷新：确保前端静态资源也换到新版本，而不只是数据重载 */
+      setTimeout(() => location.reload(), 400);
     } catch (e) { location.reload(); }
   }
   function checkResume() {
@@ -280,11 +287,9 @@
   window.renderUpdatesPage = function renderUpdatesPage() {
     $('content').innerHTML = `
       <div class="page-head upd-page-head" id="updPage" data-kind="source">
-        <div><h1>${esc(L('检查更新', 'Updates'))}</h1>
-          <p>${esc(L('版本状态、一键更新与设置，一目了然。', 'Version, one-click update and settings at a glance.'))}</p></div>
+        <div><h1>${esc(L('检查更新', 'Updates'))}</h1></div>
         <div class="upd-head-actions">
           <span class="upd-kind-chip" id="updKindChip">${esc(kindLabel(window.__updCache && window.__updCache.runtime && window.__updCache.runtime.selfUpdate))}</span>
-          <button class="btn" id="updCheck" type="button">${esc(L('立即检查', 'Check now'))}</button>
         </div></div>
 
       <div class="upd-layout">
@@ -372,12 +377,12 @@
       fill(r.config);
       return r;
     };
-    const check = async (btn) => {
+    const check = async (btn, force = false) => {
       if (btn) btn.disabled = true;
       const box = $('updStatus');
       if (box) box.innerHTML = `<div class="empty">${esc(L('正在检查…', 'Checking…'))}</div>`;
       try {
-        const r = await api('/api/update/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const r = await api('/api/update/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: !!force }) });
         paint({ ...(window.__updCache || {}), config: r.config, status: r.status });
         await loadSelf();
         toast(r.status && r.status.ok
@@ -386,9 +391,9 @@
       } catch (e) { toast(e.message, 'err'); await reload(); }
       if (btn) btn.disabled = false;
     };
-    $('updCheck').onclick = () => check($('updCheck'));
+    runCheck = check;
     $('updSave').onclick = async () => { try { await save(); toast(L('设置已保存', 'Settings saved'), 'ok'); } catch (e) { toast(e.message, 'err'); } };
-    $('updCheck2').onclick = async () => { try { await save(); await check($('updCheck2')); } catch (e) { toast(e.message, 'err'); } };
+    $('updCheck2').onclick = async () => { try { await save(); await check($('updCheck2'), true); } catch (e) { toast(e.message, 'err'); } };
     reload(true).then(loadSelf);
     checkResume();
   };

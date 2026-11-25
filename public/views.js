@@ -22,8 +22,9 @@ function renderDashboard() {
   const rxFoot = esc(sel === '__all__' ? t('rx_hint') : t('rx_hint_one'));
   const txFoot = esc(sel === '__all__' ? t('tx_hint') : t('tx_hint_one'));
   const cn = d.connections || { v4: 0, v6: 0, total: 0, tcp4: 0, tcp6: 0, udp4: 0, udp6: 0, tcp: 0, udp: 0 };
-  let peak = 0; for (const p of state.points) peak = Math.max(peak, p.rx || 0);
-  const pk = fmtRate(peak);
+  let peak = 0, peakTx = 0;
+  for (const p of state.points) { peak = Math.max(peak, p.rx || 0); peakTx = Math.max(peakTx, p.tx || 0); }
+  const pk = fmtRate(peak), pkt = fmtRate(peakTx);
 
   $('content').innerHTML = `
     <div class="page-head">
@@ -41,7 +42,8 @@ function renderDashboard() {
       <div class="card rx"><div class="card-label">${t('total_rx')}${scopeTag}</div><div class="card-value">${rx.v}<small>${rx.u}</small></div><div class="card-foot">${rxFoot}</div></div>
       <div class="card tx"><div class="card-label">${t('total_tx')}${scopeTag}</div><div class="card-value">${tx.v}<small>${tx.u}</small></div><div class="card-foot">${txFoot}</div></div>
       <div class="card ok"><div class="card-label">${t('active_if')}</div><div class="card-value">${active}<small>/ ${(d.ifaces || []).length}</small></div><div class="card-foot">${t('if_hint')}</div></div>
-      <div class="card warn"><div class="card-label">${t('peak_rx')}</div><div class="card-value">${pk.v}<small>${pk.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
+      <div class="card warn"><div class="card-label">${t('peak_rx')}${scopeTag}</div><div class="card-value">${pk.v}<small>${pk.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
+      <div class="card warn"><div class="card-label">${t('peak_tx')}${scopeTag}</div><div class="card-value">${pkt.v}<small>${pkt.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
     </div>
     <div class="grid-2">
       <div class="panel">
