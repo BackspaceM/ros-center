@@ -337,7 +337,8 @@ function customTopology(dev) {
    图标统一放在 data/topology-icons/：WebUI 上传，或直接把图片拷进该目录也会被识别。
    index.json 存显示名与内容哈希；上传按 sha256 去重，多台设备可复用同一个图标文件。 */
 const ICON_INDEX_FILE = path.join(TOPO_ICON_DIR, 'index.json');
-const ICON_NAME_RE = /^[A-Za-z0-9_-]+\.(png|jpe?g|webp|gif)$/i;
+/* 允许中文/空格等可读文件名（手动拷入即可被识别），但禁止路径分隔符与控制字符，防目录穿越 */
+const ICON_NAME_RE = /^[^\\/:*?"<>|\x00-\x1f]{1,120}\.(png|jpe?g|webp|gif|svg)$/i;
 function readIconIndex() {
   try {
     const d = JSON.parse(fs.readFileSync(ICON_INDEX_FILE, 'utf8'));
@@ -356,6 +357,22 @@ function saveIconIndex(idx) {
 function iconLabel(v, fallback) {
   const s = String(v == null ? '' : v).replace(/[\r\n\t\0-\x1f]/g, ' ').trim().slice(0, 40);
   return s || fallback;
+}
+/* 把用户命名转成安全文件名：保留中文/空格，去掉路径分隔符与控制字符，留出扩展名与冲突后缀空间 */
+function iconSafeBase(v, fallback) {
+  const s = String(v == null ? '' : v).replace(/\.[^.]*$/, '') // 去扩展名
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+|\.+$/g, '').trim().slice(0, 60);
+  return s || fallback;
+}
+/* SVG 作为 <img>/<image> 加载时浏览器已禁脚本，这里再做一次净化，移除显式脚本与危险属性 */
+function sanitizeSvg(buf) {
+  let s = buf.toString('utf8');
+  s = s.replace(/<\?xml[^>]*\?>/gi, '').replace(/<!DOCTYPE[^>]*>/gi, '');
+  s = s.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '');
+  s = s.replace(/\son[a-z]+\s*=\s*(['"])[^'"]*\1/gi, '');
+  s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
+  s = s.replace(/javascript\s*:/gi, '');
+  return Buffer.from(s, 'utf8');
 }
 function iconUsage() {
   const used = {};
@@ -1922,19 +1939,20 @@ const server = http.createServer(async (req, res) => {
     }
     return json(res, 405, { error: '不支持的请求方法' });
   }
-  /* 设备图标：仅常见位图，拒绝 SVG 防脚本注入；读取时强制图片 MIME + nosniff */
+  /* 设备图标：支持 PNG/JPEG/WebP/GIF/SVG；SVG 读取时强制图片 MIME + nosniff 且已净化脚本 */
   if (p === '/api/topology/icons' && req.method === 'GET') {
     return json(res, 200, { ok: true, icons: listTopoIcons(), dir: 'data/topology-icons/' });
   }
   if (p === '/api/topology/icon' && req.method === 'POST') {
     try {
-      const dev = activeDevice(); if (!dev) throw new Error('没有可用设备');
       const b = await readBodyLimit(req, 2 * 1024 * 1024);
-      const m = /^data:(image\/(png|jpe?g|webp|gif));base64,([\s\S]+)$/i.exec(String(b.data || ''));
-      if (!m) throw new Error('仅支持 PNG / JPEG / WebP / GIF 图片');
-      const buf = Buffer.from(m[3], 'base64');
+      const m = /^data:(image\/(png|jpe?g|webp|gif|svg\+xml));base64,([\s\S]+)$/i.exec(String(b.data || ''));
+      if (!m) throw new Error('仅支持 PNG / JPEG / WebP / GIF / SVG 图片');
+      const rawExt = m[2].toLowerCase();
+      const ext = rawExt === 'jpeg' ? 'jpg' : rawExt === 'svg+xml' ? 'svg' : rawExt;
+      let buf = Buffer.from(m[3], 'base64');
       if (!buf.length || buf.length > 900 * 1024) throw new Error('图片大小需在 900KB 以内');
-      const rawExt = m[2].toLowerCase(); const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+      if (ext === 'svg') buf = sanitizeSvg(buf);
       const hash = crypto.createHash('sha256').update(buf).digest('hex');
       const label = iconLabel(b.label || b.fileName, '');
       fs.mkdirSync(TOPO_ICON_DIR, { recursive: true });
@@ -1957,10 +1975,12 @@ const server = http.createServer(async (req, res) => {
             label: it.label, icons: listTopoIcons() });
         }
       }
-      /* 3) 确实是新图标：文件名带内容哈希前缀，天然避免重复 */
-      const name = String(dev.id).replace(/[^A-Za-z0-9_-]/g, '_') + '_' + hash.slice(0, 12) + '.' + ext;
+      /* 3) 新图标：用用户命名作为文件名（所见即所得），同名不同内容时加 -2/-3 后缀 */
+      const base = iconSafeBase(label || b.fileName, 'icon');
+      let name = base + '.' + ext, n = 2;
+      while (fs.existsSync(path.join(TOPO_ICON_DIR, name))) name = base + '-' + (n++) + '.' + ext;
       fs.writeFileSync(path.join(TOPO_ICON_DIR, name), buf, { mode: 0o644 });
-      idx.icons[name] = { label: label || iconLabel((b.fileName || '').replace(/\.[^.]+$/, ''), 'Icon'),
+      idx.icons[name] = { label: label || iconLabel(base, 'Icon'),
         sha256: hash, size: buf.length, createdAt: new Date().toISOString() };
       saveIconIndex(idx);
       return json(res, 200, { ok: true, reused: false, name, url: '/api/topology/icon/' + name,
@@ -2008,7 +2028,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const buf = fs.readFileSync(path.join(TOPO_ICON_DIR, name));
       const ext = name.split('.').pop().toLowerCase();
-      const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp'
+        : ext === 'svg' ? 'image/svg+xml' : 'image/jpeg';
       res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
       return res.end(buf);
     } catch (e) { return json(res, 404, { error: '图标不存在' }); }

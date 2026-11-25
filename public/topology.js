@@ -463,7 +463,7 @@
   function renderIconLib() {
     const box = $('tnIconLib'); if (!box) return;
     if (!iconLib.length) {
-      box.innerHTML = `<div class="topo-icon-lib-empty">${esc(L('图标库为空。上传一张图片，或直接把图片放进 data/topology-icons/ 目录后点「刷新」。', 'Library is empty. Upload an image, or drop files into data/topology-icons/ and click Refresh.'))}</div>`;
+      box.innerHTML = `<div class="topo-icon-lib-empty">${esc(L('图标库为空。上传一张图片，或直接把 PNG/JPG/SVG 等图片放进 data/topology-icons/ 目录后点「刷新」。', 'Library is empty. Upload an image, or drop PNG/JPG/SVG files into data/topology-icons/ and click Refresh.'))}</div>`;
       return;
     }
     box.innerHTML = iconLib.map((it) => `
@@ -625,41 +625,54 @@
     const calcList = descendantsOf(node ? node.id : '');
     const calcSelected = Array.isArray(node && node.calcFrom) ? node.calcFrom : [];
     const calcRows = calcList.map(({ node: d, depth }) => `<label class="calc-opt" style="padding-left:${Math.min(depth, 6) * 12}px"><input type="checkbox" class="calc-chk" value="${esc(d.id)}"${calcSelected.includes(d.id) ? ' checked' : ''}><span>${esc(d.name)}</span><small>${esc(d.iface || typeLabel(d.type))}</small></label>`).join('');
-    const body = `<div class="form-row"><label>${esc(L('名称', 'Name'))} <span class="req">*</span></label><input id="tnName" type="text" maxlength="48" value="${esc(node ? node.name : '')}"></div>
-      <div class="form-row"><label>${esc(L('类型', 'Type'))}</label><select id="tnType">${TYPES.map((tp) => `<option value="${tp}"${node && node.type === tp ? ' selected' : ''}>${esc(typeLabel(tp))}</option>`).join('')}</select></div>
-      <div class="form-row"><label>${esc(L('IP / 地址', 'IP / address'))}</label><input id="tnIp" type="text" maxlength="64" value="${esc(node ? node.ip : '')}"></div>
-      <div class="form-row"><label>${esc(L('层级关系', 'Hierarchy'))}</label><div><select id="tnRelation" style="max-width:220px">
-        <option value="child"${relationDefault === 'child' ? ' selected' : ''}>${esc(L('作为它的下级（它 → 本设备）', 'Child of selected device'))}</option>
-        <option value="parent"${relationDefault === 'parent' ? ' selected' : ''}>${esc(L('作为它的上级（本设备 → 它）', 'Parent of selected device'))}</option>
-        <option value="top"${relationDefault === 'top' ? ' selected' : ''}>${esc(L('独立顶层', 'Standalone top level'))}</option>
-      </select><p class="form-hint">${esc(L('选择「上级」可把现有设备挂到新设备下面，例如给主路由加光猫', 'Choose "Parent" to put the selected device under the new one (e.g. ONT above the router)'))}</p></div></div>
-      <div class="form-row"><label>${esc(L('目标设备', 'Target device'))}</label><select id="tnParent">${parentOpts}</select></div>
-      <div class="form-row"><label>${esc(L('上级端口', 'Parent port'))}</label><input id="tnParentPort" type="text" maxlength="32" list="tnKnownPorts" value="${esc(node ? node.parentPort || '' : '')}" placeholder="${esc(L('接在上级设备的哪个口', 'Which upstream port'))}"><datalist id="tnKnownPorts">${((parentNode && parentNode.ports) || []).map((p) => `<option value="${esc(p)}"></option>`).join('')}</datalist></div>
-      <div class="form-row"><label>${esc(L('本机网口', 'Local ports'))}</label><div><input id="tnPorts" type="text" maxlength="400" value="${esc(portsText)}" placeholder="ether1, ether2, ..."><p class="form-hint">${esc(L('逗号分隔，用于登记端口与下挂设备的连接', 'Comma-separated ports'))}</p></div></div>
-      <div class="form-row"><label>${esc(L('本层排序', 'Order in level'))}</label><div><input id="tnOrder" type="number" min="1" max="999" style="width:110px" value="${node && Number(node.order) > 0 ? Number(node.order) : ''}" placeholder="1"><p class="form-hint">${esc(L('从 1 开始，仅决定同一层级内的左右顺序；留空则排在已编号设备之后', 'Starts at 1; controls left-to-right order within the same level. Blank sorts after numbered devices.'))}</p></div></div>
-      <div class="form-row"><label>${esc(L('流量计算模式', 'Traffic calculation'))}</label><div>
-        <p class="form-hint">${esc(L('光猫/交换机等无法直接采集时，可多选下级设备，按其速率之和显示；勾选有包含关系的设备会自动互斥。', 'When a device cannot be measured directly, select downstream devices to sum their rates. Overlapping selections are mutually exclusive.'))}</p>
-        <div class="calc-list">${calcRows || `<div class="form-hint">${esc(L('该设备暂无下级设备', 'No downstream devices yet'))}</div>`}</div>
-      </div></div>
-      <div class="form-row"><label>${esc(L('点击动画', 'Click animation'))}</label><div><select id="tnAnim">${ANIMS.map((a) => `<option value="${a}"${(node && (node.anim || 'none') || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select><p class="form-hint">${esc(L('点击此设备时触发；持续到点击另一台设备，「无」表示只选中', 'Played on click until another device is clicked; None selects only'))}</p></div></div>
-      <div class="form-row"><label>${esc(L('设备图标', 'Device icon'))}</label><div class="topo-icon-picker">
-        <div class="topo-icon-current">
-          <img id="tnIconPreview" class="topo-icon-preview" ${iconUrl ? `src="${esc(iconUrl)}"` : 'hidden'} alt="preview">
-          <div class="topo-icon-current-txt"><b id="tnIconLabel">${esc(iconLabel || L('未选择（显示类型图标）', 'None (type badge shown)'))}</b>
-            <small>${esc(L('同一个图标可给多台设备复用，无需重复上传', 'One icon can be reused by many devices — no duplicate uploads'))}</small></div>
-          <button class="btn btn-sm" id="tnIconClear" type="button">${esc(L('移除图标', 'Remove icon'))}</button>
+    const section = (num, title, sub, inner) => `<section class="te-sec"><div class="te-sec-head"><span class="te-sec-num">${num}</span><div><h4>${esc(title)}</h4><p>${esc(sub)}</p></div></div><div class="te-sec-body">${inner}</div></section>`;
+    const field = (label, ctrl, hint) => `<div class="te-field"><label>${esc(label)}</label>${ctrl}${hint ? `<div class="te-hint">${esc(hint)}</div>` : ''}</div>`;
+    const body = `<div class="topo-editor">
+      ${section('1', L('基本信息', 'Basic info'), L('名称、类型与地址', 'Name, type and address'), `
+        ${field(L('名称', 'Name') + ' *', `<input id="tnName" type="text" maxlength="48" value="${esc(node ? node.name : '')}" placeholder="${esc(L('设备名称', 'Device name'))}">`)}
+        <div class="te-grid-2">
+          ${field(L('类型', 'Type'), `<select id="tnType">${TYPES.map((tp) => `<option value="${tp}"${node && node.type === tp ? ' selected' : ''}>${esc(typeLabel(tp))}</option>`).join('')}</select>`)}
+          ${field(L('IP / 地址', 'IP / address'), `<input id="tnIp" type="text" maxlength="64" value="${esc(node ? node.ip : '')}" placeholder="192.168.1.1">`)}
+        </div>`)}
+      ${section('2', L('层级与连接', 'Hierarchy & links'), L('决定设备在拓扑中的位置与连线', 'Where the device sits and how it connects'), `
+        ${field(L('层级关系', 'Hierarchy'), `<select id="tnRelation">
+          <option value="child"${relationDefault === 'child' ? ' selected' : ''}>${esc(L('作为目标设备的下级', 'Child of selected device'))}</option>
+          <option value="parent"${relationDefault === 'parent' ? ' selected' : ''}>${esc(L('作为目标设备的上级', 'Parent of selected device'))}</option>
+          <option value="top"${relationDefault === 'top' ? ' selected' : ''}>${esc(L('独立顶层', 'Standalone top level'))}</option>
+        </select>`, L('选择「上级」可把现有设备挂到新设备下面，例如给主路由加光猫', 'Choose "Parent" to put a device under this one (e.g. ONT above router)'))}
+        <div class="te-grid-2">
+          ${field(L('目标设备', 'Target device'), `<select id="tnParent">${parentOpts}</select>`)}
+          ${field(L('上级端口', 'Parent port'), `<input id="tnParentPort" type="text" maxlength="32" list="tnKnownPorts" value="${esc(node ? node.parentPort || '' : '')}" placeholder="${esc(L('接在上级的哪个口', 'Upstream port'))}"><datalist id="tnKnownPorts">${((parentNode && parentNode.ports) || []).map((p) => `<option value="${esc(p)}"></option>`).join('')}</datalist>`)}
         </div>
-        <div class="topo-icon-lib-head"><span>${esc(L('图标库', 'Icon library'))}<small> · ${esc(L('点击选择；也可把图片直接放进 data/topology-icons/', 'Click to pick; files dropped into data/topology-icons/ also appear'))}</small></span>
-          <button class="btn btn-sm" id="tnIconRefresh" type="button">${esc(L('刷新', 'Refresh'))}</button></div>
-        <div class="topo-icon-lib" id="tnIconLib"><div class="topo-icon-lib-empty">${esc(L('加载中…', 'Loading…'))}</div></div>
-        <div class="topo-icon-upload">
-          <input id="tnIconName" type="text" maxlength="40" placeholder="${esc(L('图标名称（可选，如 iPhone）', 'Icon name (optional, e.g. iPhone)'))}">
-          <label class="btn btn-sm" for="tnIconFile">＋ ${esc(L('上传新图标', 'Upload new'))}</label>
-          <input id="tnIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-          <span class="topo-hint">${esc(L('PNG/JPEG/WebP/GIF，<900KB；内容相同的图片自动复用，不会重复保存', 'PNG/JPEG/WebP/GIF, <900KB; identical images are reused instead of stored twice'))}</span>
-        </div>
-      </div></div>
-      <div class="form-row"><label>${esc(L('备注', 'Note'))}</label><input id="tnNote" type="text" maxlength="120" value="${esc(node ? node.note : '')}"></div>`;
+        <div class="te-grid-2">
+          ${field(L('本机网口', 'Local ports'), `<input id="tnPorts" type="text" maxlength="400" value="${esc(portsText)}" placeholder="ether1, ether2, ...">`, L('逗号分隔，用于登记端口与下挂连接', 'Comma-separated port list'))}
+          ${field(L('本层排序', 'Order in level'), `<input id="tnOrder" type="number" min="1" max="999" value="${node && Number(node.order) > 0 ? Number(node.order) : ''}" placeholder="1">`, L('同层左右顺序，留空排最后', 'Left-to-right order; blank sorts last'))}
+        </div>`)}
+      ${section('3', L('流量与动画', 'Traffic & animation'), L('无法直采时可用下级速率求和', 'Sum downstream rates when direct measurement is unavailable'), `
+        ${field(L('流量计算模式', 'Traffic calculation'), `<div class="calc-list">${calcRows || `<div class="form-hint">${esc(L('该设备暂无下级设备', 'No downstream devices yet'))}</div>`}</div>`, L('多选下级设备按其速率之和显示；有包含关系的勾选会自动互斥', 'Select downstream devices to sum their rates; overlapping picks are mutually exclusive'))}
+        ${field(L('点击动画', 'Click animation'), `<select id="tnAnim">${ANIMS.map((a) => `<option value="${a}"${(node && (node.anim || 'none') || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select>`, L('点击此设备时触发；「无」表示只选中', 'Played on click; None selects only'))}`)}
+      ${section('4', L('设备图标', 'Device icon'), L('可从图标库复用，或直接上传', 'Reuse from library or upload a new one'), `
+        <div class="topo-icon-picker">
+          <div class="topo-icon-current">
+            <img id="tnIconPreview" class="topo-icon-preview" ${iconUrl ? `src="${esc(iconUrl)}"` : 'hidden'} alt="preview">
+            <div class="topo-icon-current-txt"><b id="tnIconLabel">${esc(iconLabel || L('未选择（显示类型图标）', 'None (type badge shown)'))}</b>
+              <small>${esc(L('同一个图标可给多台设备复用，无需重复上传', 'One icon can be reused by many devices'))}</small></div>
+            <button class="btn btn-sm" id="tnIconClear" type="button">${esc(L('移除', 'Remove'))}</button>
+          </div>
+          <div class="topo-icon-lib-head"><span>${esc(L('图标库', 'Icon library'))}<small> · ${esc(L('点击选择，或把图片放进 data/topology-icons/ 后刷新', 'Click to pick; drop files into data/topology-icons/ then refresh'))}</small></span>
+            <button class="btn btn-sm" id="tnIconRefresh" type="button">${esc(L('刷新', 'Refresh'))}</button></div>
+          <div class="topo-icon-lib" id="tnIconLib"><div class="topo-icon-lib-empty">${esc(L('加载中…', 'Loading…'))}</div></div>
+          <div class="topo-icon-upload">
+            <input id="tnIconName" type="text" maxlength="40" placeholder="${esc(L('图标名称（可选，如 iPhone）', 'Icon name (optional, e.g. iPhone)'))}">
+            <label class="btn btn-sm" for="tnIconFile">＋ ${esc(L('上传新图标', 'Upload new'))}</label>
+            <input id="tnIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" hidden>
+            <span class="topo-hint">${esc(L('PNG/JPEG/WebP/GIF/SVG，<900KB；内容相同的图片自动复用', 'PNG/JPEG/WebP/GIF/SVG, <900KB; identical images are reused'))}</span>
+          </div>
+        </div>`)}
+      ${section('5', L('备注', 'Note'), L('可选，方便自己识别', 'Optional, for your own reference'), `
+        <input id="tnNote" type="text" maxlength="120" value="${esc(node ? node.note : '')}" placeholder="${esc(L('例如：放在客厅电视柜', 'e.g. living room TV cabinet'))}">
+      `)}
+    </div>`;
     const foot = `<button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="tnSave" type="button">${esc(L('保存', 'Save'))}</button>`;
     openModal(isNew ? L('添加网络设备', 'Add network device') : L('编辑网络设备', 'Edit network device'), body, foot, () => {
       document.querySelectorAll('.calc-chk').forEach((ch) => {
