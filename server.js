@@ -1512,7 +1512,11 @@ function appliedVersion() {
   try { return String(JSON.parse(fs.readFileSync(path.join(__dirname, 'version.json'), 'utf8')).version || ''); } catch (e) { return ''; }
 }
 function runtimeInfo() {
-  let version = String(process.env.ROS_CENTER_VERSION || '').trim() || appliedVersion();
+  /* ROS_CENTER_VERSION 历史遗留可能是 "latest"（旧版自更新把 tag 当版本写入容器环境），
+     它不是版本号，必须忽略，否则界面当前版本永远显示 latest。只接受 x.y.z 形态。 */
+  let envVer = String(process.env.ROS_CENTER_VERSION || '').trim();
+  if (!/^v?\d+(\.\d+){1,3}$/i.test(envVer)) envVer = '';
+  let version = envVer || appliedVersion();
   if (!version) { try { version = String(require('./package.json').version || ''); } catch (e) { /* no package.json */ } }
   const docker = !DESKTOP && (!!process.env.DOCKER_IMAGE || fs.existsSync('/.dockerenv'));
   return {
@@ -1920,7 +1924,14 @@ const server = http.createServer(async (req, res) => {
               ? n.calcFrom.slice(0, 64).map((x) => String(x).slice(0, 80)).filter(Boolean) : [],
             ports: Array.isArray(n && n.ports)
               ? n.ports.slice(0, 64).map((p) => String(p).trim().slice(0, 32)).filter(Boolean) : [],
-            icon: /^\/api\/topology\/icon\/[A-Za-z0-9_-]+\.(png|jpe?g|webp|gif)$/i.test(String((n && n.icon) || '')) ? n.icon : '',
+            /* 与图标库文件名规则一致：允许中文/空格与 svg；用 decodeURIComponent 兼容编码后的 URL */
+            icon: (() => {
+              const raw = String((n && n.icon) || ''), prefix = '/api/topology/icon/';
+              if (!raw.startsWith(prefix)) return '';
+              let name = raw.slice(prefix.length);
+              try { name = decodeURIComponent(name); } catch (e) { /* 保留原值校验 */ }
+              return ICON_NAME_RE.test(name) ? prefix + name : '';
+            })(),
             note: String((n && n.note) || '').slice(0, 120),
             /* 同一层级从 1 开始的显示顺序 */
             order: n && Number.isFinite(Number(n.order)) ? Math.max(0, Math.min(999, Math.round(Number(n.order)))) : 0,

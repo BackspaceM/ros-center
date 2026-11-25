@@ -246,7 +246,10 @@ function containerConfig(inspect, imageRef, opts = {}) {
     if (i >= 0) env[i] = key + '=' + value; else env.push(key + '=' + value);
   };
   if (opts.digest) setEnv('ROS_CENTER_DIGEST', opts.digest);
-  if (opts.version) setEnv('ROS_CENTER_VERSION', opts.version);
+  /* 只写入 x.y.z 数字版本号；旧版可能把 "latest" 当版本写入导致界面显示 latest */
+  if (opts.version && /^v?\d+(\.\d+){1,3}$/i.test(String(opts.version))) {
+    setEnv('ROS_CENTER_VERSION', String(opts.version).replace(/^v/i, ''));
+  }
 
   const host = pruneUndefined({
     Binds: binds.length ? binds : undefined,
