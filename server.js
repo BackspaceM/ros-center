@@ -1535,7 +1535,9 @@ async function autoTopology(dev) {
     const mac = macKey(r['mac-address']);
     const name = String(r.identity || r.address || mac.slice(0, 8) || '邻居设备');
     const hint = name + ' ' + String(r.platform || '') + ' ' + String(r.interface || '');
-    const type = /ap|wifi|wlan|cap|groove/i.test(hint) ? 'ap' : /nas|linux|server|storage/i.test(hint) ? 'nas' : 'switch';
+    const type = /dns|unbound|bind|adguard|pihole/i.test(hint) ? 'dns'
+      : /proxy|squid|clash|mitm/i.test(hint) ? 'proxy'
+      : /ap|wifi|wlan|cap|groove/i.test(hint) ? 'ap' : /nas|linux|server|storage/i.test(hint) ? 'nas' : 'switch';
     const node = { id: 'auto_n_' + (mac || encodeURIComponent(name)), name, type,
       ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
       parent: 'root', parentPort: String(r.interface || ''),
@@ -1550,7 +1552,9 @@ async function autoTopology(dev) {
     const mac = macKey(r['mac-address']);
     if (mac && byMac.has(mac)) continue;
     const name = String(r['host-name'] || r.address || mac.slice(0, 8) || '终端');
-    const type = /ap|wifi|wlan/i.test(name) ? 'ap' : /nas|server|storage/i.test(name) ? 'nas' : 'client';
+    const type = /dns|unbound|adguard|pihole/i.test(name) ? 'dns'
+      : /proxy|squid|clash/i.test(name) ? 'proxy'
+      : /ap|wifi|wlan/i.test(name) ? 'ap' : /nas|server|storage/i.test(name) ? 'nas' : 'client';
     nodes.push({ id: 'auto_l_' + (mac || encodeURIComponent(name)), name, type,
       ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
       parent: (mac && byMac.get(mac)) || 'root', parentPort: '',

@@ -6,10 +6,10 @@
    - 双击设备 = 编辑该设备本身（同 id 覆盖，绝不会新增副本）；编辑弹窗可填「本层排序」
    - 点击设备播放其绑定的动画（节点脉冲/链路流动/涟漪扩散），显示实时上下行速率 */
 (function () {
-  const TYPES = ['router', 'switch', 'ap', 'nas', 'client', 'other'];
-  const TYPE_ZH = { router: '路由器', switch: '交换机', ap: '无线 AP', nas: 'NAS / 存储', client: '终端', other: '其它' };
-  const TYPE_EN = { router: 'Router', switch: 'Switch', ap: 'Access point', nas: 'NAS / storage', client: 'Client', other: 'Other' };
-  const BADGE = { router: 'R', switch: 'S', ap: 'A', nas: 'N', client: 'C', other: '?' };
+  const TYPES = ['router', 'switch', 'ap', 'nas', 'dns', 'proxy', 'client', 'other'];
+  const TYPE_ZH = { router: '路由器', switch: '交换机', ap: '无线 AP', nas: 'NAS / 存储', dns: 'DNS 服务器', proxy: '代理服务器', client: '终端', other: '其它' };
+  const TYPE_EN = { router: 'Router', switch: 'Switch', ap: 'Access point', nas: 'NAS / storage', dns: 'DNS server', proxy: 'Proxy server', client: 'Client', other: 'Other' };
+  const BADGE = { router: 'R', switch: 'S', ap: 'A', nas: 'N', dns: 'D', proxy: 'P', client: 'C', other: '?' };
   const IPV4_TEST = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
   const ANIMS = ['none', 'pulse', 'flow', 'ripple'];
   const ANIM_ZH = { none: '无（只选中）', pulse: '节点脉冲', flow: '链路流动', ripple: '涟漪扩散' };
@@ -352,6 +352,7 @@
         ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="24"/>' : ''}
         <rect class="node-card type-${esc(n.type)}" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="8"/>
         ${icon}
+        <circle class="topo-type-dot type-${esc(n.type)}" cx="${ix + 7}" cy="${iy + 7}" r="3.6"/>
         <rect class="topo-rate-divider" x="${NODE_W / 2 - RATE_W - 2}" y="${-NODE_H / 2 + 10}" width="1" height="${NODE_H - 20}"/>
         <text class="topo-name" x="${cx}" y="-16" text-anchor="middle">${esc(name)}</text>
         <text class="topo-sub" x="${cx}" y="-2" text-anchor="middle">${esc(String(n.ip || typeLabel(n.type)).slice(0, 12))}</text>
@@ -377,7 +378,7 @@
     const meta = $('topoMeta'), legendBox = $('topoLegend'); if (!meta || !data) return;
     const sel = selectedId && map.get(selectedId);
     const counts = (data.discovery || {}).counts || {};
-    const legend = ['router', 'switch', 'ap', 'nas', 'client'].map((tp) => `<span><i class="lg-${tp}"></i>${esc(typeLabel(tp))}</span>`).join('');
+    const legend = ['router', 'switch', 'ap', 'nas', 'dns', 'proxy', 'client'].map((tp) => `<span><i class="lg-${tp}"></i>${esc(typeLabel(tp))}</span>`).join('');
     if (legendBox) legendBox.innerHTML = legend;
     meta.innerHTML = `<span>${esc(L('自动发现', 'Discovered'))} ${Number(counts.neighbors) || 0} ${esc(L('邻居', 'nb'))} · ${Number(counts.leases) || 0} ${esc(L('租约', 'leases'))}</span>
       <span>${esc(L('自定义', 'Custom'))} ${(data.custom || []).filter((n) => !n.deleted).length}</span>

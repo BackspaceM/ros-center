@@ -82,8 +82,7 @@ function renderDashboard() {
     <div class="grid-2 dash-extra">
       ${dashLinksBlock(d)}
       ${dashQualityBlock()}
-    </div>
-    ${dashSecurityBlock()}`;
+    </div>`;
   if (topoKeep) topoKeep.remove();
 
   drawLineChart('dashChart', 'dashTip', state.points, [
@@ -177,26 +176,8 @@ function dashQualityBlock() {
     <div class="panel-head"><div><h2>${t('link_quality_title')}</h2><p class="sub">${t('link_quality_sub')}</p></div></div>
     <div class="panel-body dash-mini-body">${body}</div></div>`;
 }
-function dashSecurityBlock() {
-  const data = state.security, rows = (data && data.rows) || [];
-  const body = !data ? `<div class="empty">${t('loading')}</div>` : `<div class="table-scroll"><table class="mini-table">
-    <thead><tr><th>${t('th_chain')}</th><th>${L('动作', 'Action')}</th><th>${t('th_rule')}</th><th class="num">${t('th_hits')}</th><th class="num">${t('th_bytes')}</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr><td>${esc(r.chain)}</td><td><span class="tag ${r.action === 'reject' ? 'amber' : 'red'}">${esc(r.action)}</span></td>
-      <td>${esc(r.comment || r.interface || r.id)}</td><td class="num">${num(r.packets).toLocaleString()}</td><td class="num">${fmtBytes(r.bytes)}</td></tr>`).join('')
-      || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
-  return `<div class="panel" data-block="security">
-    <div class="panel-head"><div><h2>${t('security_title')}</h2><p class="sub">${t('security_sub')}</p></div>
-      <span class="tag">${data ? num(data.total) + ' ' + L('条规则', 'rules') : '—'}</span></div>
-    <div class="panel-body dash-mini-body">${body}</div></div>`;
-}
 async function refreshDashExtras() {
   const now = Date.now();
-  if (!state.securityLoading && now - state.securityAt > 30000) {
-    state.securityLoading = true;
-    try { state.security = await api('/api/security'); } catch (e) { state.security = { error: e.message, rows: [], total: 0 }; }
-    state.securityAt = Date.now(); state.securityLoading = false;
-    if (state.section === 'dashboard') renderDashboard();
-  }
   if (!state.qualityLoading && now - state.qualityAt > 30000) {
     state.qualityLoading = true;
     try { state.quality = await api('/api/link-quality'); } catch (e) { state.quality = { error: e.message, rows: [] }; }
@@ -213,7 +194,6 @@ const DASH_BLOCKS = [
   ['iftypes', () => L('接口类型分布', 'Interface types')], ['topif', () => L('接口流量排行', 'Interface ranking')],
   ['topconn', () => L('连接流量排行', 'Connection ranking')],
   ['links', () => L('关键链路利用率', 'Link utilization')], ['quality', () => L('链路质量', 'Link quality')],
-  ['security', () => L('安全与策略状态', 'Security & policy')],
 ];
 const dashPrefsKey = () => 'rosCenter.dash.' + (state.deviceId || '');
 function dashPrefs() {

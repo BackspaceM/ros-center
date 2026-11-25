@@ -163,7 +163,7 @@ function renderConfigPage(sec) {
         ${writable ? `<button class="btn ghost-danger" id="btnDelete">${t('delete')}</button>` : ''}
       </div>
     </div>
-    ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
+    ${state.configDemo ? `<div class="card" style="margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:var(--muted);background:var(--soft);border:1px solid var(--line)"><span class="tag amber" style="margin-right:8px">DEMO</span>${t('demo_mode_tip')}</div>` : ''}
     <div class="panel">
       <div class="table-tools">
         <input type="search" id="rowSearch" placeholder="${t('search')}…" value="${esc(state.rowFilter)}">
@@ -222,7 +222,7 @@ function renderSingletonPage(sec) {
       <div class="page-actions">
         ${writable ? `<button class="btn primary" id="sioEdit">${t('edit')}</button>` : ''}
       </div></div>
-    ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
+    ${state.configDemo ? `<div class="card" style="margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:var(--muted);background:var(--soft);border:1px solid var(--line)"><span class="tag amber" style="margin-right:8px">DEMO</span>${t('demo_mode_tip')}</div>` : ''}
     <div class="panel"><div class="panel-head"><div><h2>${esc(tx(sec.title))}</h2><p class="sub">${t('singleton_hint')}</p></div>
       ${demoBadge('sioModeTag')}</div>
       <div class="panel-body"><div class="kv-grid" id="sioBody"><div class="empty">${t('loading')}</div></div></div></div>`;
@@ -440,6 +440,17 @@ function toolFeedHtml(rows, kind) {
     return `<div class="tool-feed-row"><time>${esc(String(r.time || ''))}</time><span class="tag ${cls}">${esc(String(r.topics || ''))}</span><span class="tool-feed-msg">${esc(msg)}</span></div>`;
   }).join('')}</div>`;
 }
+function toolSecurityHtml(data) {
+  const count = $('toolSecurityCount');
+  if (count) count.textContent = data ? num(data.total) + ' ' + L('条规则', 'rules') : '—';
+  if (!data) return `<div class="empty">${t('loading')}</div>`;
+  const rows = data.rows || [];
+  return `<div class="table-scroll"><table class="mini-table">
+    <thead><tr><th>${t('th_chain')}</th><th>${L('动作', 'Action')}</th><th>${t('th_rule')}</th><th class="num">${t('th_hits')}</th><th class="num">${t('th_bytes')}</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr><td>${esc(r.chain)}</td><td><span class="tag ${r.action === 'reject' ? 'amber' : 'red'}">${esc(r.action)}</span></td>
+      <td>${esc(r.comment || r.interface || r.id)}</td><td class="num">${num(r.packets).toLocaleString()}</td><td class="num">${fmtBytes(r.bytes)}</td></tr>`).join('')
+      || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
+}
 async function refreshToolsPanels() {
   try {
     const d = await api('/api/config?section=logs');
@@ -451,6 +462,13 @@ async function refreshToolsPanels() {
     const ev = $('toolEventFeed'), cf = $('toolChangeFeed');
     if (ev) ev.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     if (cf) cf.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+  try {
+    const box = $('toolSecurityFeed');
+    if (box) box.innerHTML = toolSecurityHtml(await api('/api/security'));
+  } catch (e) {
+    const box = $('toolSecurityFeed');
+    if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
   try {
     const d = await api('/api/backup/status');
@@ -497,7 +515,10 @@ function renderTools() {
         <span class="tag green">● LIVE</span></div><div class="panel-body" id="toolEventFeed"></div></div>
       <div class="panel"><div class="panel-head"><div><h2>${t('config_changes_title')}</h2><p class="sub">${t('config_changes_sub')}</p></div></div>
         <div class="panel-body" id="toolChangeFeed"></div></div>
-    </div>`;
+    </div>
+    <div class="panel" style="margin-top:14px"><div class="panel-head"><div><h2>${t('security_title')}</h2><p class="sub">${t('security_sub')}</p></div>
+      <span class="tag" id="toolSecurityCount">—</span></div>
+      <div class="panel-body dash-mini-body" id="toolSecurityFeed"></div></div>`;
   /* ICMP 逐条流式诊断 */
   const stopPing = () => {
     if (window.__rosPingSource) { try { window.__rosPingSource.close(); } catch (e) { /* ignore */ } window.__rosPingSource = null; }
