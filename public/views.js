@@ -561,7 +561,8 @@ function drawLineChart(canvasId, tipId, data, series, fmt) {
   /* 悬停重绘时只在尺寸真正变化时才改画布位图，固定 CSS 尺寸，避免整块图抖动 */
   const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
   if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
-  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  /* CSS 尺寸交给样式表的 100% 控制，绝不写死像素：自适应高度的容器（连接线图）
+     写死像素会被 canvas 反向撑大，悬停/滚动重绘时形成反馈循环导致图片被不断拉长。 */
   const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
   if (!data || data.length < 2) return;
   const pad = { l: 58, r: 12, t: 12, b: 24 };

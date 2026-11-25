@@ -351,13 +351,13 @@
       const hasRate = !!(rate.rxBps || rate.txBps);
       const upText = hasRate ? '↑' + fmtRate(rate.txBps) : '';
       const downText = hasRate ? '↓' + fmtRate(rate.rxBps) : '';
-      /* 无流量用灰色「空闲」小标签，比空白更容易判断设备是否在线 */
-      const idleLabel = hasRate ? '' : `<g class="topo-idle"><rect x="${NODE_W / 2 - RATE_W + 6}" y="-8" width="28" height="16" rx="8"/><text x="${NODE_W / 2 - RATE_W + 20}" y="3" text-anchor="middle">${esc(L('空闲', 'Idle'))}</text></g>`;
+      /* 空闲标签始终渲染，由 paintRates() 按实时速率切换显隐（避免首次渲染后不再更新） */
+      const idleLabel = `<g class="topo-idle" style="display:${hasRate ? 'none' : ''}"><rect x="${NODE_W / 2 - RATE_W + 6}" y="-8" width="28" height="16" rx="8"/><text x="${NODE_W / 2 - RATE_W + 20}" y="3" text-anchor="middle">${esc(L('空闲', 'Idle'))}</text></g>`;
       const cx = (-NODE_W / 2 + ICON_W) + (NODE_W - ICON_W - RATE_W) / 2;
-      /* 类型色灯光：从卡片顶部内侧射下、尾端到 icon 上方，宽度与 icon 一致；
-         强度按实时速率在 paintRates() 里更新（空闲微微一束，有流量按 log 比例增强）。 */
-      const lightX = ix, lightTop = -NODE_H / 2 + 1, lightBottom = -ICON_SZ / 2 + 1;
-      const light = `<path class="topo-light" d="M ${lightX} ${lightTop} L ${lightX + ICON_SZ} ${lightTop} L ${lightX + ICON_SZ - 3} ${lightBottom} L ${lightX + 3} ${lightBottom} Z" fill="url(#topoLight-${esc(n.type)})" opacity="${lightIntensity(rate)}"/>`;
+      /* 类型色灯光：手电筒式——顶点在卡片顶部内侧、icon 水平中心，向下扩散到 icon 上方、
+         底边宽度与 icon 一致；强度按实时速率在 paintRates() 里更新。 */
+      const lightApexX = ix + ICON_SZ / 2, lightTop = -NODE_H / 2 + 1, lightBottom = -ICON_SZ / 2 + 1;
+      const light = `<path class="topo-light" d="M ${lightApexX} ${lightTop} L ${lightApexX + ICON_SZ / 2} ${lightBottom} L ${lightApexX - ICON_SZ / 2} ${lightBottom} Z" fill="url(#topoLight-${esc(n.type)})" opacity="${lightIntensity(rate)}"/>`;
       const mac = String(n.mac || '').toUpperCase().slice(0, 15) || typeLabel(n.type);
       const fx = activeFx && activeFx.id === n.id ? ' fx-' + activeFx.type : '';
       nodeHtml.push(`<g class="topo-node type-${esc(n.type)} ${n.auto ? 'auto' : 'custom'}${selectedId === n.id ? ' selected' : ''}${fx}" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})">
@@ -485,11 +485,14 @@
     const stage = $('topoStage'); if (!stage) return;
     stage.querySelectorAll('.topo-node').forEach((g) => {
       const n = map.get(g.dataset.id); if (!n) return;
-      const up = g.querySelector('.topo-rate.up'), down = g.querySelector('.topo-rate.down'), light = g.querySelector('.topo-light');
+      const up = g.querySelector('.topo-rate.up'), down = g.querySelector('.topo-rate.down');
+      const light = g.querySelector('.topo-light'), idle = g.querySelector('.topo-idle');
       const r = effectiveRate(n.id);
       const has = !!(r.rxBps || r.txBps);
       if (up) up.textContent = has ? '↑' + fmtRate(r.txBps) : '';
       if (down) down.textContent = has ? '↓' + fmtRate(r.rxBps) : '';
+      /* 空闲标签与速率文字同步切换：有流量隐藏空闲，无流量显示空闲并清空速率，避免空白或残留 */
+      if (idle) idle.style.display = has ? 'none' : '';
       if (light) light.setAttribute('opacity', String(lightIntensity(r)));
     });
     /* 连线流速由下级设备的下行速率决定，与父节点是否新增无关 */

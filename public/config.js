@@ -7,6 +7,8 @@ const macKeyOf = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A
 const ipKeyOf = (v) => String(v == null ? '' : v).split('/')[0].trim();
 const nameKeyOf = (v) => String(v == null ? '' : v).toLowerCase().trim();
 let topoIconLookup = { device: '', at: 0, byMac: new Map(), byIp: new Map(), byName: new Map() };
+/* DHCP 租约复用拓扑设备的实时上下行：按 IP / 接口建速率索引，随配置表自动刷新 */
+let leaseRates = { device: '', at: 0, byIp: new Map(), byIface: new Map() };
 
 async function loadTopoIcons(sec) {
   const need = (sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key));
@@ -72,6 +74,8 @@ const colsKey = (sec) => 'rosCenter.cols.' + (state.deviceId || '') + '.' + sec.
 function availableColumns(sec) {
   const keys = (sec.fields || []).map((f) => f.key).filter((k) => k !== '.id');
   if ((sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key)) && !keys.includes('topoName')) keys.push('topoName');
+  /* DHCP 租约：可复用拓扑设备的实时上下行 */
+  if (sec.id === 'dhcpLeases') for (const k of ['rateUp', 'rateDown']) if (!keys.includes(k)) keys.push(k);
   return keys;
 }
 function visibleColumns(sec) {
@@ -132,11 +136,36 @@ function bindHeaderDrag(sec) {
   });
 }
 
+/* DHCP 租约：拉取拓扑开启 IP 测速的节点速率 + 接口实时速率，供「上行/下行」列复用 */
+async function loadLeaseRates(sec) {
+  if (sec.id !== 'dhcpLeases') return;
+  const dev = state.deviceId || '';
+  if (leaseRates.device === dev && Date.now() - leaseRates.at < 1200) return;
+  const [ipd, snap] = await Promise.all([
+    api('/api/ip-rates').catch(() => ({ rows: [] })),
+    api('/api/snapshot').catch(() => ({ ifaces: [] })),
+  ]);
+  const byIp = new Map(), byIface = new Map();
+  for (const r of (ipd.rows || [])) byIp.set(ipKeyOf(r.ip), { rxBps: r.rxBps || 0, txBps: r.txBps || 0 });
+  for (const i of (snap.ifaces || [])) byIface.set(String(i.name || ''), { rxBps: i.rxBps || 0, txBps: i.txBps || 0 });
+  leaseRates = { device: dev, at: Date.now(), byIp, byIface };
+}
+function leaseRateFor(row) {
+  const n = topoNodeFor(row, row['mac-address']);
+  if (!n) return null;
+  if (n.ipRate && n.ip) return leaseRates.byIp.get(ipKeyOf(n.ip)) || null;
+  for (const k of [n.iface, n.parentPort]) {
+    const key = String(k || '').trim(); if (!key) continue;
+    const r = leaseRates.byIface.get(key);
+    if (r && (r.rxBps || r.txBps)) return r;
+  }
+  return null;
+}
 async function loadRows(sec) {
   const d = await api('/api/config?section=' + encodeURIComponent(sec.id));
   state.rows = d.rows || []; state.configDemo = !!d.demo; state.configOffline = !!d.offline;
   if (sec.id === 'connections') state.connRows = state.rows;
-  await loadTopoIcons(sec);
+  await Promise.all([loadTopoIcons(sec), loadLeaseRates(sec)]);
   return state.rows;
 }
 /* 只保留 demo 提示；LIVE / OFFLINE 徽标不再显示 */
@@ -244,11 +273,13 @@ function paintSingletonBody(sec) {
   }).join('');
 }
 
-function numCol(key, sec) { return /mac[-_]?address|bytes|port|mtu|distance|priority|time$|count/i.test(key) && sec.fields.find((f) => f.key === key)?.type !== 'bool'; }
+function numCol(key, sec) { return /mac[-_]?address|bytes|port|mtu|distance|priority|time$|count|^rate(Up|Down)$/i.test(key) && sec.fields.find((f) => f.key === key)?.type !== 'bool'; }
 function fieldLabel(sec, key) {
   if (key === 'running') return L('运行', 'Running');
   if (key === '.id') return 'ID';
   if (key === 'topoName') return L('设备名', 'Device name');
+  if (key === 'rateUp') return L('上行', 'Upload');
+  if (key === 'rateDown') return L('下行', 'Download');
   const f = sec.fields.find((x) => x.key === key);
   return f ? tx(f.label) : key;
 }
@@ -332,6 +363,14 @@ function cellHtml(row, key, sec) {
     return n && n.name
       ? `<span class="topo-name-cell" title="${esc(n.name)}">${esc(n.name)}</span>`
       : '<span class="muted-cell">—</span>';
+  }
+  if ((key === 'rateUp' || key === 'rateDown') && sec && sec.id === 'dhcpLeases') {
+    const r = leaseRateFor(row);
+    if (!r) return '<span class="muted-cell">—</span>';
+    const bps = key === 'rateUp' ? r.txBps : r.rxBps;
+    const f = typeof fmtRate === 'function' ? fmtRate(bps || 0) : { v: String(bps || 0), u: 'B/s' };
+    const active = !!(bps && bps > 0);
+    return `<span class="lease-rate ${active ? (key === 'rateUp' ? 'up' : 'down') : ''}">${esc(f.v)}<small>${esc(f.u)}</small></span>`;
   }
   if (key === 'status' && sec && sec.id === 'dhcpLeases') {
     const bound = /bound/i.test(String(v || ''));
