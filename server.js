@@ -355,8 +355,19 @@ function ipRateTargets(dev) {
   return out;
 }
 function numBytes(v) {
-  const s = String(v == null ? '' : v).split('/');
-  return s.reduce((a, x) => a + (Number(String(x).trim()) || 0), 0);
+  /* RouterOS 各版本/主题可能返回 "12345"、"12 345"、"1,234" 或 "1.2MiB" */
+  return String(v == null ? '' : v).split('/').reduce((sum, part) => {
+    const s = String(part).trim().replace(/[,\s]/g, '');
+    const m = s.match(/^([\d.]+)\s*([kmgt]?i?b)?$/i);
+    if (!m) return sum;
+    let n = Number(m[1]) || 0;
+    const u = String(m[2] || '').toLowerCase();
+    if (u.startsWith('k')) n *= 1024;
+    else if (u.startsWith('m')) n *= 1048576;
+    else if (u.startsWith('g')) n *= 1073741824;
+    else if (u.startsWith('t')) n *= 1099511627776;
+    return sum + n;
+  }, 0);
 }
 async function pollIpRates() {
   const now = Date.now();
@@ -386,17 +397,46 @@ async function pollIpRates() {
     /* 只拉目标 IP 实际用到的地址族：纯 IPv4 时不查 IPv6 表，进一步降低路由器负载 */
     const need4 = targets.some((t) => !t.ip.includes(':'));
     const need6 = targets.some((t) => t.ip.includes(':'));
-    const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes,bytes';
-    let rows4 = [], rows6 = [];
+    /* 关键：v7 连接表没有 bytes 字段，把它写进 proplist 会让 print trap。
+       api.exec 对 trap 仍是 resolve，旧代码直接读空 re，于是所有 IP 速率为 0，
+       前端回退到同一个接口的总速率 —— 表现为「所有设备速率一模一样」。 */
+    const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes';
+    async function connectionRows(path) {
+      const run = async (words) => {
+        const r = await dev.api.exec(words);
+        if (r.status && r.status.type === 'trap') return { trap: r.status.message || 'connection print trapped', rows: [] };
+        return { trap: '', rows: r.re || [] };
+      };
+      const a = await run([path, props]);
+      /* 不支持 proplist / 返回空表：退回全字段（老版本 RouterOS） */
+      if (a.trap || !a.rows.length) {
+        const b = await run([path]);
+        if (!b.trap) return b.rows;
+      }
+      /* v6 只有 bytes：proplist 请求不到计数时再取一次全字段 */
+      if (a.rows.length && !a.rows.some((r) => r['orig-bytes'] !== undefined || r['repl-bytes'] !== undefined)) {
+        const b = await run([path]);
+        if (!b.trap && b.rows.length) return b.rows;
+      }
+      return a.rows;
+    }
+    let rows4 = [], rows6 = [], err = '';
     try {
       const jobs = [];
-      if (need4) jobs.push(dev.api.exec(['/ip/firewall/connection/print', props]));
-      if (need6) jobs.push(dev.api.exec(['/ipv6/firewall/connection/print', props]));
+      if (need4) jobs.push(connectionRows('/ip/firewall/connection/print'));
+      if (need6) jobs.push(connectionRows('/ipv6/firewall/connection/print'));
       const results = await Promise.all(jobs);
-      if (need4) rows4 = (results[0] && results[0].re) || [];
-      if (need6) rows6 = (results[(need4 ? 1 : 0)] && results[(need4 ? 1 : 0)].re) || [];
-    } catch (e) { continue; }
-    const totals = new Map();  // ip -> { up, down }
+      if (need4) rows4 = results[0] || [];
+      if (need6) rows6 = results[(need4 ? 1 : 0)] || [];
+      if (!rows4.length && !rows6.length) err = '连接表为空或读取失败，请检查路由权限与 FastTrack/连接计数';
+    } catch (e) { err = e.message || String(e); }
+    dev.ipRateError = err;
+    if (err) {
+      for (const tg of targets) dev.ipRates.set(tg.ip,
+        { rxBps: 0, txBps: 0, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id, connections: 0 });
+      continue;
+    }
+    const totals = new Map(), hits = new Map();  // ip -> { up, down } / 命中连接数
     for (const r of [...rows4, ...rows6]) {
       const src = ipOf(r['src-address']), dst = ipOf(r['dst-address']);
       const orig = numBytes(r['orig-bytes']), repl = numBytes(r['repl-bytes']);
@@ -405,11 +445,16 @@ async function pollIpRates() {
       if (srcIsTarget) {
         const x = totals.get(src) || { up: 0, down: 0 };
         x.up += orig || bytes; x.down += repl; totals.set(src, x);
+        hits.set(src, (hits.get(src) || 0) + 1);
       }
       if (dstIsTarget && dst !== src) {
         const x = totals.get(dst) || { up: 0, down: 0 };
         x.up += repl; x.down += orig || bytes; totals.set(dst, x);
+        hits.set(dst, (hits.get(dst) || 0) + 1);
       }
+    }
+    if (![...totals.values()].some((t) => t.up || t.down)) {
+      dev.ipRateError = '连接表有 ' + (rows4.length + rows6.length) + ' 条记录，但这些 IP 的字节计数为 0（常见于 FastTrack 未计入连接计数）';
     }
     const dt = Math.max(0.5, (now - (dev.ipRateAt || now - 1000)) / 1000);
     dev.ipRateAt = now;
@@ -420,7 +465,7 @@ async function pollIpRates() {
       /* 连接生灭会让总数回退，差值为负时按 0 处理，避免假速率 */
       const up = Math.max(0, t.up - prev.up), down = Math.max(0, t.down - prev.down);
       dev.ipRates.set(tg.ip, { rxBps: Math.round(down / dt), txBps: Math.round(up / dt),
-        rxBytes: t.down, txBytes: t.up, ts: now, name: tg.name, id: tg.id });
+        rxBytes: t.down, txBytes: t.up, ts: now, name: tg.name, id: tg.id, connections: hits.get(tg.ip) || 0 });
     }
     for (const k of [...dev.ipRatePrev.keys()]) if (!want.has(k)) dev.ipRatePrev.delete(k);
   }
@@ -764,6 +809,7 @@ class Device {
     this.ifaceTotals = new Map();
     this.ipRates = new Map();     // IP -> { rxBps, txBps, rxBytes, txBytes, ts }  拓扑按 IP 测速
     this.ipRatePrev = new Map();  // 上次连接表字节快照（用于求差值）
+    this.ipRateError = '';        // 连接表采集失败原因（在 IP 监控页提示，避免误以为速率为 0）
     this.demoTotal = new Map();
     this.demoDB = freshDemoDB();
     this.demoIdSeq = 100;
@@ -1398,7 +1444,8 @@ async function autoTopology(dev) {
     const hint = name + ' ' + String(r.platform || '') + ' ' + String(r.interface || '');
     const type = /ap|wifi|wlan|cap|groove/i.test(hint) ? 'ap' : /nas|linux|server|storage/i.test(hint) ? 'nas' : 'switch';
     const node = { id: 'auto_n_' + (mac || encodeURIComponent(name)), name, type,
-      ip: String(r.address || ''), parent: 'root', parentPort: String(r.interface || ''),
+      ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
+      parent: 'root', parentPort: String(r.interface || ''),
       ports: [], auto: true, note: String(r.platform || ''), iface: String(r.interface || '') };
     nodes.push(node);
     if (mac) byMac.set(mac, node.id);
@@ -2030,10 +2077,10 @@ const server = http.createServer(async (req, res) => {
       return { id: t.id, name: t.name, ip: t.ip,
         rxBps: Number(r.rxBps) || 0, txBps: Number(r.txBps) || 0,
         rxBytes: Number(r.rxBytes) || 0, txBytes: Number(r.txBytes) || 0,
-        ts: Number(r.ts) || 0 };
+        connections: Number(r.connections) || 0, ts: Number(r.ts) || 0 };
     });
     return json(res, 200, { ok: true, deviceId: dev.id, deviceName: dev.name,
-      interval: IP_RATE_INTERVAL, rows });
+      interval: IP_RATE_INTERVAL, error: dev.ipRateError || '', rows });
   }
   /* 网络拓扑：自动发现 + 用户自定义节点（custom 按设备持久化） */
   if (p === '/api/topology') {
@@ -2060,6 +2107,8 @@ const server = http.createServer(async (req, res) => {
           if (!id || !name) return null;
           return { id, name, type: allowed.has(n && n.type) ? n.type : 'other',
             ip: String((n && n.ip) || '').slice(0, 64),
+            /* MAC 仅用于在接口/租约/邻居等表格里复用该节点的图标，不参与测速 */
+            mac: String((n && n.mac) || '').slice(0, 32),
             parent: n && n.parent == null ? null : String((n && n.parent) || '').slice(0, 80),
             parentPort: String((n && n.parentPort) || '').slice(0, 32),
             iface: String((n && n.iface) || '').slice(0, 64),

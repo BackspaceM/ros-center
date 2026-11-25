@@ -1306,6 +1306,9 @@ details.panel, details.upd-help { border-radius: var(--ui-radius); }
 /* ---------- 24. IP 流量监控页 ---------- */
 .ipm-note { font-size:11.5px; line-height:1.7; color:var(--muted); background:var(--soft); border:1px solid var(--line);
   border-left:3px solid var(--blue); border-radius:8px; padding:9px 12px; margin-bottom:14px; }
+.ipm-error { font-size:11.5px; line-height:1.6; color:var(--amber); background:color-mix(in srgb,var(--amber) 9%,var(--card));
+  border:1px solid color-mix(in srgb,var(--amber) 35%,var(--line)); border-radius:8px; padding:9px 12px; margin-bottom:14px; }
+.tag.ipm-err { color:var(--amber); border-color:color-mix(in srgb,var(--amber) 45%,var(--line)); }
 .ipm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:14px; }
 .ipm-card { border:1px solid var(--line); border-radius:12px; background:var(--card); box-shadow:var(--ui-shadow);
   padding:15px 16px 13px; transition:transform .18s, box-shadow .18s, border-color .18s; }
@@ -1333,10 +1336,8 @@ details.panel, details.upd-help { border-radius: var(--ui-radius); }
 .ipm-card-foot { display:flex; justify-content:space-between; gap:8px; margin-top:10px; padding-top:10px;
   border-top:1px dashed var(--line); font-size:10.5px; color:var(--muted); }
 
-/* ---------- 25. MAC 厂商标签（OUI 离线识别） ---------- */
-.mac-cell { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
-.mac-logo { display: inline-flex; vertical-align: middle; margin-left: 5px; line-height: 1; }
-.oui-logo { display: block; flex: none; color: var(--oui-c); fill: currentColor;
-  filter: drop-shadow(0 0 1px rgba(110,120,140,.32)); }
-.oui-logo text { fill: currentColor; }
-:root[data-scheme="dark"] .oui-logo { color: var(--oui-dk); filter: drop-shadow(0 0 1px rgba(255,255,255,.14)); }
+/* ---------- 25. MAC 列：复用拓扑设备图标（不再做 OUI 厂商识别） ---------- */
+.mac-cell { display: inline-flex; align-items: center; gap: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.mac-topo-icon { width: 18px; height: 18px; flex: none; border-radius: 5px; object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }

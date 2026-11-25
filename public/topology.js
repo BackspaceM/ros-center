@@ -10,6 +10,7 @@
   const TYPE_ZH = { router: '路由器', switch: '交换机', ap: '无线 AP', nas: 'NAS / 存储', client: '终端', other: '其它' };
   const TYPE_EN = { router: 'Router', switch: 'Switch', ap: 'Access point', nas: 'NAS / storage', client: 'Client', other: 'Other' };
   const BADGE = { router: 'R', switch: 'S', ap: 'A', nas: 'N', client: 'C', other: '?' };
+  const IPV4_TEST = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
   const ANIMS = ['none', 'pulse', 'flow', 'ripple'];
   const ANIM_ZH = { none: '无（只选中）', pulse: '节点脉冲', flow: '链路流动', ripple: '涟漪扩散' };
   const ANIM_EN = { none: 'None (select only)', pulse: 'Node pulse', flow: 'Link flow', ripple: 'Ripple' };
@@ -38,6 +39,7 @@
         <div class="topo-meta" id="topoMeta"></div>
       </div>
       <div class="page-actions">
+        <button class="btn btn-sm" type="button" id="topoIpAll" title="${esc(L('把当前所有填写了 IP 的设备一次性开启按 IP 实时测速', 'Enable live per-IP rates for every device that has an IP'))}">◎ ${esc(L('全部按 IP 测速', 'Monitor all by IP'))}</button>
         <button class="btn btn-sm" type="button" id="topoAnimBtn">✦ ${esc(L('动画设置', 'Animations'))}</button>
         <button class="btn btn-sm" type="button" id="topoRefresh">${esc(L('重新发现', 'Rediscover'))}</button>
         <button class="btn btn-sm primary" type="button" id="topoAdd">+ ${esc(L('添加设备', 'Add device'))}</button>
@@ -69,6 +71,25 @@
     $('topoAdd').onclick = () => openEditor(null);
     $('topoDelete').onclick = () => deleteSelected();
     $('topoAnimBtn').onclick = () => openAnimSettings();
+    $('topoIpAll').onclick = () => {
+      const targets = (data ? allNodes() : []).filter((n) => n.ip && IPV4_TEST.test(String(n.ip).trim()));
+      if (!targets.length) { toast(L('没有填写有效 IPv4 地址的设备', 'No devices with a valid IPv4 address'), 'err'); return; }
+      const already = targets.filter((n) => n.ipRate).length;
+      confirmModal(L('批量开启按 IP 测速', 'Enable per-IP monitoring'),
+        L('将对 ', 'Enable for ') + targets.length + L(' 台已填 IP 的设备开启连接表聚合测速（默认关闭，只读取、不改路由器配置）。', ' devices with an IP. Connection-table aggregation is read-only and does not change router config.')
+        + (already ? '<br>' + L('其中部分设备已开启，重复设置不会改变速率。', 'Some are already enabled; no rate change for them.') : ''),
+        false, async () => {
+          const list = ((data && data.custom) || []).slice();
+          for (const n of targets) {
+            const idx = list.findIndex((x) => x.id === n.id);
+            const item = idx >= 0 ? { ...list[idx] } : overrideOf(n);
+            item.ipRate = true;
+            if (idx >= 0) list[idx] = item; else list.push(item);
+          }
+          const ok = await saveCustom(list);
+          if (ok) toast(L('已开启 ', 'Enabled for ') + targets.length + L(' 台设备', ' devices'), 'ok');
+        });
+    };
     window.openTopologyAnimSettings = openAnimSettings;
     /* 供「IP 流量监控」页跳转过来直接编辑指定节点 */
     window.openTopologyEditorById = (id) => { const n = map.get(String(id || '')); if (n) openEditor(n); };
@@ -257,8 +278,9 @@
   /* 速率来源优先级：① 节点开启的按 IP 测速（连接表聚合）② 关联接口 ③ 上级端口 */
   function directRate(n) {
     if (n && n.ipRate && n.ip) {
-      const ir = ipRates.get(String(n.ip).trim());
-      if (ir && (ir.rxBps || ir.txBps)) return ir;
+      /* 已开启按 IP 测速就只用连接表数据。采集失败时显示 0，
+         绝不回退到接口总速率 —— 否则所有设备都会显示同一串数字，掩盖问题。 */
+      return ipRates.get(String(n.ip).trim()) || zeroRate;
     }
     for (const key of [n.iface, n.parentPort]) {
       const k = String(key || '').trim(); if (!k) continue;
@@ -319,13 +341,14 @@
       const sub = n.ip || typeLabel(n.type);
       const portsHint = Array.isArray(n.ports) && n.ports.length ? `${n.ports.length}${L('口', 'p')}` : '';
       const calcHint = (Array.isArray(n.calcFrom) && n.calcFrom.length) ? ' · Σ' : '';
+      const ipHint = (n.ipRate && n.ip) ? ' · IP' : '';
       const fx = activeFx && activeFx.id === n.id ? ' fx-' + activeFx.type : '';
       nodeHtml.push(`<g class="topo-node type-${esc(n.type)} ${n.auto ? 'auto' : 'custom'}${selectedId === n.id ? ' selected' : ''}${fx}" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})">
         ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="26"/>' : ''}
         <rect class="node-card" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="7"/>
         ${icon}
         <text class="topo-name" x="${-NODE_W / 2 + 42}" y="-10">${esc(name)}</text>
-        <text class="topo-sub" x="${-NODE_W / 2 + 42}" y="4">${esc(String(sub).slice(0, 14))}${portsHint ? ' · ' + esc(portsHint) : ''}${calcHint}</text>
+        <text class="topo-sub" x="${-NODE_W / 2 + 42}" y="4">${esc(String(sub).slice(0, 14))}${portsHint ? ' · ' + esc(portsHint) : ''}${calcHint}${esc(ipHint)}</text>
         <text class="topo-rate up" x="${NODE_W / 2 - 8}" y="-4" text-anchor="end">${esc(upText)}</text>
         <text class="topo-rate down" x="${NODE_W / 2 - 8}" y="12" text-anchor="end">${esc(downText)}</text>
       </g>`);
@@ -582,7 +605,7 @@
 
   /* 为自动发现的节点建立可持久化的覆盖版本（同 id，custom 优先） */
   function overrideOf(n) {
-    return { id: n.id, name: n.name, type: n.type, ip: n.ip || '', parent: n.parent || null,
+    return { id: n.id, name: n.name, type: n.type, ip: n.ip || '', mac: n.mac || '', parent: n.parent || null,
       parentPort: n.parentPort || '', ports: Array.isArray(n.ports) ? n.ports.slice() : [],
       iface: n.iface || '', icon: n.icon || '', note: n.note || '', anim: n.anim || 'none',
       ipRate: !!n.ipRate,
@@ -643,7 +666,8 @@
         <div class="te-grid-2">
           ${field(L('类型', 'Type'), `<select id="tnType">${TYPES.map((tp) => `<option value="${tp}"${node && node.type === tp ? ' selected' : ''}>${esc(typeLabel(tp))}</option>`).join('')}</select>`)}
           ${field(L('IP / 地址', 'IP / address'), `<input id="tnIp" type="text" maxlength="64" value="${esc(node ? node.ip : '')}" placeholder="192.168.1.1">`)}
-        </div>`)}
+        </div>
+        ${field(L('MAC 地址（可选）', 'MAC address (optional)'), `<input id="tnMac" type="text" maxlength="32" value="${esc(node ? node.mac || '' : '')}" placeholder="AA:BB:CC:DD:EE:FF">`, L('用于在接口、租约、邻居等表格中复用本设备上传的图标；自动发现的设备会自动带出', 'Used to reuse this device icon in interface/lease/neighbour tables; auto-discovered devices fill this in'))}`)}
       ${section('2', L('层级与连接', 'Hierarchy & links'), L('决定设备在拓扑中的位置与连线', 'Where the device sits and how it connects'), `
         ${field(L('层级关系', 'Hierarchy'), `<select id="tnRelation">
           <option value="child"${relationDefault === 'child' ? ' selected' : ''}>${esc(L('作为目标设备的下级', 'Child of selected device'))}</option>
@@ -723,7 +747,7 @@
         }
         const item = {
           id: myId,
-          name, type: $('tnType').value, ip: $('tnIp').value.trim(),
+          name, type: $('tnType').value, ip: $('tnIp').value.trim(), mac: ($('tnMac') && $('tnMac').value.trim()) || '',
           parent, parentPort: $('tnParentPort').value.trim(),
           ports: $('tnPorts').value.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean).slice(0, 64),
           iface: (node && node.iface) || '', icon: iconUrl, note: $('tnNote').value.trim(),

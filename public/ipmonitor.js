@@ -65,7 +65,16 @@
       b.onclick = () => { navigate('topology'); setTimeout(() => { if (typeof window.openTopologyEditorById === 'function') window.openTopologyEditorById(b.dataset.ipEdit); }, 250); };
     });
     const st = $('ipmStatus');
-    if (st) st.textContent = d && d.deviceName ? d.deviceName : '';
+    if (st) {
+      st.textContent = d && d.deviceName ? d.deviceName : '';
+      st.classList.toggle('ipm-err', !!(d && d.error));
+      st.title = d && d.error ? String(d.error) : '';
+    }
+    const eb = $('ipmError');
+    if (eb) {
+      eb.hidden = !(d && d.error);
+      if (d && d.error) eb.textContent = String(d.error);
+    }
   }
   async function refresh() {
     try { render(await api('/api/ip-rates')); }
@@ -83,6 +92,7 @@
           <button class="btn" id="ipmTopo" type="button">${esc(L('在网络拓扑中设置', 'Configure in topology'))}</button></div>
       </div>
       <div class="ipm-note">${esc(L('只有在网络拓扑的设备编辑里勾选「按 IP 实时测速」并填写 IP 才会显示在这里；默认全部关闭，不增加路由器配置负担。', 'Only devices with "Live rate by IP" enabled and a valid IP in the topology editor appear here. Off by default; no router configuration changes.'))}</div>
+      <div class="ipm-error" id="ipmError" hidden></div>
       <div class="ipm-grid" id="ipmGrid"></div>
       <div class="empty" id="ipmEmpty" hidden>${esc(L('暂无设备开启 IP 测速。请到网络拓扑中编辑设备，填写 IP 并勾选「按 IP 实时测速」。', 'No devices with IP monitoring yet. Edit a device in the topology, enter its IP and enable "Live rate by IP".'))}</div>`;
     $('ipmTopo').onclick = () => navigate('topology');

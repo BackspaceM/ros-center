@@ -1,10 +1,55 @@
 'use strict';
 
 /* ================= 配置表格页 ================= */
+/* MAC 列不再做 OUI 厂商猜测：直接复用网络拓扑里给该设备上传的图标。
+   按 MAC → IP → 名称 依次匹配，自动发现节点带出 MAC，手工节点可填 MAC。 */
+const macKeyOf = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-F]/g, '');
+const ipKeyOf = (v) => String(v == null ? '' : v).split('/')[0].trim();
+const nameKeyOf = (v) => String(v == null ? '' : v).toLowerCase().trim();
+let topoIconLookup = { device: '', at: 0, byMac: new Map(), byIp: new Map(), byName: new Map() };
+
+async function loadTopoIcons(sec) {
+  const need = (sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key));
+  if (!need) { topoIconLookup = { device: '', at: 0, byMac: new Map(), byIp: new Map(), byName: new Map() }; return; }
+  const dev = state.deviceId || '';
+  if (topoIconLookup.device === dev && Date.now() - topoIconLookup.at < 60000) return;
+  const byMac = new Map(), byIp = new Map(), byName = new Map();
+  try {
+    const d = await api('/api/topology');
+    const all = new Map();
+    for (const n of (d.auto || [])) all.set(n.id, n);
+    for (const n of (d.custom || [])) { if (n.deleted) all.delete(n.id); else all.set(n.id, n); }
+    for (const n of all.values()) {
+      if (!n.icon) continue;
+      const mk = macKeyOf(n.mac); if (mk) byMac.set(mk, n);
+      const ip = ipKeyOf(n.ip); if (ip) byIp.set(ip, n);
+      const name = nameKeyOf(n.name); if (name) byName.set(name, n);
+    }
+  } catch (e) { /* 拓扑暂不可用：表格只显示纯 MAC，不影响配置页 */ }
+  topoIconLookup = { device: dev, at: Date.now(), byMac, byIp, byName };
+}
+
+function topoIconFor(row, mac) {
+  const lk = topoIconLookup;
+  let n = lk.byMac.get(macKeyOf(mac));
+  if (!n && row) {
+    const ip = ipKeyOf(row.address || row['src-address'] || row.ip);
+    if (ip) n = lk.byIp.get(ip);
+  }
+  if (!n && row) {
+    for (const k of ['host-name', 'identity', 'name']) {
+      const key = nameKeyOf(row[k]);
+      if (key && lk.byName.has(key)) { n = lk.byName.get(key); break; }
+    }
+  }
+  return n && n.icon ? { url: n.icon, name: n.name } : null;
+}
+
 async function loadRows(sec) {
   const d = await api('/api/config?section=' + encodeURIComponent(sec.id));
   state.rows = d.rows || []; state.configDemo = !!d.demo; state.configOffline = !!d.offline;
   if (sec.id === 'connections') state.connRows = state.rows;
+  await loadTopoIcons(sec);
   return state.rows;
 }
 /* 只保留 demo 提示；LIVE / OFFLINE 徽标不再显示 */
@@ -191,10 +236,10 @@ function cellHtml(row, key, sec) {
   if (key === 'disabled') return `<span class="tag ${boolOn(v) ? 'red' : 'green'}">${boolOn(v) ? t('disabled') : t('enabled')}</span>`;
   if (/\.id$/.test(key)) return `<span style="color:#9aa5bd">${esc(v)}</span>`;
   if (/mac[-_]?address/i.test(key) && v) {
-    /* MAC 厂商识别：内置 OUI 离线查表，知名厂商显示原厂配色徽标（无背景） */
-    const vendor = typeof ouiVendor === 'function' ? ouiVendor(v) : '';
-    const logo = vendor && typeof ouiLogo === 'function' ? ouiLogo(vendor) : '';
-    return `<span class="mac-cell" title="${esc(v)}${vendor ? ' · ' + esc(vendor) : ''}">${esc(v)}${logo ? ` <span class="mac-logo" title="${esc(vendor)}">${logo}</span>` : ''}</span>`;
+    /* 复用拓扑设备图标；没有对应节点或没上传图标时只显示 MAC */
+    const hit = topoIconFor(row, v);
+    const icon = hit ? `<img class="mac-topo-icon" src="${esc(hit.url)}" alt="" title="${esc(hit.name || '')}" loading="lazy">` : '';
+    return `<span class="mac-cell" title="${esc(v)}${hit && hit.name ? ' · ' + esc(hit.name) : ''}">${icon}${esc(v)}</span>`;
   }
   if (/bytes/i.test(key)) {
     /* 连接表：显示精确字节数，实时每秒递增可见；其余表格保留易读单位 */
