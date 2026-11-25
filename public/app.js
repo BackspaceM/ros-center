@@ -873,6 +873,8 @@ function setBar(id, pct) { const el = $(id); if (!el) return; el.style.width = M
 function renderPage() {
   const sec = state.schema.sections.find((s) => s.id === state.section);
   if (!sec) return;
+  document.body.classList.toggle('topology-page', sec.id === 'topology');
+  $('content').className = 'content';
   if (sec.id !== 'trafficStats') ensureUsageTimer(false);
   const g = state.schema.groups.find((x) => x.id === sec.group);
   $('crumbGroup').textContent = g ? tx(g) : ''; $('crumbSection').textContent = tx(sec.title);

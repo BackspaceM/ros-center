@@ -772,6 +772,17 @@ tbody tr:last-child td { border-bottom: 0; }
 .topo-hint { font-size: 11px; color: var(--muted); }
 .topo-stage { position: relative; padding: 6px 10px; min-height: 420px; overflow: hidden; }
 .topo-svg { width: 100%; height: 620px; display: block; cursor: grab; }
+/* 拓扑页：画布从信息行下方一直铺到浏览器底部 */
+body.topology-page .content { padding: 16px 20px 0; overflow: hidden; display: flex; flex-direction: column; }
+body.topology-page .page-head { margin-bottom: 8px; flex: none; }
+body.topology-page .topo-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body.topology-page .topo-canvas-wrap { position: relative; flex: 1; min-height: 0; }
+body.topology-page .topo-controls { position: absolute; z-index: 5; top: 6px; left: 12px; right: 12px;
+  padding: 5px 9px; border: 1px solid var(--line); border-radius: 9px;
+  background: color-mix(in srgb, var(--card) 86%, transparent); backdrop-filter: blur(8px); }
+body.topology-page .topo-stage { position: absolute; inset: 0; padding: 0; }
+body.topology-page .topo-svg { height: 100%; }
+body.topology-page .topo-legend { padding: 0; gap: 12px; font-size: 10.5px; margin-left: auto; }
 .topo-svg.panning { cursor: grabbing; }
 .topo-link { fill: none; stroke: #d8dde5; stroke-width: 1.4; }
 :root[data-scheme="dark"] .topo-link { stroke: #3a4049; }
@@ -790,14 +801,15 @@ tbody tr:last-child td { border-bottom: 0; }
 .topo-icon-bg.type-nas { fill: #fff2dc; }
 .topo-icon-bg.type-client { fill: #eef1f5; }
 :root[data-scheme="dark"] .topo-icon-bg { fill: #303640; }
-.topo-icon-t { fill: var(--blue); font-size: 11px; font-weight: 700; }
+.topo-icon-t { fill: var(--blue); font-size: 18px; font-weight: 700; }
 .topo-node.type-switch .topo-icon-t { fill: var(--green); }
 .topo-node.type-ap .topo-icon-t { fill: var(--violet); }
 .topo-node.type-nas .topo-icon-t { fill: var(--amber); }
 .topo-node.type-client .topo-icon-t { fill: var(--muted); }
-.topo-node .topo-name { fill: var(--ink); font-size: 11.5px; font-weight: 600; }
-.topo-node .topo-sub { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-.topo-node .topo-rate { font-size: 9.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.topo-node .topo-name { fill: var(--ink); font-size: 13px; font-weight: 650; }
+.topo-node .topo-sub { fill: var(--ink); font-size: 10.5px; font-variant-numeric: tabular-nums; opacity: .82; }
+.topo-node .topo-mac { fill: var(--muted); font-size: 9.5px; letter-spacing: .2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.topo-node .topo-rate { font-size: 10px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .topo-node .topo-rate.up { fill: var(--blue); }
 .topo-node .topo-rate.down { fill: var(--green); }
 .calc-list { max-height: 180px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin-top: 6px; }
@@ -825,7 +837,6 @@ tr.row-fail td { color: var(--red); }
 .topo-actions { display: inline-flex; gap: 6px; }
 .topo-warn { color: var(--amber); cursor: help; }
 .topo-empty { padding: 90px 20px; text-align: center; color: var(--muted); font-size: 12.5px; }
-.topo-icon-img { clip-path: inset(0 round 5px); }
 .topo-icon-picker { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .topo-icon-preview { width: 36px; height: 36px; flex: none; border-radius: 6px; object-fit: contain; border: 1px solid var(--line); background: var(--soft); }
 .topo-icon-current { display: flex; align-items: center; gap: 10px; }
@@ -1341,3 +1352,36 @@ details.panel, details.upd-help { border-radius: var(--ui-radius); }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
 .mac-topo-icon { width: 18px; height: 18px; flex: none; border-radius: 5px; object-fit: cover;
   border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+td.num .mac-cell { justify-content: flex-end; }
+.topo-name-cell { font-weight: 600; color: var(--ink); }
+.muted-cell { color: var(--muted); }
+td.rownum { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* ---------- 26. 配置表：列设置与 DHCP 租约美化 ---------- */
+.cfg-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+.cfg-sum-item { flex: 1; min-width: 130px; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 11px 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--card);
+  box-shadow: var(--ui-shadow); font-size: 11.5px; color: var(--muted); }
+.cfg-sum-item b { font-size: 19px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cfg-sum-item.ok { border-left: 3px solid var(--green); }
+.cfg-sum-item.ok b { color: var(--green); }
+.cfg-sum-item.warn { border-left: 3px solid var(--amber); }
+.cfg-sum-item.warn b { color: var(--amber); }
+.cfg-sum-item.info { border-left: 3px solid var(--blue); }
+.cfg-sum-item.info b { color: var(--blue); }
+#content.cfg-dhcpLeases .panel { border-top: 3px solid var(--blue); border-radius: 13px; }
+#content.cfg-dhcpLeases .table-tools { padding: 12px 16px; }
+#content.cfg-dhcpLeases tbody tr { transition: background .15s; }
+#content.cfg-dhcpLeases tbody tr:hover td { background: color-mix(in srgb, var(--blue) 5%, transparent); }
+#content.cfg-dhcpLeases .tag.amber { color: var(--amber); background: color-mix(in srgb, var(--amber) 11%, transparent); border-color: color-mix(in srgb, var(--amber) 32%, transparent); }
+.col-editor-list { max-height: 330px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; }
+.col-editor-tip { margin: 0 0 10px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.col-editor-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.col-editor-row:last-child { border-bottom: 0; }
+.col-editor-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--ink); }
+.col-editor-row small { color: var(--muted); font-size: 10px; }
+.col-editor-move { display: inline-flex; gap: 4px; }
+.col-editor-move button { width: 24px; height: 24px; border: 1px solid var(--line); background: var(--card);
+  border-radius: 6px; color: var(--muted); cursor: pointer; }
+.col-editor-move button:hover { color: var(--blue); border-color: var(--blue); }

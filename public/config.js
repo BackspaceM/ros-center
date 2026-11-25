@@ -29,7 +29,7 @@ async function loadTopoIcons(sec) {
   topoIconLookup = { device: dev, at: Date.now(), byMac, byIp, byName };
 }
 
-function topoIconFor(row, mac) {
+function topoNodeFor(row, mac) {
   const lk = topoIconLookup;
   let n = lk.byMac.get(macKeyOf(mac));
   if (!n && row) {
@@ -42,7 +42,63 @@ function topoIconFor(row, mac) {
       if (key && lk.byName.has(key)) { n = lk.byName.get(key); break; }
     }
   }
+  return n || null;
+}
+function topoIconFor(row, mac) {
+  const n = topoNodeFor(row, mac);
   return n && n.icon ? { url: n.icon, name: n.name } : null;
+}
+
+/* ---------- 表头字段：可增删、排序、按分类+设备记忆 ---------- */
+const colsKey = (sec) => 'rosCenter.cols.' + (state.deviceId || '') + '.' + sec.id;
+function availableColumns(sec) {
+  const keys = (sec.fields || []).map((f) => f.key).filter((k) => k !== '.id');
+  if ((sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key)) && !keys.includes('topoName')) keys.push('topoName');
+  return keys;
+}
+function visibleColumns(sec) {
+  const all = availableColumns(sec);
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(colsKey(sec))); } catch (e) { /* ignore */ }
+  const picked = (Array.isArray(saved) && saved.length ? saved : (sec.columns || all))
+    .filter((k) => all.includes(k));
+  return picked.length ? picked : all.slice(0, 5);
+}
+function openColumnSettings(sec) {
+  const all = availableColumns(sec), cur = visibleColumns(sec);
+  let draft = [...cur, ...all.filter((k) => !cur.includes(k))];
+  let checked = new Set(cur);
+  const list = (m) => {
+    const box = m.querySelector('.col-editor-list'); if (!box) return;
+    box.innerHTML = draft.map((k, i) => `<div class="col-editor-row" data-key="${esc(k)}">
+      <label><input type="checkbox" class="col-chk" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label>
+      <span class="col-editor-move"><button type="button" data-move="${i}" data-dir="-1" title="↑">↑</button><button type="button" data-move="${i}" data-dir="1" title="↓">↓</button></span>
+    </div>`).join('');
+    box.querySelectorAll('.col-chk').forEach((c) => {
+      c.onchange = () => { const k = c.closest('.col-editor-row').dataset.key; c.checked ? checked.add(k) : checked.delete(k); };
+    });
+    box.querySelectorAll('[data-move]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.move), j = i + Number(b.dataset.dir);
+        if (j < 0 || j >= draft.length) return;
+        [draft[i], draft[j]] = [draft[j], draft[i]]; list(m);
+      };
+    });
+  };
+  openModal(L('表头字段', 'Table columns'),
+    `<div class="col-editor"><p class="col-editor-tip">${esc(L('勾选要显示的字段，用 ↑ ↓ 调整顺序。设置按当前设备与分类保存。', 'Pick visible columns and reorder them. Saved per device and section.'))}</p><div class="col-editor-list"></div></div>`,
+    `<button class="btn" data-reset type="button">${esc(L('恢复默认', 'Reset'))}</button><button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" data-save type="button">${esc(t('confirm'))}</button>`,
+    (m) => {
+      list(m);
+      m.querySelector('[data-reset]').onclick = () => { draft = all.slice(); checked = new Set(sec.columns || all); list(m); };
+      m.querySelector('[data-close]').onclick = closeModal;
+      m.querySelector('[data-save]').onclick = () => {
+        const keys = draft.filter((k) => checked.has(k));
+        if (!keys.length) { toast(L('至少保留一列', 'Keep at least one column'), 'err'); return; }
+        localStorage.setItem(colsKey(sec), JSON.stringify(keys));
+        closeModal(); renderConfigPage(sec);
+      };
+    });
 }
 
 async function loadRows(sec) {
@@ -61,13 +117,25 @@ function syncConfigTag() {
   el.className = 'badge-demo';
 }
 
+function paintConfigSummary(sec) {
+  const box = $('cfgSummary'); if (!box || sec.id !== 'dhcpLeases') return;
+  const rows = state.rows || [];
+  const bound = rows.filter((r) => /bound/i.test(String(r.status || ''))).length;
+  const waiting = rows.filter((r) => /waiting/i.test(String(r.status || ''))).length;
+  const matched = rows.filter((r) => !!topoNodeFor(r, r['mac-address'])).length;
+  const vals = [rows.length, bound, waiting, matched];
+  box.querySelectorAll('b').forEach((b, i) => { if (vals[i] != null) b.textContent = String(vals[i]); });
+}
+
 function renderConfigPage(sec) {
-  const cols = sec.columns || sec.fields.map((f) => f.key);
+  const cols = visibleColumns(sec).filter((c) => c !== '.id');
   const writable = sec.writable !== false;
+  $('content').className = 'content cfg-page cfg-' + sec.id;
   $('content').innerHTML = `
     <div class="page-head">
       <div><h1>${esc(tx(sec.title))}</h1><p>${esc(sec.path || '')}${!writable ? ' · ' + t('readonly_tip') : ''}</p></div>
       <div class="page-actions">
+        <button class="btn" id="btnCols" type="button" title="${esc(L('增删与排序表头字段', 'Add/remove and reorder table columns'))}">☷ ${esc(L('列设置', 'Columns'))}</button>
         ${writable ? `<button class="btn primary" id="btnAdd">+ ${t('add')}</button>` : ''}
         ${writable && sec.runAction ? `<button class="btn" id="btnRun">▶ ${t('run_script')}</button>` : ''}
         ${writable && !sec.runAction && sec.toggle !== false ? `<button class="btn" id="btnEnable">${t('enable')}</button><button class="btn" id="btnDisable">${t('disable')}</button>` : ''}
@@ -75,6 +143,7 @@ function renderConfigPage(sec) {
       </div>
     </div>
     ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
+    ${sec.id === 'dhcpLeases' ? `<div class="cfg-summary" id="cfgSummary"><span class="cfg-sum-item">${esc(L('租约总数', 'Leases'))} <b>—</b></span><span class="cfg-sum-item ok">${esc(L('已绑定', 'Bound'))} <b>—</b></span><span class="cfg-sum-item warn">${esc(L('等待中', 'Waiting'))} <b>—</b></span><span class="cfg-sum-item info">${esc(L('拓扑匹配', 'Topology matched'))} <b>—</b></span></div>` : ''}
     <div class="panel">
       <div class="table-tools">
         <input type="search" id="rowSearch" placeholder="${t('search')}…" value="${esc(state.rowFilter)}">
@@ -91,6 +160,7 @@ function renderConfigPage(sec) {
       <div class="pager"><span id="pageInfo"></span><button id="prevPage">${t('prev')}</button><button id="nextPage">${t('next')}</button></div>
     </div>`;
 
+  $('btnCols').onclick = () => openColumnSettings(sec);
   if (writable) {
     $('btnAdd').onclick = () => openForm(sec, null);
     if (sec.runAction) {
@@ -120,7 +190,7 @@ function renderConfigPage(sec) {
   };
   $('prevPage').onclick = () => { if (state.page > 1) { state.page--; renderRows(sec); } };
   $('nextPage').onclick = () => { if (state.page < Math.max(1, Math.ceil(sortedRows(sec).length / state.pageSize))) { state.page++; renderRows(sec); } };
-  loadRows(sec).then(() => { syncConfigTag(); renderRows(sec); }).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
+  loadRows(sec).then(() => { syncConfigTag(); paintConfigSummary(sec); renderRows(sec); }).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
 }
 
 /* 单例配置（DNS / 设备标识 / 时钟 / NTP）：只展示一组参数，避免误用新增/删除 */
@@ -153,10 +223,11 @@ function paintSingletonBody(sec) {
   }).join('');
 }
 
-function numCol(key, sec) { return /bytes|port|mtu|distance|priority|time$|count/i.test(key) && sec.fields.find((f) => f.key === key)?.type !== 'bool'; }
+function numCol(key, sec) { return /mac[-_]?address|bytes|port|mtu|distance|priority|time$|count/i.test(key) && sec.fields.find((f) => f.key === key)?.type !== 'bool'; }
 function fieldLabel(sec, key) {
   if (key === 'running') return L('运行', 'Running');
   if (key === '.id') return 'ID';
+  if (key === 'topoName') return L('拓扑设备名', 'Topology device');
   const f = sec.fields.find((x) => x.key === key);
   return f ? tx(f.label) : key;
 }
@@ -192,7 +263,7 @@ function sortMark(key) {
   return s.key === key ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
 }
 function renderRows(sec) {
-  const cols = (sec.columns || sec.fields.map((f) => f.key)).filter((c) => c !== '.id');
+  const cols = visibleColumns(sec).filter((c) => c !== '.id');
   const writable = sec.writable !== false;
   const rows = sortedRows(sec);
   const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
@@ -202,11 +273,11 @@ function renderRows(sec) {
   $('pageInfo').textContent = `${t('page')} ${state.page} ${t('of')} ${totalPages}`;
   $('prevPage').disabled = state.page <= 1; $('nextPage').disabled = state.page >= totalPages;
   const tb = $('tbody'); if (!tb) return;
-  tb.innerHTML = pageRows.map((r) => {
-    const nid = idNum(r['.id']);
+  tb.innerHTML = pageRows.map((r, ri) => {
+    const rowno = (state.page - 1) * state.pageSize + ri + 1;
     return `<tr data-id="${esc(r['.id'])}" title="RouterOS .id: ${esc(r['.id'])}" class="${state.selectedIds.has(r['.id']) ? 'selected' : ''}">
     ${writable ? `<td><input type="checkbox" class="check rowcheck" data-id="${esc(r['.id'])}" ${state.selectedIds.has(r['.id']) ? 'checked' : ''}></td>` : ''}
-    <td class="num" style="color:var(--muted)">${Number.isFinite(nid) ? nid : esc(r['.id'] || '—')}</td>
+    <td class="num rownum">${rowno}</td>
     ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''}>${cellHtml(r, c, sec)}</td>`).join('')}
     ${writable ? `<td><div class="row-actions">
       ${sec.runAction ? `<button class="icon-btn run" data-act="run" title="${esc(t('run_script_row'))}">▶</button>` : ''}
@@ -235,6 +306,16 @@ function cellHtml(row, key, sec) {
   if (key === 'running') return `<span class="tag ${boolOn(v) ? 'green' : 'red'}">${boolOn(v) ? t('running') : t('stopped')}</span>`;
   if (key === 'disabled') return `<span class="tag ${boolOn(v) ? 'red' : 'green'}">${boolOn(v) ? t('disabled') : t('enabled')}</span>`;
   if (/\.id$/.test(key)) return `<span style="color:#9aa5bd">${esc(v)}</span>`;
+  if (key === 'topoName') {
+    const n = topoNodeFor(row, row['mac-address']);
+    return n && n.name
+      ? `<span class="topo-name-cell" title="${esc(n.name)}">${esc(n.name)}</span>`
+      : '<span class="muted-cell">—</span>';
+  }
+  if (key === 'status' && sec && sec.id === 'dhcpLeases') {
+    const bound = /bound/i.test(String(v || ''));
+    return `<span class="tag ${bound ? 'green' : 'amber'}">${esc(v || '—')}</span>`;
+  }
   if (/mac[-_]?address/i.test(key) && v) {
     /* 复用拓扑设备图标；没有对应节点或没上传图标时只显示 MAC */
     const hit = topoIconFor(row, v);

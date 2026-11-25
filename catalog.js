@@ -69,7 +69,7 @@ const SECTIONS = [
       F('host-name', '主机名', 'Host name', 'readonly'), F('server', '服务端', 'Server', 'readonly'), F('status', '状态', 'Status', 'readonly'),
       F('dhcp-option', '单个选项', 'DHCP option', 'text'), F('dhcp-option-set', '选项集', 'Option set', 'text'),
       F('comment', '备注', 'Comment', 'text'), F('disabled', '禁用', 'Disabled', 'bool')],
-    { columns: ['address', 'mac-address', 'host-name', 'server', 'status', 'dhcp-option-set', 'comment'] }),
+    { columns: ['address', 'mac-address', 'topoName', 'host-name', 'server', 'status', 'dhcp-option-set', 'comment'] }),
   /* DHCP Option 与 Option Sets：官方文档 /ip dhcp-server option、/ip dhcp-server option sets。
      选项集通过 dhcp-option-set 关联到 server / network / lease（优先级 lease > server > network）。 */
   S('dhcpOptions', 'network', 'DHCP 选项', 'DHCP options', '/ip/dhcp-server/option',

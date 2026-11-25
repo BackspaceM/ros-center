@@ -14,7 +14,7 @@
   const ANIMS = ['none', 'pulse', 'flow', 'ripple'];
   const ANIM_ZH = { none: '无（只选中）', pulse: '节点脉冲', flow: '链路流动', ripple: '涟漪扩散' };
   const ANIM_EN = { none: 'None (select only)', pulse: 'Node pulse', flow: 'Link flow', ripple: 'Ripple' };
-  const NODE_W = 190, NODE_H = 62, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
+  const NODE_W = 240, NODE_H = 104, ICON_W = 72, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 172, MARGIN = 90;
   let data = null, loading = false, iconUrl = '', iconLib = [], iconLabel = '';
   let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
@@ -47,7 +47,7 @@
       </div>
     </div>
     <div class="topo-panel">
-      <div class="topo-legend" id="topoLegend"></div>
+      <div class="topo-canvas-wrap">
       <div class="topo-controls">
         <button class="topo-ctrl" id="topoZoomIn" type="button" title="${esc(L('放大', 'Zoom in'))}">+</button>
         <span class="topo-zoom" id="topoZoomLabel">100%</span>
@@ -57,8 +57,10 @@
         <button class="topo-ctrl topo-dir" id="topoDir" type="button" title="${esc(L('切换上下 / 左右视图', 'Switch vertical / horizontal view'))}">${direction === 'tb' ? '↕ ' + esc(L('上下', 'Vertical')) : '↔ ' + esc(L('左右', 'Horizontal'))}</button>
         <span class="topo-ctrl-sep"></span>
         <span class="topo-hint">${esc(L('滚轮缩放 · 空白处拖动平移 · 双击设备编辑 · 选中后点删除移除', 'Scroll to zoom · drag to pan · double-click a device to edit · select then Delete to remove'))}</span>
+        <div class="topo-legend" id="topoLegend"></div>
       </div>
       <div class="topo-stage" id="topoStage"><div class="topo-empty">${esc(L('正在加载拓扑…', 'Loading topology…'))}</div></div>
+      </div>
     </div>`;
     $('topoZoomIn').onclick = () => zoomAt(1.08);
     $('topoZoomOut').onclick = () => zoomAt(1 / 1.08);
@@ -207,7 +209,7 @@
     const label = $('topoZoomLabel'); if (label) label.textContent = Math.round(zoom * 100) + '%';
   }
   function zoomAt(factor, cx, cy) {
-    const next = Math.max(.35, Math.min(3.5, zoom * factor));
+    const next = Math.max(.25, Math.min(5, zoom * factor));
     const k = next / zoom;
     const fx = cx == null ? baseW / 2 : cx, fy = cy == null ? baseH / 2 : cy;
     panX = fx - (fx - panX) / k; panY = fy - (fy - panY) / k;
@@ -330,30 +332,34 @@
     }
     for (const n of nodes) {
       const p = pos.get(n.id); if (!p) continue;
-      const name = String(n.name || '').slice(0, 11);
+      const name = String(n.name || '').slice(0, 12);
+      const ix = -NODE_W / 2 + 1, iy = -NODE_H / 2 + 1, iw = ICON_W - 2, ih = NODE_H - 2;
       const icon = n.icon
-        ? `<image class="topo-icon-img" href="${esc(n.icon)}" x="${-NODE_W / 2 + 8}" y="-13" width="26" height="26" preserveAspectRatio="xMidYMid slice"/>`
-        : `<rect class="topo-icon-bg type-${esc(n.type)}" x="${-NODE_W / 2 + 8}" y="-13" width="26" height="26" rx="5"/><text class="topo-icon-t" x="${-NODE_W / 2 + 21}" y="5" text-anchor="middle">${BADGE[n.type] || '?'}</text>`;
+        ? `<image class="topo-icon-img" href="${esc(n.icon)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid slice" clip-path="url(#topoIconClip)"/>`
+        : `<rect class="topo-icon-bg type-${esc(n.type)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="9"/><text class="topo-icon-t" x="${ix + iw / 2}" y="6" text-anchor="middle">${BADGE[n.type] || '?'}</text>`;
       const rate = effectiveRate(n.id);
       const hasRate = !!(rate.rxBps || rate.txBps);
       const upText = hasRate ? '↑' + fmtRate(rate.txBps) : '';
       const downText = hasRate ? '↓' + fmtRate(rate.rxBps) : '';
-      const sub = n.ip || typeLabel(n.type);
-      const portsHint = Array.isArray(n.ports) && n.ports.length ? `${n.ports.length}${L('口', 'p')}` : '';
+      const portsHint = Array.isArray(n.ports) && n.ports.length ? ` · ${n.ports.length}${L('口', 'p')}` : '';
       const calcHint = (Array.isArray(n.calcFrom) && n.calcFrom.length) ? ' · Σ' : '';
       const ipHint = (n.ipRate && n.ip) ? ' · IP' : '';
+      const cx = -NODE_W / 2 + ICON_W + (NODE_W - ICON_W) / 2;
+      const mac = String(n.mac || '').toUpperCase().slice(0, 17);
       const fx = activeFx && activeFx.id === n.id ? ' fx-' + activeFx.type : '';
       nodeHtml.push(`<g class="topo-node type-${esc(n.type)} ${n.auto ? 'auto' : 'custom'}${selectedId === n.id ? ' selected' : ''}${fx}" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})">
-        ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="26"/>' : ''}
-        <rect class="node-card" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="7"/>
+        ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="34"/>' : ''}
+        <rect class="node-card" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="11"/>
         ${icon}
-        <text class="topo-name" x="${-NODE_W / 2 + 42}" y="-10">${esc(name)}</text>
-        <text class="topo-sub" x="${-NODE_W / 2 + 42}" y="4">${esc(String(sub).slice(0, 14))}${portsHint ? ' · ' + esc(portsHint) : ''}${calcHint}${esc(ipHint)}</text>
-        <text class="topo-rate up" x="${NODE_W / 2 - 8}" y="-4" text-anchor="end">${esc(upText)}</text>
-        <text class="topo-rate down" x="${NODE_W / 2 - 8}" y="12" text-anchor="end">${esc(downText)}</text>
+        <text class="topo-name" x="${cx}" y="-25" text-anchor="middle">${esc(name)}</text>
+        <text class="topo-sub" x="${cx}" y="-5" text-anchor="middle">${esc(String(n.ip || typeLabel(n.type)).slice(0, 14))}${esc(portsHint + calcHint + ipHint)}</text>
+        <text class="topo-mac" x="${cx}" y="18" text-anchor="middle">${esc(mac)}</text>
+        <text class="topo-rate up" x="${NODE_W / 2 - 9}" y="-34" text-anchor="end">${esc(upText)}</text>
+        <text class="topo-rate down" x="${NODE_W / 2 - 9}" y="38" text-anchor="end">${esc(downText)}</text>
       </g>`);
     }
     const svg = `<svg class="topo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${baseW} ${baseH}" preserveAspectRatio="xMidYMid meet">
+      <defs><clipPath id="topoIconClip"><rect x="${-NODE_W / 2 + 1}" y="${-NODE_H / 2 + 1}" width="${ICON_W - 2}" height="${NODE_H - 2}" rx="9"/></clipPath></defs>
       <g class="topo-layer-links">${links.join('')}</g>
       <g class="topo-layer-nodes">${nodeHtml.join('')}</g>
     </svg>`;
