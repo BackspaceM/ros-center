@@ -76,8 +76,8 @@ function renderDashboard() {
       </div>
     </div>
     <div class="grid-2 dash-extra">
-      ${topTablePanel('topIfPanel', t('top_if'), t('top_if_sub'), ['#', t('iface'), t('rate_rx'), t('rate_tx'), t('total')], 'topif')}
-      ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), ['#', L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')], 'topconn')}
+      ${topTablePanel('topIfPanel', t('top_if'), t('top_if_sub'), [t('seq'), t('iface'), t('rate_rx'), t('rate_tx'), t('total')], 'topif')}
+      ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), [t('seq'), L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')], 'topconn')}
     </div>
     <div class="grid-2 dash-extra">
       ${dashLinksBlock(d)}
@@ -98,11 +98,17 @@ function renderDashboard() {
   applyDashboardLayout();
   const lb = $('linkCfgBtn');
   if (lb) lb.onclick = (e) => { e.stopPropagation(); openLinkSettings(d); };
+  const qb = $('qualityCfgBtn');
+  if (qb) qb.onclick = (e) => { e.stopPropagation(); openQualityTargets(); };
   if (window.paintDashIfacePop) window.paintDashIfacePop();
   refreshDashExtras();
 }
 /* ---------- 仪表盘可选块：全部来自真实接口速率 / Netwatch / 防火墙计数器 ---------- */
 const LINKS_KEY = () => 'rosCenter.links.' + (state.deviceId || '');
+const QUALITY_KEY = () => 'rosCenter.qualityTargets.' + (state.deviceId || '');
+function qualityTargets() {
+  try { const p = JSON.parse(localStorage.getItem(QUALITY_KEY())); return Array.isArray(p) ? p : []; } catch (e) { return []; }
+}
 function linkPrefs() {
   try { const p = JSON.parse(localStorage.getItem(LINKS_KEY())); return Array.isArray(p) ? p : []; } catch (e) { return []; }
 }
@@ -173,14 +179,47 @@ function dashQualityBlock() {
         <td class="num">${loss}%</td><td><span class="tag ${bad ? 'red' : warn ? 'amber' : 'green'}">${bad ? t('critical') : warn ? t('warning_level') : t('normal')}</span></td></tr>`;
     }).join('') || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
   return `<div class="panel" data-block="quality">
-    <div class="panel-head"><div><h2>${t('link_quality_title')}</h2><p class="sub">${t('link_quality_sub')}</p></div></div>
+    <div class="panel-head"><div><h2>${t('link_quality_title')}</h2><p class="sub">${t('link_quality_sub')}</p></div>
+      <button class="btn btn-sm" id="qualityCfgBtn" type="button">⚙ ${t('quality_targets')}</button></div>
     <div class="panel-body dash-mini-body">${body}</div></div>`;
+}
+function qtRow(host, label) {
+  return `<div class="qt-row"><input type="text" class="qt-host" placeholder="1.1.1.1" value="${esc(host || '')}">
+    <input type="text" class="qt-label" placeholder="${esc(L('名称', 'Label'))}" value="${esc(label || '')}">
+    <button class="btn btn-sm" type="button" data-qt-del title="${esc(t('delete'))}">×</button></div>`;
+}
+function openQualityTargets() {
+  const rows = qualityTargets();
+  openModal(t('quality_targets'),
+    `<div class="dash-block-editor"><p class="dash-block-tip">${esc(L('填写要探测的地址与显示名称，最多 5 个；留空则使用 Netwatch 目标。', 'Enter up to 5 probe targets and labels; leave empty to use Netwatch.'))}</p>
+      <div id="qtList">${rows.map((r) => qtRow(r.host, r.label)).join('') || qtRow('', '')}</div>
+      <button class="btn btn-sm" id="qtAdd" type="button">+ ${esc(t('add'))}</button></div>`,
+    `<button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
+    (m) => {
+      const list = m.querySelector('#qtList');
+      const bindDel = () => list.querySelectorAll('[data-qt-del]').forEach((b) => {
+        b.onclick = () => { b.closest('.qt-row').remove(); };
+      });
+      bindDel();
+      m.querySelector('#qtAdd').onclick = () => { list.insertAdjacentHTML('beforeend', qtRow('', '')); bindDel(); };
+      m.querySelector('[data-close]').onclick = closeModal;
+      m.querySelector('[data-save]').onclick = () => {
+        const chosen = [...list.querySelectorAll('.qt-row')].map((r) => ({
+          host: r.querySelector('.qt-host').value.trim(), label: r.querySelector('.qt-label').value.trim(),
+        })).filter((r) => /^[a-zA-Z0-9_.:-]+$/.test(r.host)).slice(0, 5);
+        localStorage.setItem(QUALITY_KEY(), JSON.stringify(chosen));
+        state.quality = null; state.qualityAt = 0;
+        closeModal(); renderDashboard();
+      };
+    });
 }
 async function refreshDashExtras() {
   const now = Date.now();
   if (!state.qualityLoading && now - state.qualityAt > 30000) {
     state.qualityLoading = true;
-    try { state.quality = await api('/api/link-quality'); } catch (e) { state.quality = { error: e.message, rows: [] }; }
+    const qs = qualityTargets().map((r) => encodeURIComponent(r.host + '|' + r.label)).join(',');
+    try { state.quality = await api('/api/link-quality' + (qs ? '?targets=' + qs : '')); }
+    catch (e) { state.quality = { error: e.message, rows: [] }; }
     state.qualityAt = Date.now(); state.qualityLoading = false;
     if (state.section === 'dashboard') renderDashboard();
   }
@@ -262,8 +301,9 @@ function openDashboardBlocks() {
 
 function emptyRow(cols) { return `<tr><td colspan="${cols}" style="text-align:center;padding:36px;color:var(--muted)">${t('no_data')}</td></tr>`; }
 function topTablePanel(id, title, sub, heads, block) {
+  const numeric = new Set([t('rate_rx'), t('rate_tx'), t('total'), t('th_bytes'), L('流量', 'Bytes')]);
   return `<div class="panel"${block ? ` data-block="${esc(block)}"` : ''}><div class="panel-head"><div><h2>${esc(title)}</h2><p class="sub">${esc(sub)}</p></div></div>
-    <div class="table-scroll"><table><thead><tr>${heads.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody id="${id}Body"></tbody></table></div></div>`;
+    <div class="table-scroll"><table><thead><tr>${heads.map((h, i) => `<th class="${numeric.has(h) || i === 0 ? 'num' : ''}">${esc(h)}</th>`).join('')}</tr></thead><tbody id="${id}Body"></tbody></table></div></div>`;
 }
 /* 接口类型分布：全部来自真实接口列表，不再编造 2.4G/5G/干扰/负载 等数据 */
 function ifTypeDonutHtml(ifaces, active) {
@@ -307,7 +347,7 @@ function renderTopTables(d) {
 }
 function drawConnSpark() {
   const host = $('connSpark'); if (!host) return;
-  host.innerHTML = '<canvas id="connCv" style="width:100%;height:100%"></canvas>';
+  if (!host.querySelector('#connCv')) host.innerHTML = '<canvas id="connCv"></canvas>';
   const hist = (state.connHistory || []).slice(-60);
   drawLineChart('connCv', null, hist.map((p) => ({ ts: p.ts, total: p.total, v4: p.v4, v6: p.v6 })),
     [
@@ -512,7 +552,10 @@ function drawLineChart(canvasId, tipId, data, series, fmt) {
   const wrap = cv.parentElement; const w = wrap.clientWidth, h = wrap.clientHeight;
   if (!w || !h) return;
   const dpr = window.devicePixelRatio || 1;
-  cv.width = w * dpr; cv.height = h * dpr;
+  /* 悬停重绘时只在尺寸真正变化时才改画布位图，固定 CSS 尺寸，避免整块图抖动 */
+  const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
   const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
   if (!data || data.length < 2) return;
   const pad = { l: 58, r: 12, t: 12, b: 24 };

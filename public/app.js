@@ -24,9 +24,9 @@ const I18N = {
     security_title: '安全与策略状态', security_sub: '关键丢弃 / 拒绝规则命中计数',
     event_stream_title: '实时事件流', event_stream_sub: '关键事件 · 每 5 秒刷新',
     config_changes_title: '最近配置更改', config_changes_sub: '来自系统日志的变更记录',
-    backup_status_title: '最近备份', link_settings: '链路设置', link_capacity: '带宽 (Mbps)',
+    backup_status_title: '最近备份', link_settings: '链路设置', link_capacity: '带宽 (Mbps)', quality_targets: '目标设置',
     th_target: '目标', th_delay: '延迟', th_jitter: '抖动', th_loss: '丢包', th_chain: '链', th_rule: '规则', th_hits: '命中包', th_bytes: '字节',
-    normal: '正常', warning_level: '警告', critical: '严重', no_data: '暂无数据',
+    normal: '正常', warning_level: '警告', critical: '严重', no_data: '暂无数据', seq: '序号',
     device_online: '在线', device_offline: '离线', demo_only: '演示 DEMO',
     stats_iface_all_short: '全部网口', stats_chart_prefix: '范围', search_hint: '快捷键搜索菜单',
     dash_iface: '速率接口', dash_iface_title: '仪表盘速率接口',
@@ -137,9 +137,9 @@ const I18N = {
     security_title: 'Security & policy', security_sub: 'Hit counters of key drop / reject rules',
     event_stream_title: 'Event stream', event_stream_sub: 'Key events · refreshed every 5s',
     config_changes_title: 'Recent config changes', config_changes_sub: 'Change records from system log',
-    backup_status_title: 'Last backup', link_settings: 'Link settings', link_capacity: 'Capacity (Mbps)',
+    backup_status_title: 'Last backup', link_settings: 'Link settings', link_capacity: 'Capacity (Mbps)', quality_targets: 'Targets',
     th_target: 'Target', th_delay: 'Latency', th_jitter: 'Jitter', th_loss: 'Loss', th_chain: 'Chain', th_rule: 'Rule', th_hits: 'Hits', th_bytes: 'Bytes',
-    normal: 'Normal', warning_level: 'Warning', critical: 'Critical', no_data: 'No data',
+    normal: 'Normal', warning_level: 'Warning', critical: 'Critical', no_data: 'No data', seq: 'No.',
     device_online: 'Online', device_offline: 'Offline', demo_only: 'DEMO',
     stats_iface_all_short: 'All interfaces', stats_chart_prefix: 'Range', search_hint: 'Search menu shortcut',
     dash_iface: 'Rate source', dash_iface_title: 'Dashboard rate source',
@@ -442,6 +442,7 @@ function buildNav(filter = '') {
       <button class="nav-group-title" data-group="${g.id}" title="${esc(tx(g))}">
         <span>${esc(tx(g))}</span><span class="group-chev">⌄</span><span class="group-count">${items.length}</span>
       </button>
+      <button class="nav-group-mini" data-group="${g.id}" title="${esc(tx(g))}">${iconSvg(g.icon || 'grid')}</button>
       <div class="nav-items">${items.map((s) =>
         `<button class="nav-item ${s.id === state.section ? 'active' : ''}" data-section="${s.id}" title="${esc(tx(s.title))}">
           ${iconSvg(sectionIconName(s))}<span class="nav-label">${esc(tx(s.title))}</span></button>`).join('')}</div></div>`;
@@ -451,6 +452,13 @@ function buildNav(filter = '') {
     const id = b.dataset.group;
     if (state.collapsedGroups.has(id)) state.collapsedGroups.delete(id); else state.collapsedGroups.add(id);
     saveCollapsedGroups(); buildNav($('navSearch').value);
+  });
+  nav.querySelectorAll('.nav-group-mini').forEach((b) => b.onclick = () => {
+    /* 折叠态下点击组图标：展开侧栏并定位到该组 */
+    const sb = $('sidebar');
+    if (sb) { sb.classList.remove('collapsed'); try { localStorage.setItem('ros-traffic-collapsed', '0'); } catch (e) { /* ignore */ } }
+    state.collapsedGroups.delete(b.dataset.group); saveCollapsedGroups(); buildNav($('navSearch').value);
+    setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats(); }, 220);
   });
   const fold = $('foldAllBtn');
   if (fold) fold.textContent = groups.every((g) => state.collapsedGroups.has(g.id)) ? '+' : '−';
@@ -476,7 +484,7 @@ document.addEventListener('keydown', (e) => {
 });
 /* 按分类 id 匹配图标，未命中时按名称关键字兜底 */
 const SECTION_ICONS = {
-  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link', ipMonitor: 'speed',
+  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link', ipMonitor: 'speed', security: 'shield',
   quickSetup: 'sliders', updates: 'package',
   interfaces: 'ethernet', ipAddresses: 'ip', dhcpClients: 'monitor', dhcpServers: 'server',
   dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dhcpOptions: 'tag', dhcpOptionSets: 'clipboard', dns: 'globe', dnsStatic: 'pin',
@@ -899,6 +907,7 @@ function renderPage() {
   if (sec.id === 'dashboard') return renderDashboard();
   if (sec.id === 'trafficStats') return renderTrafficStats();
   if (sec.id === 'systemTools') return renderTools();
+  if (sec.id === 'security') return renderSecurityPage();
   if (sec.id === 'topology') return window.renderTopologyPage ? window.renderTopologyPage() : undefined;
   if (sec.id === 'ipMonitor') return window.renderIpMonitorPage ? window.renderIpMonitorPage() : undefined;
   if (sec.id === 'quickSetup') return window.renderQuickSetupPage ? window.renderQuickSetupPage() : undefined;

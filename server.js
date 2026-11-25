@@ -1476,12 +1476,20 @@ function pingOne(dev, host) {
       loss: Math.round((1 - times.length / 10) * 100) };
   }).catch((e) => ({ avg: null, jitter: null, loss: 100, error: e.message }));
 }
-async function linkQualitySnapshot(dev) {
-  if (dev.qualityCache && Date.now() - dev.qualityCache.at < QUALITY_TTL) return dev.qualityCache.data;
+async function linkQualitySnapshot(dev, targetParam) {
+  const key = String(targetParam || '');
+  if (dev.qualityCache && dev.qualityCache.key === key && Date.now() - dev.qualityCache.at < QUALITY_TTL) return dev.qualityCache.data;
   let targets = [];
-  if (dev.forceDemo) {
+  /* 用户自定义目标优先：host|标签，逗号分隔，最多 5 个；非法地址直接忽略 */
+  if (key) {
+    targets = key.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 5).map((x) => {
+      const parts = x.split('|');
+      return { host: String(parts[0] || '').trim(), label: String(parts[1] || parts[0] || '').trim() };
+    }).filter((t) => /^[a-zA-Z0-9_.:-]+$/.test(t.host));
+  }
+  if (!targets.length && dev.forceDemo) {
     targets = [{ host: '10.0.0.1', label: '网关' }, { host: '223.5.5.5', label: 'DNS' }, { host: '1.1.1.1', label: '外部网站' }];
-  } else {
+  } else if (!targets.length) {
     try {
       const rows = await rosPrint(dev, SECTION_MAP.netwatch);
       targets = (rows || []).filter((r) => r && r.host).map((r) => ({ host: String(r.host), label: String(r.comment || r.host), netwatch: String(r.status || '') }));
@@ -1492,7 +1500,7 @@ async function linkQualitySnapshot(dev) {
   const rows = [];
   for (const t of targets) rows.push({ ...t, ...(await pingOne(dev, t.host)) });
   const data = { ok: true, ts: Date.now(), rows };
-  dev.qualityCache = { at: Date.now(), data };
+  dev.qualityCache = { at: Date.now(), key, data };
   return data;
 }
 
@@ -2186,7 +2194,7 @@ const server = http.createServer(async (req, res) => {
   }
   /* 链路质量：Netwatch 目标的延迟 / 抖动 / 丢包 */
   if (p === '/api/link-quality' && req.method === 'GET') {
-    try { return json(res, 200, await linkQualitySnapshot(reqDevice(req, url))); }
+    try { return json(res, 200, await linkQualitySnapshot(reqDevice(req, url), url.searchParams.get('targets'))); }
     catch (e) { return json(res, 500, { error: e.message }); }
   }
   /* 最近一次成功备份的状态与位置 */

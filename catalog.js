@@ -31,6 +31,7 @@ const SECTIONS = [
   S('topology', 'overview', '网络拓扑', 'Network topology', null, [], { virtual: true, toggle: false, writable: false }),
   S('ipMonitor', 'overview', 'IP 流量监控', 'IP traffic monitor', null, [], { virtual: true, toggle: false, writable: false }),
   S('systemTools', 'overview', '运维工具', 'Tools', null, [], { virtual: true, toggle: false, writable: false }),
+  S('security', 'overview', '安全与策略状态', 'Security & policy', null, [], { virtual: true, toggle: false, writable: false, icon: 'shield' }),
   S('connections', 'overview', '连接状态 IPv4', 'Connections IPv4', '/ip/firewall/connection',
     [F('.id', 'ID', 'ID', 'id'), F('src-address', '源地址', 'Source', 'readonly'), F('dst-address', '目标地址', 'Destination', 'readonly'),
       F('protocol', '协议', 'Protocol', 'readonly'), F('connection-state', '状态', 'State', 'readonly'), F('bytes', '字节', 'Bytes', 'readonly')],

@@ -173,7 +173,7 @@ function renderConfigPage(sec) {
       </div>
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
-        <th class="sortable${(state.sort || {}).key === '#' ? ' sorted' : ''}" data-sort="#" style="width:52px" title="${t('sort_hint')}">#${sortMark('#')}</th>
+        <th class="sortable" data-sort="#" style="width:64px" title="${t('sort_hint')}">${t('seq')}</th>
         ${cols.filter((c) => c !== '.id').map((c) => `<th class="sortable${numCol(c, sec) ? ' num' : ''}${(state.sort || {}).key === c ? ' sorted' : ''}" data-sort="${esc(c)}" title="${t('sort_hint')}">${esc(fieldLabel(sec, c))}${sortMark(c)}</th>`).join('')}
         ${writable ? `<th style="width:${sec.id === 'wireguard' || sec.id === 'wgPeers' ? 142 : 110}px"></th>` : ''}
       </tr></thead><tbody id="tbody"></tbody></table></div>
@@ -440,8 +440,8 @@ function toolFeedHtml(rows, kind) {
     return `<div class="tool-feed-row"><time>${esc(String(r.time || ''))}</time><span class="tag ${cls}">${esc(String(r.topics || ''))}</span><span class="tool-feed-msg">${esc(msg)}</span></div>`;
   }).join('')}</div>`;
 }
-function toolSecurityHtml(data) {
-  const count = $('toolSecurityCount');
+function toolSecurityHtml(data, countId) {
+  const count = $(countId || 'toolSecurityCount');
   if (count) count.textContent = data ? num(data.total) + ' ' + L('条规则', 'rules') : '—';
   if (!data) return `<div class="empty">${t('loading')}</div>`;
   const rows = data.rows || [];
@@ -450,6 +450,26 @@ function toolSecurityHtml(data) {
     <tbody>${rows.map((r) => `<tr><td>${esc(r.chain)}</td><td><span class="tag ${r.action === 'reject' ? 'amber' : 'red'}">${esc(r.action)}</span></td>
       <td>${esc(r.comment || r.interface || r.id)}</td><td class="num">${num(r.packets).toLocaleString()}</td><td class="num">${fmtBytes(r.bytes)}</td></tr>`).join('')
       || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
+}
+let securityTimer = null;
+async function refreshSecurity() {
+  const box = $('securityBody') || $('toolSecurityFeed');
+  const countId = $('securityBody') ? 'securityCount' : 'toolSecurityCount';
+  try { if (box) box.innerHTML = toolSecurityHtml(await api('/api/security'), countId); }
+  catch (e) { if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function renderSecurityPage() {
+  $('content').innerHTML = `
+    <div class="page-head"><div><h1>${t('security_title')}</h1><p>${t('security_sub')}</p></div>
+      <div class="page-actions"><span class="tag" id="securityCount">—</span></div></div>
+    <div class="panel"><div class="panel-head"><div><h2>${t('security_title')}</h2><p class="sub">${t('security_sub')}</p></div></div>
+      <div class="panel-body dash-mini-body" id="securityBody"></div></div>`;
+  if (securityTimer) { clearInterval(securityTimer); securityTimer = null; }
+  refreshSecurity();
+  securityTimer = setInterval(() => {
+    if (state.section !== 'security') { clearInterval(securityTimer); securityTimer = null; return; }
+    refreshSecurity();
+  }, 15000);
 }
 async function refreshToolsPanels() {
   try {
@@ -463,13 +483,7 @@ async function refreshToolsPanels() {
     if (ev) ev.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     if (cf) cf.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
-  try {
-    const box = $('toolSecurityFeed');
-    if (box) box.innerHTML = toolSecurityHtml(await api('/api/security'));
-  } catch (e) {
-    const box = $('toolSecurityFeed');
-    if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
-  }
+  await refreshSecurity();
   try {
     const d = await api('/api/backup/status');
     const box = $('backupStatus');
@@ -515,10 +529,7 @@ function renderTools() {
         <span class="tag green">● LIVE</span></div><div class="panel-body" id="toolEventFeed"></div></div>
       <div class="panel"><div class="panel-head"><div><h2>${t('config_changes_title')}</h2><p class="sub">${t('config_changes_sub')}</p></div></div>
         <div class="panel-body" id="toolChangeFeed"></div></div>
-    </div>
-    <div class="panel" style="margin-top:14px"><div class="panel-head"><div><h2>${t('security_title')}</h2><p class="sub">${t('security_sub')}</p></div>
-      <span class="tag" id="toolSecurityCount">—</span></div>
-      <div class="panel-body dash-mini-body" id="toolSecurityFeed"></div></div>`;
+    </div>`;
   /* ICMP 逐条流式诊断 */
   const stopPing = () => {
     if (window.__rosPingSource) { try { window.__rosPingSource.close(); } catch (e) { /* ignore */ } window.__rosPingSource = null; }
@@ -532,7 +543,7 @@ function renderTools() {
     if (!address) { toast(L('请先填写目标地址', 'Enter a target address first'), 'err'); $('pingAddr').focus(); return; }
     stopPing();
     const out = $('pingOut'), status = $('pingStatus');
-    out.innerHTML = `<table><thead><tr><th>#</th><th>${esc(L('目标', 'Host'))}</th><th>${esc(L('时延', 'Time'))}</th><th>TTL</th><th>${esc(L('大小', 'Size'))}</th></tr></thead><tbody></tbody></table>`;
+    out.innerHTML = `<table><thead><tr><th>${t('seq')}</th><th>${esc(L('目标', 'Host'))}</th><th>${esc(L('时延', 'Time'))}</th><th>TTL</th><th>${esc(L('大小', 'Size'))}</th></tr></thead><tbody></tbody></table>`;
     status.textContent = L('正在诊断…', 'Running…');
     $('pingStop').disabled = false;
     let received = 0, lost = 0;

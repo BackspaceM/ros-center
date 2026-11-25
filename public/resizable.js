@@ -23,9 +23,14 @@
   }
   function colName(th) { return th.dataset.sort || th.textContent.trim() || String([...th.parentElement.children].indexOf(th)); }
 
+  function contentWidth() { const c = document.getElementById('content'); return c ? c.clientWidth : 0; }
+  function scaledWidth(s) {
+    const cw = contentWidth();
+    return Math.max(160, Math.round(Number(s.w) * (s.cw && cw ? cw / s.cw : 1)));
+  }
   function applyBlockSize(el, key) {
     const s = sizeStore[key];
-    if (s && Number(s.w) > 0) el.style.width = Math.round(s.w) + 'px'; else el.style.width = '';
+    if (s && Number(s.w) > 0) el.style.width = scaledWidth(s) + 'px'; else el.style.width = '';
     if (s && Number(s.h) > 0) el.style.height = Math.round(s.h) + 'px'; else el.style.height = '';
     if (s && (Number(s.w) > 0 || Number(s.h) > 0)) el.style.overflow = 'auto';
   }
@@ -44,7 +49,7 @@
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', end);
       handle.removeEventListener('pointercancel', end);
-      sizeStore[key] = { w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) };
+      sizeStore[key] = { w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height), cw: contentWidth() };
       write(SZ_KEY, sizeStore);
     };
     handle.addEventListener('pointermove', move);
@@ -152,6 +157,15 @@
     });
     mo.observe(content, { childList: true, subtree: true });
     scan();
+    /* 侧栏折叠/展开或窗口缩放改变内容区宽度时，按比例重算已保存的块宽度 */
+    const reflow = () => {
+      content.querySelectorAll('[data-rz="1"]').forEach((el) => {
+        const s = sizeStore[page() + '::' + blockName(el)];
+        if (s && Number(s.w) > 0 && s.cw) el.style.width = scaledWidth(s) + 'px';
+      });
+    };
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(reflow).observe(content);
+    else window.addEventListener('resize', reflow);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', observe);
   else observe();
