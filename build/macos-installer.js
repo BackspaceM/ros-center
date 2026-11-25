@@ -191,8 +191,10 @@ function buildDmg(appDir, arch) {
   fs.writeFileSync(path.join(root, '安装说明.txt'), PKG_README);
 
   const out = path.join(DIST, `ROS-Center-${VERSION}-macos-${arch}.dmg`);
+  /* 不强制 -fs HFS+：部分 macOS runner 上 HFS+ 格式化报 "Resource busy"，
+     让 hdiutil 用默认文件系统（APFS/HFS+）更稳，dmg 内容不受影响。 */
   execFileSync('hdiutil', ['create', '-volname', `ROS Center ${VERSION}`, '-srcfolder', root,
-    '-ov', '-format', 'UDZO', '-fs', 'HFS+', out], { stdio: 'pipe' });
+    '-ov', '-format', 'UDZO', out], { stdio: 'pipe' });
   const hex = sha256(out);
   console.log('dmg:', path.relative(path.join(__dirname, '..'), out),
     (fs.statSync(out).size / 1024 / 1024).toFixed(1) + ' MB', 'sha256:', hex.slice(0, 12) + '…');
