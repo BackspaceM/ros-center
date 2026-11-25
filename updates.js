@@ -330,7 +330,8 @@ function chooseAppBundle(latest) {
 }
 
 async function check(cfg, current = {}, previous = {}) {
-  const opts = { proxy: cfg.proxy, timeout: 15000 };
+  /* 8 秒超时：GitHub / Docker Hub 正常几百毫秒返回，超时多半是被墙，快速失败比干等 15s 体感好 */
+  const opts = { proxy: cfg.proxy, timeout: 8000 };
   const endpoint = endpointFor(cfg);
   const data = await fetchJson(endpoint, opts);
   let latest, hasUpdate, reason;

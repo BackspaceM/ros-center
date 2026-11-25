@@ -63,6 +63,9 @@
       $('qsSteps').textContent = L('共 ', 'Total ') + d.steps + L(' 条命令', ' commands');
       const s = d.summary || {};
       $('qsSummary').textContent = `LAN ${s.lanCidr || '—'} · ${L('网关', 'gateway')} ${s.gateway || '—'} · ${L('地址池', 'pool')} ${s.pool || '—'} · WAN ${s.wanIface || '—'}`;
+      const rw = $('qsReviewWan'), rl = $('qsReviewLan');
+      if (rw) rw.textContent = (s.wanIface || '—') + ' · ' + (val('qsMode') || 'pppoe').toUpperCase();
+      if (rl) rl.textContent = s.lanCidr || '—';
       const warns = d.warnings || [];
       $('qsWarn').innerHTML = warns.length
         ? `<b>${esc(L('注意事项', 'Notes'))}</b><ul>${warns.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`
@@ -132,125 +135,213 @@
       const names = (d.rows || []).map((r) => r.name).filter(Boolean);
       const dl = $('qsIfaceList');
       if (dl) dl.innerHTML = names.map((n) => `<option value="${esc(n)}"></option>`).join('');
+      /* WAN/LAN 接口下拉：真实接口优先，保留一个「自定义…」入口让用户手填 */
+      for (const id of ['qsWanSelect', 'qsLanSelect']) {
+        const sel = $(id); if (!sel) continue;
+        sel.innerHTML = names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')
+          + `<option value="__custom__">${esc(L('自定义…', 'Custom…'))}</option>`;
+        const input = $(id === 'qsWanSelect' ? 'qsWan' : 'qsLan');
+        if (input && input.value && names.includes(input.value)) sel.value = input.value;
+      }
     } catch (e) { /* 离线时用手工输入 */ }
   }
 
+  /* ---------- 向导步骤 ---------- */
+  let currentStep = 1;
+  const TOTAL_STEPS = 5;
+  function goStep(n) {
+    currentStep = Math.max(1, Math.min(TOTAL_STEPS, n));
+    document.querySelectorAll('.qs-step-pane').forEach((p) => {
+      p.classList.toggle('active', Number(p.dataset.qsStep) === currentStep);
+    });
+    document.querySelectorAll('.qs-step-tab').forEach((tab) => {
+      const i = Number(tab.dataset.qsStep);
+      tab.classList.toggle('active', i === currentStep);
+      tab.classList.toggle('done', i < currentStep);
+    });
+    const prev = $('qsStepPrev'), next = $('qsStepNext');
+    if (prev) prev.disabled = currentStep === 1;
+    if (next) { next.hidden = currentStep === TOTAL_STEPS; next.textContent = currentStep === TOTAL_STEPS - 1
+      ? L('生成预览', 'Preview') : L('下一步', 'Next'); }
+    const bar = $('qsStepBar');
+    if (bar) bar.style.width = (currentStep / TOTAL_STEPS * 100) + '%';
+    const cnt = $('qsStepCount'); if (cnt) cnt.textContent = currentStep + ' / ' + TOTAL_STEPS;
+    if (currentStep === TOTAL_STEPS) refreshPreview();
+    const box = $('qsForm'); if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   window.renderQuickSetupPage = function renderQuickSetupPage() {
+    const ifaceRow = (id, inputId, label, help) => `<div class="qs-iface-row">
+      <select id="${id}" class="qs-iface-select" aria-label="${esc(label)}"><option value="__custom__">${esc(L('自定义…', 'Custom…'))}</option></select>
+      <span class="qs-iface-or">${esc(L('或', 'or'))}</span>
+      <input type="text" id="${inputId}" list="qsIfaceList" value="${id === 'qsWanSelect' ? 'ether1' : 'bridge-lan'}" aria-label="${esc(label)}">
+      ${help ? `<div class="form-hint">${esc(help)}</div>` : ''}</div>`;
     $('content').innerHTML = `
-      <div class="page-head"><div>
-        <h1>${esc(L('一键配置', 'Quick setup'))}</h1>
-        <p>${esc(L('按向导生成 RouterOS 配置：PPPoE 拨号 / DHCP 自动获取 / 静态 IP，自定义内网网段，并附带常用防火墙与管理员账号设置。', 'Generate RouterOS config: PPPoE / DHCP / static WAN, custom LAN subnet, common firewall rules and admin account changes.'))}</p>
-      </div><span class="qs-tag">${esc(L('先预览，再应用', 'Preview before apply'))}</span></div>
-
-      <div class="qs-warn-top">${esc(L('建议在未配置或已恢复出厂的路由器上使用；本工具会按 comment 幂等更新自己生成的条目，不会删除手工添加的规则。生产环境请先备份配置。', 'Best used on a fresh/reset router. Entries created here are updated idempotently by comment; manually added rules are never deleted. Back up production configs first.'))}</div>
-
-      <div id="qsForm">
-        <datalist id="qsIfaceList"><option value="ether1"><option value="bridge-lan"></datalist>
-        <div class="grid-2">
-          <div class="panel"><div class="panel-head"><div><h2>1 · ${esc(L('上网方式', 'WAN / uplink'))}</h2></div></div>
-            <div class="panel-body">
-              <div class="form-row"><label>${esc(L('接入类型', 'Connection type'))}</label><div><select id="qsMode">
-                <option value="pppoe">PPPoE ${esc(L('拨号', 'dial-up'))}</option>
-                <option value="dhcp">DHCP ${esc(L('自动获取', 'auto'))}</option>
-                <option value="static">${esc(L('静态 IP', 'Static IP'))}</option></select></div></div>
-              <div class="form-row"><label>${esc(L('WAN 接口', 'WAN interface'))}</label><div><input type="text" id="qsWan" list="qsIfaceList" value="ether1"></div></div>
-              <div class="qs-sub" id="qsPppoeRow">
-                <div class="form-row"><label>${esc(L('PPPoE 账号', 'PPPoE username'))}</label><div><input type="text" id="qsPppoeUser" autocomplete="off" placeholder="user@isp"></div></div>
-                <div class="form-row"><label>${esc(L('PPPoE 密码', 'PPPoE password'))}</label><div><input type="password" id="qsPppoePass" autocomplete="new-password"></div></div>
-                <div class="qs-inline3">
-                  <div><label>${esc(L('接口名', 'Name'))}</label><input type="text" id="qsPppoeName" value="pppoe-out1"></div>
-                  <div><label>MTU</label><input type="number" id="qsPppoeMtu" value="1480" min="576" max="1500"></div>
-                  <div><label>MRU</label><input type="number" id="qsPppoeMru" value="1480" min="576" max="1500"></div>
-                </div>
-                <div class="form-row"><label>${esc(L('服务名', 'Service name'))}</label><div><input type="text" id="qsPppoeService" placeholder="${esc(L('可留空', 'optional'))}"></div></div>
-                <label class="qs-check"><input type="checkbox" id="qsPppoePeerDns"><span>${esc(L('使用运营商下发的 DNS', 'Use peer DNS'))}</span></label>
-              </div>
-              <div class="qs-sub" id="qsDhcpRow" style="display:none">
-                <label class="qs-check"><input type="checkbox" id="qsWanPeerDns" checked><span>${esc(L('使用对端 DNS', 'Use peer DNS'))}</span></label>
-                <label class="qs-check"><input type="checkbox" id="qsWanDefaultRoute" checked><span>${esc(L('添加默认路由', 'Add default route'))}</span></label>
-              </div>
-              <div class="qs-sub" id="qsStaticRow" style="display:none">
-                <div class="form-row"><label>${esc(L('WAN 地址', 'WAN address'))}</label><div><input type="text" id="qsStaticAddr" placeholder="10.0.1.2/30"></div></div>
-                <div class="form-row"><label>${esc(L('默认网关', 'Default gateway'))}</label><div><input type="text" id="qsStaticGw" placeholder="10.0.1.1"></div></div>
-              </div>
-            </div></div>
-
-          <div class="panel"><div class="panel-head"><div><h2>2 · ${esc(L('内网与 DHCP', 'LAN & DHCP'))}</h2></div></div>
-            <div class="panel-body">
-              <div class="form-row"><label>${esc(L('内网网段（可自定义）', 'LAN subnet (customizable)'))}</label><div>
-                <input type="text" id="qsLanCidr" value="192.168.88.1/24" placeholder="192.168.88.1/24">
-                <div class="form-hint">${esc(L('填写网关 IP/前缀，如 10.10.0.1/16；地址池默认自动推算，也可手动指定。', 'Enter gateway IP/prefix; the pool is derived automatically unless overridden.'))}</div></div></div>
-              <div class="qs-inline3">
-                <div><label>${esc(L('地址池起', 'Pool start'))}</label><input type="text" id="qsPoolStart" placeholder="${esc(L('自动', 'auto'))}"></div>
-                <div><label>${esc(L('地址池止', 'Pool end'))}</label><input type="text" id="qsPoolEnd" placeholder="${esc(L('自动', 'auto'))}"></div>
-                <div><label>${esc(L('租约', 'Lease'))}</label><input type="text" id="qsLease" value="1d"></div>
-              </div>
-              <div class="form-row"><label>${esc(L('LAN 接口', 'LAN interface'))}</label><div><input type="text" id="qsLan" list="qsIfaceList" value="bridge-lan"></div></div>
-              <label class="qs-check"><input type="checkbox" id="qsBridge" checked><span>${esc(L('创建 LAN 网桥并加入端口', 'Create LAN bridge and add ports'))}</span></label>
-              <div class="form-row"><label>${esc(L('桥接端口', 'Bridge ports'))}</label><div><input type="text" id="qsBridgePorts" value="ether2,ether3,ether4,ether5" placeholder="ether2,ether3"></div></div>
-              <div class="form-row"><label>${esc(L('上游 DNS', 'Upstream DNS'))}</label><div><input type="text" id="qsDns" value="223.5.5.5,119.29.29.29"></div></div>
-              <div class="form-row"><label>${esc(L('下发给客户端的 DNS', 'DNS handed to clients'))}</label><div><select id="qsDnsForClients">
-                <option value="gateway">${esc(L('网关自身（启用 DNS 缓存）', 'Router itself (DNS cache)'))}</option>
-                <option value="upstream">${esc(L('直接使用上游 DNS', 'Upstream DNS'))}</option>
-                <option value="custom">${esc(L('自定义', 'Custom'))}</option></select></div></div>
-              <div class="form-row" id="qsCustomDnsRow" style="display:none"><label>${esc(L('自定义 DNS', 'Custom DNS'))}</label><div><input type="text" id="qsCustomDns" placeholder="10.0.0.2,10.0.0.3"></div></div>
-              <div class="qs-inline3">
-                <div><label>${esc(L('域名', 'Domain'))}</label><input type="text" id="qsDomain" value="lan"></div>
-                <div style="flex:2"><label>${esc(L('DHCP 选项集（可选）', 'DHCP option set (optional)'))}</label><input type="text" id="qsOptionSet" placeholder="lan-extras"></div>
-              </div>
-              <div class="form-hint">${esc(L('选项与选项集在「网络设置 → DHCP 选项 / DHCP 选项集」里创建，这里填名称即可关联。', 'Create options/sets under Network → DHCP options, then reference a set name here.'))}</div>
-            </div></div>
-        </div>
-
-        <div class="grid-2" style="margin-top:14px">
-          <div class="panel"><div class="panel-head"><div><h2>3 · ${esc(L('防火墙与系统', 'Firewall & system'))}</h2></div></div>
-            <div class="panel-body">
-              <label class="qs-check"><input type="checkbox" id="qsFwBasic" checked><span>${esc(L('常用防火墙模板（input/forward + NAT 伪装）', 'Common firewall template (input/forward + NAT masquerade)'))}</span></label>
-              <label class="qs-check"><input type="checkbox" id="qsFwFasttrack" checked><span>FastTrack ${esc(L('加速已建立连接', 'for established connections'))}</span></label>
-              <label class="qs-check"><input type="checkbox" id="qsFwDropWan" checked><span>${esc(L('丢弃来自 WAN 的入站管理流量', 'Drop inbound WAN management traffic'))}</span></label>
-              <label class="qs-check"><input type="checkbox" id="qsFwAllowPing"><span>${esc(L('允许 WAN 侧 Ping', 'Allow WAN ping'))}</span></label>
-              <div class="qs-divider"></div>
-              <div class="form-row"><label>${esc(L('设备名称', 'Device identity'))}</label><div><input type="text" id="qsIdentity" placeholder="ROS-Center"></div></div>
-              <div class="form-row"><label>${esc(L('关闭不安全服务', 'Disable insecure services'))}</label><div class="qs-checks-inline">
-                <label class="qs-check"><input type="checkbox" id="qsSvcTelnet"><span>telnet</span></label>
-                <label class="qs-check"><input type="checkbox" id="qsSvcFtp" checked><span>ftp</span></label>
-                <label class="qs-check"><input type="checkbox" id="qsSvcWww"><span>www</span></label></div></div>
-              <div class="form-hint">${esc(L('API / SSH / WinBox 不会被禁用，避免把 ROS Center 自己踢下线。', 'API / SSH / WinBox are never disabled, so ROS Center stays connected.'))}</div>
-            </div></div>
-
-          <div class="panel"><div class="panel-head"><div><h2>4 · ${esc(L('管理员账号', 'Administrator account'))}</h2></div></div>
-            <div class="panel-body">
-              <label class="qs-check"><input type="checkbox" id="qsAdminEnabled"><span>${esc(L('修改用户名 / 密码', 'Change username / password'))}</span></label>
-              <div class="form-row"><label>${esc(L('当前用户名', 'Current username'))}</label><div><input type="text" id="qsAdminCurrent" value="admin"></div></div>
-              <div class="form-row"><label>${esc(L('新用户名', 'New username'))}</label><div><input type="text" id="qsAdminNewUser" placeholder="${esc(L('留空则只改密码', 'blank = password only'))}"></div></div>
-              <div class="qs-inline3">
-                <div><label>${esc(L('新密码（≥8）', 'New password (≥8)'))}</label><input type="password" id="qsAdminNewPass" autocomplete="new-password"></div>
-                <div><label>${esc(L('确认密码', 'Confirm password'))}</label><input type="password" id="qsAdminConfirm" autocomplete="new-password"></div>
-              </div>
-              <label class="qs-check"><input type="checkbox" id="qsAdminSync" checked><span>${esc(L('同步更新 ROS Center 的连接凭据并自动重连', 'Sync ROS Center credentials and reconnect'))}</span></label>
-              <div class="qs-divider"></div>
-              <label class="qs-check"><input type="checkbox" id="qsClean"><span>${esc(L('重新应用前先清理本工具之前生成的条目', 'Remove previous entries created by this tool before re-applying'))}</span></label>
-              <div class="form-hint">${esc(L('默认按名称/comment 更新已有条目，不会堆叠；勾选清理会删除带本工具标记的旧条目（LAN 地址与网桥除外）。', 'By default existing entries are updated in place. Cleaning removes marked entries, except LAN address/bridge.'))}</div>
-            </div></div>
-        </div>
+      <div class="qs-hero">
+        <div class="qs-hero-icon">⚙</div>
+        <div><h1>${esc(L('一键配置', 'Quick setup'))}</h1>
+          <p>${esc(L('跟着向导走 5 步，生成可预览的 RouterOS 配置，确认无误后再应用到路由器。', 'Follow 5 steps to generate a reviewable RouterOS config, then apply it when ready.'))}</p></div>
+        <span class="qs-tag">${esc(L('先预览，再应用', 'Preview before apply'))}</span>
       </div>
 
-      <div class="panel qs-preview" style="margin-top:14px">
-        <div class="panel-head"><div><h2>${esc(L('生成的 RouterOS 脚本', 'Generated RouterOS script'))}</h2>
-          <p class="sub" id="qsSummary">—</p></div><span class="topo-hint" id="qsSteps"></span></div>
-        <div class="panel-body">
-          <div id="qsWarn" class="qs-warn" style="display:none"></div>
-          <pre class="qs-code" id="qsScript">${esc(L('加载中…', 'Loading…'))}</pre>
-          <div class="form-hint">${esc(L('预览中的密码已遮蔽；下载的 .rsc 与实际应用使用真实值。', 'Passwords are masked in the preview; downloaded .rsc and the actual apply use real values.'))}</div>
+      <div class="qs-warn-top">${esc(L('建议在未配置或已恢复出厂的路由器上使用；本工具按 comment 幂等更新自己生成的条目，不删除手工规则。生产环境请先备份。', 'Best on a fresh/reset router. Entries are updated idempotently by comment; manual rules are untouched. Back up production configs first.'))}</div>
+
+      <div class="qs-wizard" id="qsForm">
+        <div class="qs-stepper">
+          <div class="qs-step-bar"><i id="qsStepBar"></i></div>
+          ${[
+            [1, L('上网方式', 'WAN'), L('WAN 接入', 'WAN uplink')],
+            [2, L('内网 DHCP', 'LAN'), L('网段与地址池', 'Subnet & pool')],
+            [3, L('防火墙系统', 'Firewall'), L('安全与服务', 'Security & services')],
+            [4, L('管理员账号', 'Account'), L('用户名密码', 'Credentials')],
+            [5, L('预览应用', 'Review'), L('检查并应用', 'Review & apply')],
+          ].map(([n, t1, t2]) => `<button type="button" class="qs-step-tab" data-qs-step="${n}"><span class="qs-step-dot">${n}</span><span class="qs-step-txt"><b>${esc(t1)}</b><small>${esc(t2)}</small></span></button>`).join('')}
+        </div>
+
+        <div class="qs-step-pane active" data-qs-step="1">
+          <div class="qs-pane-head"><span class="qs-pane-num">1</span><div><h2>${esc(L('上网方式', 'WAN / uplink'))}</h2><p>${esc(L('选择路由器如何接入互联网', 'How the router connects to the internet'))}</p></div></div>
+          <datalist id="qsIfaceList"><option value="ether1"><option value="bridge-lan"></datalist>
+          <div class="qs-field"><label>${esc(L('接入类型', 'Connection type'))}</label>
+            <div class="qs-mode-cards">
+              <label class="qs-mode-card"><input type="radio" name="qsModeRadio" value="pppoe" checked><span class="qs-mode-ic">PPP</span><span><b>PPPoE</b><small>${esc(L('拨号上网', 'Dial-up'))}</small></span></label>
+              <label class="qs-mode-card"><input type="radio" name="qsModeRadio" value="dhcp"><span class="qs-mode-ic">DHCP</span><span><b>DHCP</b><small>${esc(L('自动获取', 'Auto'))}</small></span></label>
+              <label class="qs-mode-card"><input type="radio" name="qsModeRadio" value="static"><span class="qs-mode-ic">IP</span><span><b>${esc(L('静态 IP', 'Static'))}</b><small>${esc(L('固定地址', 'Fixed address'))}</small></span></label>
+            </div>
+            <select id="qsMode" hidden><option value="pppoe">PPPoE</option><option value="dhcp">DHCP</option><option value="static">Static</option></select>
+          </div>
+          <div class="qs-field"><label>${esc(L('WAN 接口', 'WAN interface'))}</label>
+            ${ifaceRow('qsWanSelect', 'qsWan', L('WAN 接口', 'WAN interface'), L('可从下拉选择真实接口，也可直接输入接口名。', 'Pick a detected interface or type a custom name.'))}</div>
+          <div class="qs-sub" id="qsPppoeRow">
+            <div class="qs-inline2">
+              <div class="qs-field"><label>${esc(L('PPPoE 账号', 'Username'))}</label><input type="text" id="qsPppoeUser" autocomplete="off" placeholder="user@isp"></div>
+              <div class="qs-field"><label>${esc(L('PPPoE 密码', 'Password'))}</label><input type="password" id="qsPppoePass" autocomplete="new-password"></div>
+            </div>
+            <div class="qs-inline3">
+              <div><label>${esc(L('接口名', 'Name'))}</label><input type="text" id="qsPppoeName" value="pppoe-out1"></div>
+              <div><label>MTU</label><input type="number" id="qsPppoeMtu" value="1480" min="576" max="1500"></div>
+              <div><label>MRU</label><input type="number" id="qsPppoeMru" value="1480" min="576" max="1500"></div>
+            </div>
+            <div class="qs-field"><label>${esc(L('服务名', 'Service name'))}</label><input type="text" id="qsPppoeService" placeholder="${esc(L('可留空', 'optional'))}"></div>
+            <label class="qs-check"><input type="checkbox" id="qsPppoePeerDns"><span>${esc(L('使用运营商下发的 DNS', 'Use peer DNS'))}</span></label>
+          </div>
+          <div class="qs-sub" id="qsDhcpRow" style="display:none">
+            <label class="qs-check"><input type="checkbox" id="qsWanPeerDns" checked><span>${esc(L('使用对端 DNS', 'Use peer DNS'))}</span></label>
+            <label class="qs-check"><input type="checkbox" id="qsWanDefaultRoute" checked><span>${esc(L('添加默认路由', 'Add default route'))}</span></label>
+          </div>
+          <div class="qs-sub" id="qsStaticRow" style="display:none">
+            <div class="qs-inline2">
+              <div class="qs-field"><label>${esc(L('WAN 地址', 'WAN address'))}</label><input type="text" id="qsStaticAddr" placeholder="10.0.1.2/30"></div>
+              <div class="qs-field"><label>${esc(L('默认网关', 'Gateway'))}</label><input type="text" id="qsStaticGw" placeholder="10.0.1.1"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="qs-step-pane" data-qs-step="2">
+          <div class="qs-pane-head"><span class="qs-pane-num">2</span><div><h2>${esc(L('内网与 DHCP', 'LAN & DHCP'))}</h2><p>${esc(L('配置内网网段、地址池与 DNS', 'Subnet, address pool and DNS'))}</p></div></div>
+          <div class="qs-field"><label>${esc(L('内网网段（网关 IP/前缀）', 'LAN subnet (gateway IP/prefix)'))}</label>
+            <input type="text" id="qsLanCidr" value="192.168.88.1/24" placeholder="192.168.88.1/24">
+            <div class="form-hint">${esc(L('如 10.10.0.1/16；地址池自动推算，也可手动指定。', 'e.g. 10.10.0.1/16; pool derived automatically unless overridden.'))}</div></div>
+          <div class="qs-inline3">
+            <div><label>${esc(L('地址池起', 'Pool start'))}</label><input type="text" id="qsPoolStart" placeholder="${esc(L('自动', 'auto'))}"></div>
+            <div><label>${esc(L('地址池止', 'Pool end'))}</label><input type="text" id="qsPoolEnd" placeholder="${esc(L('自动', 'auto'))}"></div>
+            <div><label>${esc(L('租约', 'Lease'))}</label><input type="text" id="qsLease" value="1d"></div>
+          </div>
+          <div class="qs-field"><label>${esc(L('LAN 接口', 'LAN interface'))}</label>
+            ${ifaceRow('qsLanSelect', 'qsLan', L('LAN 接口', 'LAN interface'))}</div>
+          <label class="qs-check"><input type="checkbox" id="qsBridge" checked><span>${esc(L('创建 LAN 网桥并加入端口', 'Create LAN bridge and add ports'))}</span></label>
+          <div class="qs-field"><label>${esc(L('桥接端口', 'Bridge ports'))}</label><input type="text" id="qsBridgePorts" value="ether2,ether3,ether4,ether5" placeholder="ether2,ether3"></div>
+          <div class="qs-inline2">
+            <div class="qs-field"><label>${esc(L('上游 DNS', 'Upstream DNS'))}</label><input type="text" id="qsDns" value="223.5.5.5,119.29.29.29"></div>
+            <div class="qs-field"><label>${esc(L('下发给客户端的 DNS', 'DNS for clients'))}</label><select id="qsDnsForClients">
+              <option value="gateway">${esc(L('网关自身（DNS 缓存）', 'Router itself (DNS cache)'))}</option>
+              <option value="upstream">${esc(L('直接上游 DNS', 'Upstream DNS'))}</option>
+              <option value="custom">${esc(L('自定义', 'Custom'))}</option></select></div>
+          </div>
+          <div class="qs-field" id="qsCustomDnsRow" style="display:none"><label>${esc(L('自定义 DNS', 'Custom DNS'))}</label><input type="text" id="qsCustomDns" placeholder="10.0.0.2,10.0.0.3"></div>
+          <div class="qs-inline2">
+            <div class="qs-field"><label>${esc(L('域名', 'Domain'))}</label><input type="text" id="qsDomain" value="lan"></div>
+            <div class="qs-field"><label>${esc(L('DHCP 选项集（可选）', 'DHCP option set (optional)'))}</label><input type="text" id="qsOptionSet" placeholder="lan-extras"></div>
+          </div>
+          <div class="form-hint">${esc(L('选项集在「网络设置 → DHCP 选项集」创建，这里填名称关联。', 'Create option sets under Network → DHCP options, then reference by name.'))}</div>
+        </div>
+
+        <div class="qs-step-pane" data-qs-step="3">
+          <div class="qs-pane-head"><span class="qs-pane-num">3</span><div><h2>${esc(L('防火墙与系统', 'Firewall & system'))}</h2><p>${esc(L('基础防护、设备名与不安全服务', 'Basic protection, identity and insecure services'))}</p></div></div>
+          <div class="qs-check-list">
+            <label class="qs-check"><input type="checkbox" id="qsFwBasic" checked><span>${esc(L('常用防火墙模板（input/forward + NAT 伪装）', 'Common firewall template (input/forward + NAT masquerade)'))}</span></label>
+            <label class="qs-check"><input type="checkbox" id="qsFwFasttrack" checked><span>FastTrack ${esc(L('加速已建立连接', 'for established connections'))}</span></label>
+            <label class="qs-check"><input type="checkbox" id="qsFwDropWan" checked><span>${esc(L('丢弃来自 WAN 的入站管理流量', 'Drop inbound WAN management traffic'))}</span></label>
+            <label class="qs-check"><input type="checkbox" id="qsFwAllowPing"><span>${esc(L('允许 WAN 侧 Ping', 'Allow WAN ping'))}</span></label>
+          </div>
+          <div class="qs-field"><label>${esc(L('设备名称', 'Device identity'))}</label><input type="text" id="qsIdentity" placeholder="ROS-Center"></div>
+          <div class="qs-field"><label>${esc(L('关闭不安全服务', 'Disable insecure services'))}</label>
+            <div class="qs-checks-inline">
+              <label class="qs-check"><input type="checkbox" id="qsSvcTelnet"><span>telnet</span></label>
+              <label class="qs-check"><input type="checkbox" id="qsSvcFtp" checked><span>ftp</span></label>
+              <label class="qs-check"><input type="checkbox" id="qsSvcWww"><span>www</span></label></div>
+            <div class="form-hint">${esc(L('API / SSH / WinBox 不会被禁用，避免把 ROS Center 踢下线。', 'API / SSH / WinBox are never disabled, so ROS Center stays connected.'))}</div></div>
+        </div>
+
+        <div class="qs-step-pane" data-qs-step="4">
+          <div class="qs-pane-head"><span class="qs-pane-num">4</span><div><h2>${esc(L('管理员账号', 'Administrator account'))}</h2><p>${esc(L('可选：修改路由器登录用户名与密码', 'Optionally change the router login'))}</p></div></div>
+          <label class="qs-check"><input type="checkbox" id="qsAdminEnabled"><span>${esc(L('修改用户名 / 密码', 'Change username / password'))}</span></label>
+          <div class="qs-inline2">
+            <div class="qs-field"><label>${esc(L('当前用户名', 'Current username'))}</label><input type="text" id="qsAdminCurrent" value="admin"></div>
+            <div class="qs-field"><label>${esc(L('新用户名', 'New username'))}</label><input type="text" id="qsAdminNewUser" placeholder="${esc(L('留空只改密码', 'blank = password only'))}"></div>
+          </div>
+          <div class="qs-inline2">
+            <div class="qs-field"><label>${esc(L('新密码（≥8）', 'New password (≥8)'))}</label><input type="password" id="qsAdminNewPass" autocomplete="new-password"></div>
+            <div class="qs-field"><label>${esc(L('确认密码', 'Confirm password'))}</label><input type="password" id="qsAdminConfirm" autocomplete="new-password"></div>
+          </div>
+          <label class="qs-check"><input type="checkbox" id="qsAdminSync" checked><span>${esc(L('同步更新 ROS Center 连接凭据并自动重连', 'Sync ROS Center credentials and reconnect'))}</span></label>
+          <div class="qs-divider"></div>
+          <label class="qs-check"><input type="checkbox" id="qsClean"><span>${esc(L('重新应用前清理本工具之前生成的条目', 'Remove entries previously created by this tool'))}</span></label>
+          <div class="form-hint">${esc(L('默认按 comment 幂等更新；勾选清理会删除带本工具标记的旧条目（LAN 地址与网桥除外）。', 'Default updates in place by comment; cleaning removes marked entries except LAN address/bridge.'))}</div>
+        </div>
+
+        <div class="qs-step-pane" data-qs-step="5">
+          <div class="qs-pane-head"><span class="qs-pane-num">5</span><div><h2>${esc(L('预览与应用', 'Review & apply'))}</h2><p>${esc(L('检查生成的脚本，确认后再写入路由器', 'Review the generated script before writing'))}</p></div></div>
+          <div class="qs-review-cards">
+            <div class="qs-review-card"><small>${esc(L('上网方式', 'WAN'))}</small><b id="qsReviewWan">—</b></div>
+            <div class="qs-review-card"><small>${esc(L('内网网段', 'LAN'))}</small><b id="qsReviewLan">—</b></div>
+            <div class="qs-review-card"><small>${esc(L('命令数', 'Commands'))}</small><b id="qsSteps">—</b></div>
+          </div>
+          <div class="qs-preview">
+            <div class="qs-preview-head"><span>${esc(L('生成的 RouterOS 脚本', 'Generated RouterOS script'))}</span><span class="topo-hint" id="qsSummary">—</span></div>
+            <div id="qsWarn" class="qs-warn" style="display:none"></div>
+            <pre class="qs-code" id="qsScript">${esc(L('加载中…', 'Loading…'))}</pre>
+            <div class="form-hint">${esc(L('预览密码已遮蔽；下载的 .rsc 与实际应用使用真实值。', 'Passwords masked in preview; real values used on download/apply.'))}</div>
+          </div>
           <div class="qs-actions">
-            <button class="btn" id="qsPreview" type="button">${esc(L('刷新预览', 'Refresh preview'))}</button>
+            <button class="btn" id="qsPreview" type="button">${esc(L('刷新预览', 'Refresh'))}</button>
             <button class="btn" id="qsDownload" type="button">${esc(L('下载 .rsc', 'Download .rsc'))}</button>
             <button class="btn primary" id="qsApply" type="button">${esc(L('一键应用', 'Apply now'))}</button>
           </div>
           <div id="qsResult"></div>
-        </div></div>`;
+        </div>
 
-    toggleMode();
+        <div class="qs-wizard-nav">
+          <button class="btn" id="qsStepPrev" type="button">← ${esc(L('上一步', 'Back'))}</button>
+          <span class="qs-step-count" id="qsStepCount">1 / 5</span>
+          <button class="btn primary" id="qsStepNext" type="button">${esc(L('下一步', 'Next'))} →</button>
+        </div>
+      </div>`;
+
+    /* 接入类型卡片 → 同步隐藏的 select（collect 依赖 qsMode） */
+    document.querySelectorAll('input[name="qsModeRadio"]').forEach((r) => {
+      r.onchange = () => { const m = $('qsMode'); if (m) { m.value = r.value; m.dispatchEvent(new Event('change')); } };
+    });
+    /* 接口下拉 → 同步到真实输入框 */
+    const bindIface = (selId, inputId) => {
+      const sel = $(selId); if (!sel) return;
+      sel.onchange = () => { if (sel.value === '__custom__') { $(inputId).focus(); return; } $(inputId).value = sel.value; $(inputId).dispatchEvent(new Event('input')); };
+    };
+    bindIface('qsWanSelect', 'qsWan'); bindIface('qsLanSelect', 'qsLan');
+    /* 步骤导航 */
+    document.querySelectorAll('.qs-step-tab').forEach((tab) => { tab.onclick = () => goStep(Number(tab.dataset.qsStep)); });
+    $('qsStepPrev').onclick = () => goStep(currentStep - 1);
+    $('qsStepNext').onclick = () => goStep(currentStep + 1);
+
     $('qsMode').onchange = () => { toggleMode(); schedulePreview(); };
     $('qsDnsForClients').onchange = () => { toggleMode(); schedulePreview(); };
     $('qsForm').querySelectorAll('input,select').forEach((el) => {
@@ -261,6 +352,7 @@
     $('qsDownload').onclick = downloadScript;
     $('qsApply').onclick = apply;
     loadInterfaces();
+    currentStep = 1; goStep(1);
     refreshPreview();
   };
 })();

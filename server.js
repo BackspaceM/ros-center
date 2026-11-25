@@ -1554,8 +1554,15 @@ async function downloadUpdateAsset(asset, automatic) {
   console.log(`[updates] downloaded ${name} (${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
   return rec;
 }
-async function performUpdateCheck(trigger) {
+/* 最近一次成功检查的缓存有效期：普通「检查」秒回缓存，避免每次都等 GitHub/Docker Hub；
+   需要真正重新请求时用 force（前端「强制检查」或定时自动检查）。 */
+const UPDATE_CACHE_MS = 60 * 1000;
+async function performUpdateCheck(trigger, force = false) {
   if (updateChecking) return updateState.status;
+  const st = updateState.status;
+  if (!force && st && st.ok && st.checkedAt && Date.now() - Date.parse(st.checkedAt) < UPDATE_CACHE_MS) {
+    return st;   // 缓存新鲜，直接返回，UI 秒开
+  }
   updateChecking = true;
   const current = runtimeInfo();
   const prev = updateState.status && updateState.status.ok
@@ -1717,7 +1724,8 @@ function scheduleUpdateChecks() {
   if (updateTimer.unref) updateTimer.unref();
   const last = Date.parse((updateState.status || {}).checkedAt || '') || 0;
   if (Date.now() - last >= ms) {
-    const t = setTimeout(() => { performUpdateCheck('startup').catch(() => {}); }, 6000);
+    /* 启动即后台检查（1s 后），用户打开页面时通常已有结果，无需等待 */
+    const t = setTimeout(() => { performUpdateCheck('startup').catch(() => {}); }, 1000);
     if (t.unref) t.unref();
   }
 }
@@ -2256,7 +2264,9 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 400, { error: updates.friendlyError(e) }); }
   }
   if (p === '/api/update/check' && req.method === 'POST') {
-    const s = await performUpdateCheck('manual');
+    let force = false;
+    try { force = !!(await readBody(req)).force; } catch (e) { /* 空 body 视为普通检查 */ }
+    const s = await performUpdateCheck('manual', force);
     return json(res, 200, { ok: true, status: s, config: publicUpdateConfig() });
   }
   if (p === '/api/update/download' && req.method === 'POST') {

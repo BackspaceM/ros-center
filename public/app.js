@@ -866,7 +866,21 @@ function renderPage() {
 }
 async function refreshRowsIfLoaded() {
   const sec = state.schema.sections.find((s) => s.id === state.section);
-  if (sec && sec.path && $('tbody')) { try { await loadRows(sec); } catch (e) { /* ignore */ } }
+  if (!sec || !sec.path || !$('tbody')) return;
+  try {
+    /* 实时帧每秒拉新数据后必须重绘 tbody，否则连接表的 bytes 变了界面也不动。
+       只读表格（连接状态 / 其它 readonly 分类）没有输入框，重绘不会丢焦点。 */
+    const sig = liveRowsSignature(sec);
+    await loadRows(sec);
+    if (liveRowsSignature(sec) !== sig) renderRows(sec);
+  } catch (e) { /* ignore */ }
+}
+/* 连接表实时刷新用的轻量签名：id + 字节 + 状态，避免无变化时空转重绘 */
+function liveRowsSignature(sec) {
+  const key = sec.id === 'connections' || sec.id === 'connections6' ? 'bytes' : null;
+  const rows = state.rows || [];
+  if (!key) return rows.length + ':' + rows.map((r) => r && r['.id']).join(',');
+  return rows.length + ':' + rows.map((r) => [r && r['.id'], r && r[key], r && r['connection-state']].join('|')).join(',');
 }
 
 function applyLang() {
