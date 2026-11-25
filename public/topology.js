@@ -17,7 +17,7 @@
   let data = null, loading = false, iconUrl = '', iconLib = [], iconLabel = '';
   let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
-  let selectedId = null, drag = null, panDrag = null, rates = new Map(), rateTimer = null;
+  let selectedId = null, drag = null, panDrag = null, rates = new Map(), ipRates = new Map(), rateTimer = null;
   let activeFx = null;
 
   const typeLabel = (tp) => L(TYPE_ZH[tp] || TYPE_ZH.other, TYPE_EN[tp] || TYPE_EN.other);
@@ -70,6 +70,8 @@
     $('topoDelete').onclick = () => deleteSelected();
     $('topoAnimBtn').onclick = () => openAnimSettings();
     window.openTopologyAnimSettings = openAnimSettings;
+    /* 供「IP 流量监控」页跳转过来直接编辑指定节点 */
+    window.openTopologyEditorById = (id) => { const n = map.get(String(id || '')); if (n) openEditor(n); };
     $('topoRefresh').onclick = () => load(true);
     const stage = $('topoStage');
     if (data && data.deviceId === currentDeviceId() && stage.dataset.loaded === '1') { buildLayout(); fitView(); draw(); return; }
@@ -252,9 +254,12 @@
     return out;
   }
 
-  /* 速率来源：优先节点自带的关联接口；手工设备没填接口时，用填写的「上级端口」
-     （例如设备接在上级 ether3 口，该口的实时速率即可代表这条链路） */
+  /* 速率来源优先级：① 节点开启的按 IP 测速（连接表聚合）② 关联接口 ③ 上级端口 */
   function directRate(n) {
+    if (n && n.ipRate && n.ip) {
+      const ir = ipRates.get(String(n.ip).trim());
+      if (ir && (ir.rxBps || ir.txBps)) return ir;
+    }
     for (const key of [n.iface, n.parentPort]) {
       const k = String(key || '').trim(); if (!k) continue;
       const r = rates.get(k);
@@ -413,8 +418,12 @@
       /* 预览面板 / 后台标签里 document.hidden 可能为 true，不能用它做守卫，否则速率永远不刷新 */
       if (!data || !$('topoStage')) return;
       try {
-        const snap = await api('/api/snapshot');
+        const [snap, ipd] = await Promise.all([
+          api('/api/snapshot'),
+          api('/api/ip-rates').catch(() => ({ rows: [] })),
+        ]);
         rates = new Map((snap.ifaces || []).map((i) => [i.name, { rxBps: i.rxBps || 0, txBps: i.txBps || 0 }]));
+        ipRates = new Map((ipd.rows || []).map((r) => [r.ip, { rxBps: r.rxBps || 0, txBps: r.txBps || 0 }]));
         paintRates();
       } catch (e) { /* ignore */ }
     };
@@ -576,6 +585,7 @@
     return { id: n.id, name: n.name, type: n.type, ip: n.ip || '', parent: n.parent || null,
       parentPort: n.parentPort || '', ports: Array.isArray(n.ports) ? n.ports.slice() : [],
       iface: n.iface || '', icon: n.icon || '', note: n.note || '', anim: n.anim || 'none',
+      ipRate: !!n.ipRate,
       calcFrom: Array.isArray(n.calcFrom) ? n.calcFrom.slice() : [],
       order: Number(n.order) || 0,
       deleted: false, x: n.x || 0, y: n.y || 0 };
@@ -649,6 +659,7 @@
           ${field(L('本层排序', 'Order in level'), `<input id="tnOrder" type="number" min="1" max="999" value="${node && Number(node.order) > 0 ? Number(node.order) : ''}" placeholder="1">`, L('同层左右顺序，留空排最后', 'Left-to-right order; blank sorts last'))}
         </div>`)}
       ${section('3', L('流量与动画', 'Traffic & animation'), L('无法直采时可用下级速率求和', 'Sum downstream rates when direct measurement is unavailable'), `
+        ${field(L('按 IP 实时测速', 'Live rate by IP'), `<label class="qs-check"><input type="checkbox" id="tnIpRate"${node && node.ipRate ? ' checked' : ''}><span>${esc(L('从连接表按此设备的 IP 聚合上下行速率（默认关闭）', 'Aggregate up/down rate by this device IP from the connection table (off by default)'))}</span></label>`, L('需在上方填写有效 IP；开启后优先于接口与下级求和，仅每秒读取连接表，不改路由器配置', 'Requires a valid IP above; takes priority over interface/child sums; reads connection table once per second without changing router config'))}
         ${field(L('流量计算模式', 'Traffic calculation'), `<div class="calc-list">${calcRows || `<div class="form-hint">${esc(L('该设备暂无下级设备', 'No downstream devices yet'))}</div>`}</div>`, L('多选下级设备按其速率之和显示；有包含关系的勾选会自动互斥', 'Select downstream devices to sum their rates; overlapping picks are mutually exclusive'))}
         ${field(L('点击动画', 'Click animation'), `<select id="tnAnim">${ANIMS.map((a) => `<option value="${a}"${(node && (node.anim || 'none') || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select>`, L('点击此设备时触发；「无」表示只选中', 'Played on click; None selects only'))}`)}
       ${section('4', L('设备图标', 'Device icon'), L('可从图标库复用，或直接上传', 'Reuse from library or upload a new one'), `
@@ -716,6 +727,7 @@
           parent, parentPort: $('tnParentPort').value.trim(),
           ports: $('tnPorts').value.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean).slice(0, 64),
           iface: (node && node.iface) || '', icon: iconUrl, note: $('tnNote').value.trim(),
+          ipRate: !!($('tnIpRate') && $('tnIpRate').checked),
           anim: $('tnAnim').value,
           calcFrom: [...document.querySelectorAll('.calc-chk:checked')].map((x) => x.value),
           order: Math.max(0, Math.min(999, Math.round(Number($('tnOrder').value) || 0))),

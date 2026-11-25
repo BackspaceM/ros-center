@@ -333,6 +333,92 @@ function customTopology(dev) {
   return Array.isArray(v) ? v : [];
 }
 
+/* ================= 拓扑按 IP 实时测速 =================
+   仅在拓扑节点显式开启 ipRate 且填了 IP 时采集：读连接表 orig-bytes / repl-bytes，
+   按 IP 聚合后与上一秒快照求差得到上下行 bps。默认全部关闭，零路由器改动。 */
+const IP_RATE_INTERVAL = Math.max(1000, envNum('IP_RATE_INTERVAL_MS', 1000));
+let ipRateTimer = null;
+const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
+function ipOf(addr) {
+  const s = String(addr || '');
+  /* 连接表地址形如 10.0.0.1:1234 或 [2001:db8::1]:443 */
+  if (s.startsWith('[')) return s.slice(1, s.indexOf(']') > 0 ? s.indexOf(']') : undefined);
+  return s.split(':')[0];
+}
+function ipRateTargets(dev) {
+  const out = [];
+  for (const n of customTopology(dev)) {
+    if (!n || n.ipRate !== true || n.deleted) continue;
+    const ip = String(n.ip || '').trim();
+    if (IPV4_RE.test(ip)) out.push({ ip, id: n.id, name: String(n.name || ip) });
+  }
+  return out;
+}
+function numBytes(v) {
+  const s = String(v == null ? '' : v).split('/');
+  return s.reduce((a, x) => a + (Number(String(x).trim()) || 0), 0);
+}
+async function pollIpRates() {
+  const now = Date.now();
+  for (const dev of devices.values()) {
+    const targets = ipRateTargets(dev);
+    if (!targets.length) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
+    if (dev.forceDemo) {
+      /* 演示模式：为开启测速的节点生成合理的模拟速率 */
+      const t = now / 1000;
+      for (const tg of targets) {
+        const seed = tg.ip.split('.').reduce((a, x) => a + Number(x), 0);
+        const rx = Math.max(0, Math.round(2.4e6 + Math.sin(t / 5 + seed) * 1.6e6 + (Math.random() - .5) * 2e5));
+        const tx = Math.max(0, Math.round(6.8e5 + Math.sin(t / 7 + seed * .3) * 4.2e5 + (Math.random() - .5) * 1e5));
+        dev.ipRates.set(tg.ip, { rxBps: rx, txBps: tx, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id });
+      }
+      continue;
+    }
+    if (!(dev.api && dev.api.connected)) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
+    const want = new Set(targets.map((t) => t.ip));
+    /* 只拉目标 IP 实际用到的地址族：纯 IPv4 时不查 IPv6 表，进一步降低路由器负载 */
+    const need4 = targets.some((t) => !t.ip.includes(':'));
+    const need6 = targets.some((t) => t.ip.includes(':'));
+    const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes,bytes';
+    let rows4 = [], rows6 = [];
+    try {
+      const jobs = [];
+      if (need4) jobs.push(dev.api.exec(['/ip/firewall/connection/print', props]));
+      if (need6) jobs.push(dev.api.exec(['/ipv6/firewall/connection/print', props]));
+      const results = await Promise.all(jobs);
+      if (need4) rows4 = (results[0] && results[0].re) || [];
+      if (need6) rows6 = (results[(need4 ? 1 : 0)] && results[(need4 ? 1 : 0)].re) || [];
+    } catch (e) { continue; }
+    const totals = new Map();  // ip -> { up, down }
+    for (const r of [...rows4, ...rows6]) {
+      const src = ipOf(r['src-address']), dst = ipOf(r['dst-address']);
+      const orig = numBytes(r['orig-bytes']), repl = numBytes(r['repl-bytes']);
+      const bytes = (orig || repl) ? 0 : numBytes(r.bytes);
+      const srcIsTarget = want.has(src), dstIsTarget = want.has(dst);
+      if (srcIsTarget) {
+        const x = totals.get(src) || { up: 0, down: 0 };
+        x.up += orig || bytes; x.down += repl; totals.set(src, x);
+      }
+      if (dstIsTarget && dst !== src) {
+        const x = totals.get(dst) || { up: 0, down: 0 };
+        x.up += repl; x.down += orig || bytes; totals.set(dst, x);
+      }
+    }
+    const dt = Math.max(0.5, (now - (dev.ipRateAt || now - 1000)) / 1000);
+    dev.ipRateAt = now;
+    for (const tg of targets) {
+      const t = totals.get(tg.ip) || { up: 0, down: 0 };
+      const prev = dev.ipRatePrev.get(tg.ip) || { up: t.up, down: t.down };
+      dev.ipRatePrev.set(tg.ip, t);
+      /* 连接生灭会让总数回退，差值为负时按 0 处理，避免假速率 */
+      const up = Math.max(0, t.up - prev.up), down = Math.max(0, t.down - prev.down);
+      dev.ipRates.set(tg.ip, { rxBps: Math.round(down / dt), txBps: Math.round(up / dt),
+        rxBytes: t.down, txBytes: t.up, ts: now, name: tg.name, id: tg.id });
+    }
+    for (const k of [...dev.ipRatePrev.keys()]) if (!want.has(k)) dev.ipRatePrev.delete(k);
+  }
+}
+
 /* ================= 拓扑图标库 =================
    图标统一放在 data/topology-icons/：WebUI 上传，或直接把图片拷进该目录也会被识别。
    index.json 存显示名与内容哈希；上传按 sha256 去重，多台设备可复用同一个图标文件。 */
@@ -669,6 +755,8 @@ class Device {
     this.history = [];
     this.resourceHistory = [];
     this.ifaceTotals = new Map();
+    this.ipRates = new Map();     // IP -> { rxBps, txBps, rxBytes, txBytes, ts }  拓扑按 IP 测速
+    this.ipRatePrev = new Map();  // 上次连接表字节快照（用于求差值）
     this.demoTotal = new Map();
     this.demoDB = freshDemoDB();
     this.demoIdSeq = 100;
@@ -702,6 +790,7 @@ class Device {
     this.lastError = ''; this.mode = this.forceDemo ? 'demo' : 'connecting';
     this.ifaceTotals.clear(); this.history.length = 0; this.resourceHistory.length = 0;
     this.ifaceMeta.clear(); this.lastRates.clear(); this.lastResource = null;
+    this.ipRates.clear(); this.ipRatePrev.clear();
     this.monitorFails = 0; this.lastStreamError = '';
     this.ensureConnection();
   }
@@ -1133,6 +1222,8 @@ function emitStreamPacket(dev) {
     connections: dev.connections, connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
     /* DEMO 模式随实时帧下发动态连接行，让连接页与仪表盘 TOP10 每秒变化（真实设备仍走 /api/config 拉取） */
     connRows: dev.forceDemo ? { connections: demoConnectionsRows(dev, 'connections'), connections6: demoConnectionsRows(dev, 'connections6') } : null,
+    /* 拓扑按 IP 测速：仅开启的节点有数据 */
+    ipRates: dev.ipRates && dev.ipRates.size ? Object.fromEntries(dev.ipRates) : null,
   };
   dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
   if (dev.history.length > HISTORY) dev.history.shift();
@@ -1240,6 +1331,8 @@ async function pollDevice(dev) {
       connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
       /* DEMO 连接行随每次轮询动态生成，让连接页与仪表盘 TOP10 实时变化 */
       connRows: dev.forceDemo ? { connections: demoConnectionsRows(dev, 'connections'), connections6: demoConnectionsRows(dev, 'connections6') } : null,
+      /* 拓扑按 IP 测速：仅开启的节点有数据 */
+      ipRates: dev.ipRates && dev.ipRates.size ? Object.fromEntries(dev.ipRates) : null,
     };
     dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
     if (dev.history.length > HISTORY) dev.history.shift();
@@ -1920,6 +2013,21 @@ const server = http.createServer(async (req, res) => {
     const dev = reqDevice(req, url);
     return json(res, 200, { points: dev ? dev.history : [], resource: dev ? dev.resourceHistory : [] });
   }
+  /* 拓扑按 IP 实时测速：返回所有开启了 ipRate 的节点及其速率，供「IP 流量监控」页使用 */
+  if (p === '/api/ip-rates' && req.method === 'GET') {
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 200, { ok: true, deviceId: '', rows: [] });
+    const targets = ipRateTargets(dev);
+    const rows = targets.map((t) => {
+      const r = dev.ipRates.get(t.ip) || {};
+      return { id: t.id, name: t.name, ip: t.ip,
+        rxBps: Number(r.rxBps) || 0, txBps: Number(r.txBps) || 0,
+        rxBytes: Number(r.rxBytes) || 0, txBytes: Number(r.txBytes) || 0,
+        ts: Number(r.ts) || 0 };
+    });
+    return json(res, 200, { ok: true, deviceId: dev.id, deviceName: dev.name,
+      interval: IP_RATE_INTERVAL, rows });
+  }
   /* 网络拓扑：自动发现 + 用户自定义节点（custom 按设备持久化） */
   if (p === '/api/topology') {
     const dev = reqDevice(req, url);
@@ -1948,6 +2056,8 @@ const server = http.createServer(async (req, res) => {
             parent: n && n.parent == null ? null : String((n && n.parent) || '').slice(0, 80),
             parentPort: String((n && n.parentPort) || '').slice(0, 32),
             iface: String((n && n.iface) || '').slice(0, 64),
+            /* ipRate：按该节点 IP 从连接表实时测速（默认 false，需显式开启） */
+            ipRate: !!(n && n.ipRate),
             /* 点击该节点触发的动画：none | ports | pulse | flow | ripple */
             anim: ['none', 'pulse', 'flow', 'ripple'].includes(n && n.anim) ? n.anim : 'none',
             /*  tombstone：隐藏自动发现的节点；calcFrom：按多选下级设备求和 */
@@ -2408,6 +2518,9 @@ server.listen(PORT, HOST, () => {
 for (const dev of devices.values()) { dev.ensureConnection(); pollDevice(dev); }
 scheduleUpdateChecks();
 setInterval(() => { for (const dev of devices.values()) pollDevice(dev); }, INTERVAL);
+/* 拓扑 IP 测速：独立 1 秒定时器。没有任何节点开启时 pollIpRates 内部快速跳过，几乎零开销 */
+ipRateTimer = setInterval(() => { pollIpRates().catch(() => {}); }, IP_RATE_INTERVAL);
+if (ipRateTimer.unref) ipRateTimer.unref();
 setInterval(() => { saveUsage(); }, 15000); // 每 15 秒把流量统计落盘
 process.on('SIGINT', () => { saveUsage(true); for (const d of devices.values()) if (d.api) d.api.close(); server.close(() => process.exit(0)); });
 process.on('SIGTERM', () => { saveUsage(true); process.exit(0); });

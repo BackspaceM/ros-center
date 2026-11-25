@@ -458,7 +458,7 @@ document.addEventListener('keydown', (e) => {
 });
 /* 按分类 id 匹配图标，未命中时按名称关键字兜底 */
 const SECTION_ICONS = {
-  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link',
+  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link', ipMonitor: 'speed',
   quickSetup: 'sliders', updates: 'package',
   interfaces: 'ethernet', ipAddresses: 'ip', dhcpClients: 'monitor', dhcpServers: 'server',
   dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dhcpOptions: 'tag', dhcpOptionSets: 'clipboard', dns: 'globe', dnsStatic: 'pin',
@@ -880,6 +880,7 @@ function renderPage() {
   if (sec.id === 'trafficStats') return renderTrafficStats();
   if (sec.id === 'systemTools') return renderTools();
   if (sec.id === 'topology') return window.renderTopologyPage ? window.renderTopologyPage() : undefined;
+  if (sec.id === 'ipMonitor') return window.renderIpMonitorPage ? window.renderIpMonitorPage() : undefined;
   if (sec.id === 'quickSetup') return window.renderQuickSetupPage ? window.renderQuickSetupPage() : undefined;
   if (sec.id === 'updates') return window.renderUpdatesPage ? window.renderUpdatesPage() : undefined;
   if (sec.id === 'connectionSettings') return renderConnectionSettings();
