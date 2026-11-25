@@ -4,6 +4,23 @@
 (function () {
   let timer = null, history = new Map(), lastRows = [];
   let iconById = new Map(), iconByIp = new Map();
+  let order = [], dragIp = '', dragging = false;
+  const orderKey = () => 'rosCenter.ipmOrder.' + (state.deviceId || '');
+  function readOrder() { try { return JSON.parse(localStorage.getItem(orderKey())) || []; } catch (e) { return []; } }
+  function saveOrder() { try { localStorage.setItem(orderKey(), JSON.stringify(order)); } catch (e) { /* ignore */ } }
+  function ensureOrder(rows) {
+    const known = new Set(order.map(String));
+    for (const r of rows) { const k = String(r.ip); if (!known.has(k)) { order.push(k); known.add(k); } }
+    order = order.filter((k) => rows.some((r) => String(r.ip) === String(k)));
+  }
+  function sortRows(rows) {
+    const rank = new Map(order.map((k, i) => [String(k), i]));
+    return rows.slice().sort((a, b) => {
+      const ai = rank.has(String(a.ip)) ? rank.get(String(a.ip)) : 1e9;
+      const bi = rank.has(String(b.ip)) ? rank.get(String(b.ip)) : 1e9;
+      return ai - bi;
+    });
+  }
 
   /* 复用网络拓扑里上传的设备图标：优先按节点 id，再按 IP，避免 IP 写错时串台 */
   async function loadIcons() {
@@ -48,8 +65,9 @@
     const key = r.ip, h = history.get(key) || { rx: [], tx: [] };
     const rx = rate(r.rxBps), tx = rate(r.txBps);
     const icon = iconFor(r);
-    return `<article class="ipm-card">
+    return `<article class="ipm-card" data-ip="${esc(r.ip)}">
       <div class="ipm-card-head">
+        <span class="ipm-drag" draggable="true" data-drag-ip="${esc(r.ip)}" title="${esc(L('拖动排序', 'Drag to reorder'))}">⠿</span>
         <span class="ipm-dot${(r.rxBps || r.txBps) ? ' live' : ''}"></span>
         <div class="ipm-card-title"><b>${icon ? `<img class="ipm-icon" src="${esc(icon)}" alt="" loading="lazy">` : ''}${esc(r.name || r.ip)}</b><small>${esc(r.ip)}</small></div>
         <button class="ipm-edit" type="button" data-ip-edit="${esc(r.id)}" title="${esc(L('在网络拓扑中编辑', 'Edit in topology'))}">✎</button>
@@ -65,8 +83,37 @@
       <div class="ipm-card-foot"><span>${esc(L('累计', 'Total'))} ↓ ${bytes(r.rxBytes)}</span><span>↑ ${bytes(r.txBytes)}</span></div>
     </article>`;
   }
+  function bindCards(box) {
+    box.querySelectorAll('.ipm-drag').forEach((h) => {
+      h.ondragstart = (e) => {
+        dragIp = String(h.dataset.dragIp || ''); dragging = true;
+        e.dataTransfer.effectAllowed = 'move';
+        h.closest('.ipm-card').classList.add('dragging');
+      };
+      h.ondragend = () => {
+        dragging = false; dragIp = '';
+        box.querySelectorAll('.ipm-card').forEach((c) => c.classList.remove('dragging', 'over'));
+      };
+    });
+    box.querySelectorAll('.ipm-card').forEach((card) => {
+      card.ondragover = (e) => { if (!dragIp) return; e.preventDefault(); card.classList.add('over'); };
+      card.ondragleave = () => card.classList.remove('over');
+      card.ondrop = (e) => {
+        e.preventDefault(); card.classList.remove('over');
+        const to = String(card.dataset.ip || '');
+        const from = order.indexOf(dragIp), dest = order.indexOf(to);
+        if (from >= 0 && dest >= 0 && from !== dest) {
+          order.splice(from, 1); order.splice(dest, 0, dragIp); saveOrder();
+          box.innerHTML = sortRows(lastRows).map(cardHtml).join('');
+          bindCards(box);
+        }
+      };
+    });
+  }
+  const cardHtml = card;
   function render(d) {
     const rows = (d && d.rows) || [];
+    ensureOrder(rows);
     for (const r of rows) {
       const h = history.get(r.ip) || { rx: [], tx: [] };
       h.rx.push(Number(r.rxBps) || 0); h.tx.push(Number(r.txBps) || 0);
@@ -79,7 +126,8 @@
     lastRows = rows;
     const box = $('ipmGrid'); if (!box) return;
     const empty = $('ipmEmpty'); if (empty) empty.hidden = rows.length > 0;
-    box.innerHTML = rows.map(card).join('');
+    box.innerHTML = sortRows(rows).map(cardHtml).join('');
+    bindCards(box);
     box.querySelectorAll('[data-ip-edit]').forEach((b) => {
       b.onclick = () => { navigate('topology'); setTimeout(() => { if (typeof window.openTopologyEditorById === 'function') window.openTopologyEditorById(b.dataset.ipEdit); }, 250); };
     });
@@ -96,7 +144,7 @@
     }
   }
   async function refresh() {
-    try { render(await api('/api/ip-rates')); }
+    try { const d = await api('/api/ip-rates'); if (!dragging) render(d); }
     catch (e) { const st = $('ipmStatus'); if (st) st.textContent = e.message || ''; }
   }
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
@@ -115,6 +163,7 @@
       <div class="ipm-grid" id="ipmGrid"></div>
       <div class="empty" id="ipmEmpty" hidden>${esc(L('暂无设备开启 IP 测速。请到网络拓扑中编辑设备，填写 IP 并勾选「按 IP 实时测速」。', 'No devices with IP monitoring yet. Edit a device in the topology, enter its IP and enable "Live rate by IP".'))}</div>`;
     $('ipmTopo').onclick = () => navigate('topology');
+    order = readOrder();
     loadIcons().then(refresh);
     timer = setInterval(refresh, 1000);
   };

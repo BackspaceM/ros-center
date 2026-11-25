@@ -359,10 +359,15 @@ button { cursor: pointer; }
 }
 .nav-item:hover { background: var(--side-hover); color: var(--side-bright); }
 .nav-item.active {
-  background: var(--side-active); color: var(--side-active-ink); font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--side-accent-line);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--blue) 20%, var(--side-active)), var(--side-active) 82%);
+  color: var(--side-active-ink); font-weight: 650;
+  border: 1px solid color-mix(in srgb, var(--blue) 26%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--blue) 13%, transparent), inset 0 1px 0 rgba(255,255,255,.5);
 }
-.nav-item.active .nav-icon { color: var(--side-accent-line); opacity: 1; }
+:root[data-scheme="dark"] .nav-item.active {
+  box-shadow: 0 2px 7px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.nav-item.active .nav-icon { color: var(--side-accent-line); opacity: 1; filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--blue) 32%, transparent)); }
 .nav-icon { width: 17px; height: 17px; flex: none; opacity: .82; }
 .nav-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-badge { font-size: 10px; font-weight: 600; background: var(--side-count-bg); color: var(--side-count-ink); border-radius: 5px; padding: 1px 6px; }
@@ -503,9 +508,15 @@ button { cursor: pointer; }
 .tooltip .tt { opacity: .6; }
 
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 4px 18px 0; }
-.tab { height: 30px; padding: 0 12px; border-radius: 6px; border: 0; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.tab { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; transition: background .16s, box-shadow .16s, color .16s; }
 .tab:hover { color: var(--ink); background: var(--soft); }
-.tab.active { background: var(--blue-soft); color: var(--blue); font-weight: 600; }
+.tab.active {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 16%, var(--card)), color-mix(in srgb, var(--blue) 7%, var(--card)));
+  color: var(--blue); font-weight: 650;
+  border-color: color-mix(in srgb, var(--blue) 26%, var(--line));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), 0 2px 5px color-mix(in srgb, var(--blue) 12%, transparent);
+}
+:root[data-scheme="dark"] .tab.active { box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 2px 6px rgba(0,0,0,.22); }
 
 /* ---------- 11. 流量统计：接口设置 ---------- */
 .stats-toolbar { background: var(--card); border: 1px solid var(--panel-border); border-radius: 10px; box-shadow: var(--shadow); padding: 3px 16px 13px; margin-bottom: 16px; }
@@ -662,6 +673,11 @@ th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--ink); background: var(--row-hover); }
+th.sortable.sorted { color: var(--blue); background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 9%, var(--th-bg)), var(--th-bg)); }
+th.sortable.sorted:hover { color: var(--blue); }
+.sort-ind { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 5px;
+  border-radius: 5px; background: color-mix(in srgb, var(--blue) 15%, transparent); color: var(--blue); font-size: 8px;
+  vertical-align: middle; box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 1px 2px color-mix(in srgb, var(--blue) 14%, transparent); }
 td { padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 tbody tr:hover { background: var(--row-hover); }
 tbody tr.selected { background: var(--row-selected); }
@@ -791,10 +807,15 @@ body.topology-page .topo-legend { padding: 0; gap: 12px; font-size: 10.5px; marg
 .topo-node { cursor: pointer; }
 .topo-node.custom { cursor: grab; }
 .topo-node.custom:active { cursor: grabbing; }
-.topo-node .node-card { fill: var(--card); stroke: #e4e8ee; stroke-width: 1; }
-:root[data-scheme="dark"] .topo-node .node-card { stroke: #363b44; }
-.topo-node:hover .node-card { stroke: var(--blue); }
-.topo-node.selected .node-card { stroke: var(--blue); stroke-width: 1.8; }
+.topo-node .node-card { fill: var(--card); stroke-width: 1.6; }
+.topo-node .node-card.type-router { stroke: var(--blue); }
+.topo-node .node-card.type-switch { stroke: var(--green); }
+.topo-node .node-card.type-ap { stroke: var(--violet); }
+.topo-node .node-card.type-nas { stroke: var(--amber); }
+.topo-node .node-card.type-client,
+.topo-node .node-card.type-other { stroke: var(--muted); }
+.topo-node:hover .node-card { stroke-width: 2.6; }
+.topo-node.selected .node-card { stroke-width: 3.2; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--blue) 45%, transparent)); }
 .topo-icon-bg.type-router { fill: #e8f0ff; }
 .topo-icon-bg.type-switch { fill: #e6f7f0; }
 .topo-icon-bg.type-ap { fill: #efeaff; }
@@ -1285,7 +1306,7 @@ input[type=text], input[type=password], input[type=number], select, textarea {
 /* ---------- 22. 其它分组组件精修：标签/表单/工具条/健康项 ---------- */
 .tab { border-radius: 8px; transition: background .15s, color .15s; }
 .tab:hover { background: var(--soft); color: var(--ink); }
-.tab.active { box-shadow: inset 0 -2px 0 var(--blue); }
+.tab.active { box-shadow: inset 0 1px 0 rgba(255,255,255,.6), 0 2px 5px color-mix(in srgb, var(--blue) 12%, transparent); }
 .form-row { gap: 16px; }
 .form-row label { font-weight: 600; color: var(--ink); }
 .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--blue); }
@@ -1325,6 +1346,11 @@ details.panel, details.upd-help { border-radius: var(--ui-radius); }
   padding:15px 16px 13px; transition:transform .18s, box-shadow .18s, border-color .18s; }
 .ipm-card:hover { transform:translateY(-2px); border-color:color-mix(in srgb,var(--blue) 30%,var(--line));
   box-shadow:0 8px 22px rgba(16,24,40,.09); }
+.ipm-card.dragging { opacity:.45; }
+.ipm-card.over { box-shadow: inset 0 0 0 2px var(--blue), 0 8px 22px rgba(16,24,40,.09); }
+.ipm-drag { cursor:grab; color:var(--muted); font-size:15px; line-height:1; padding:2px 4px; border-radius:6px; user-select:none; opacity:.6; }
+.ipm-drag:hover { color:var(--blue); background:var(--blue-soft); opacity:1; }
+.ipm-drag:active { cursor:grabbing; }
 .ipm-card-head { display:flex; align-items:center; gap:9px; margin-bottom:13px; }
 .ipm-dot { width:9px; height:9px; flex:none; border-radius:50%; background:var(--muted); opacity:.55; }
 .ipm-dot.live { background:var(--green); opacity:1; box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent); }
@@ -1379,7 +1405,7 @@ td.rownum { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-
 .th-draggable { cursor: grab; }
 .th-draggable:active { cursor: grabbing; }
 th.dragging { opacity: .45; }
-th.th-over { box-shadow: inset 0 2px 0 var(--blue); background: var(--blue-soft); }
+th.th-over { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 45%, var(--line)); background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 12%, var(--th-bg)), var(--th-bg)); }
 .col-editor-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--ink); }
 .col-editor-row small { color: var(--muted); font-size: 10px; }
 .col-editor-move { display: inline-flex; gap: 4px; }
@@ -1400,7 +1426,7 @@ th.th-over { box-shadow: inset 0 2px 0 var(--blue); background: var(--blue-soft)
 .btn:not(.primary):not(.danger):not(.ghost-danger):hover { background: var(--blue-soft); border-color: color-mix(in srgb, var(--blue) 38%, var(--line)); }
 .topbar { box-shadow: 0 1px 0 var(--line), 0 6px 18px rgba(16,24,40,.035); }
 .sidebar .nav-item { border-radius: 9px; height: 35px; margin: 1px 8px; }
-.sidebar .nav-item.active { box-shadow: inset 3px 0 0 var(--side-accent-line); }
+.sidebar .nav-item.active { box-shadow: 0 2px 6px color-mix(in srgb, var(--blue) 13%, transparent), inset 0 1px 0 rgba(255,255,255,.5); }
 table thead th { font-size: 11px; letter-spacing: .35px; text-transform: uppercase; color: var(--muted); }
 table tbody td { padding-top: 9px; padding-bottom: 9px; }
 .tag { border-radius: 999px; font-weight: 600; letter-spacing: .1px; }
@@ -1420,13 +1446,6 @@ table tbody td { padding-top: 9px; padding-bottom: 9px; }
 .topo-node .topo-mac { font-size: 8.5px; }
 .topo-node .topo-rate { font-size: 9px; }
 .topo-icon-t { font-size: 12px; }
-/* 类型色：与图例圆点一致，节点左侧竖条呼应设备类型 */
-.topo-type-bar.type-router { fill: var(--blue); }
-.topo-type-bar.type-switch { fill: var(--green); }
-.topo-type-bar.type-ap { fill: var(--violet); }
-.topo-type-bar.type-nas { fill: var(--amber); }
-.topo-type-bar.type-client,
-.topo-type-bar.type-other { fill: var(--muted); }
 .topo-idle rect { fill: var(--soft); stroke: var(--line); stroke-width: 1; }
 .topo-idle text { fill: var(--muted); font-size: 8px; font-weight: 600; }
 /* 仪表盘：块对齐、拖拽反馈与可选块 */
@@ -1462,3 +1481,18 @@ table tbody td { padding-top: 9px; padding-bottom: 9px; }
 .reboot-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .reboot-copy b { font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .reboot-copy small { font-size: 11px; line-height: 1.5; color: var(--muted); }
+
+/* ---------- 28. 全局尺寸调整手柄：块右下角 / 表头右缘 ---------- */
+.rz-handle { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px; cursor: nwse-resize;
+  z-index: 6; opacity: .24; transition: opacity .15s; touch-action: none; }
+.rz-handle::before { content: ''; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); border-radius: 0 0 3px 0; }
+.panel:hover > .rz-handle, .card:hover > .rz-handle { opacity: .8; }
+.rz-handle:hover { opacity: 1 !important; }
+.rz-handle:hover::before { border-color: var(--blue); }
+.rz-col { position: absolute; right: -4px; top: 0; bottom: 0; width: 9px; cursor: col-resize; z-index: 4;
+  opacity: 0; transition: opacity .14s; touch-action: none; }
+.rz-col::after { content: ''; position: absolute; left: 3px; top: 25%; bottom: 25%; width: 3px; border-radius: 99px;
+  background: var(--blue); }
+th:hover > .rz-col { opacity: .55; }
+.rz-col:hover { opacity: 1 !important; }

@@ -350,8 +350,7 @@
       const fx = activeFx && activeFx.id === n.id ? ' fx-' + activeFx.type : '';
       nodeHtml.push(`<g class="topo-node type-${esc(n.type)} ${n.auto ? 'auto' : 'custom'}${selectedId === n.id ? ' selected' : ''}${fx}" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})">
         ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="24"/>' : ''}
-        <rect class="node-card" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="8"/>
-        <rect class="topo-type-bar type-${esc(n.type)}" x="${-NODE_W / 2}" y="${-NODE_H / 2 + 8}" width="3" height="${NODE_H - 16}" rx="1.5"/>
+        <rect class="node-card type-${esc(n.type)}" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="8"/>
         ${icon}
         <rect class="topo-rate-divider" x="${NODE_W / 2 - RATE_W - 2}" y="${-NODE_H / 2 + 10}" width="1" height="${NODE_H - 20}"/>
         <text class="topo-name" x="${cx}" y="-16" text-anchor="middle">${esc(name)}</text>

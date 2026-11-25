@@ -20,7 +20,7 @@ async function loadTopoIcons(sec) {
     for (const n of (d.auto || [])) all.set(n.id, n);
     for (const n of (d.custom || [])) { if (n.deleted) all.delete(n.id); else all.set(n.id, n); }
     for (const n of all.values()) {
-      if (!n.icon) continue;
+      /* 无论是否上传图标都建索引：设备名匹配只依赖节点，图标是独立的可选字段 */
       const mk = macKeyOf(n.mac); if (mk) byMac.set(mk, n);
       const ip = ipKeyOf(n.ip); if (ip) byIp.set(ip, n);
       const name = nameKeyOf(n.name); if (name) byName.set(name, n);
@@ -30,6 +30,24 @@ async function loadTopoIcons(sec) {
 }
 
 function topoNodeFor(row, mac) {
+  const lk = topoIconLookup;
+  let n = null;
+  /* 拓扑里的 IP 是权威锚点：静态分配 / 无 MAC 的租约靠 IP 也能对上设备名 */
+  if (row) {
+    const ip = ipKeyOf(row.address || row['src-address'] || row.ip || row['dst-address']);
+    if (ip) n = lk.byIp.get(ip);
+  }
+  if (!n) n = lk.byMac.get(macKeyOf(mac));
+  if (!n && row) {
+    for (const k of ['host-name', 'identity', 'name']) {
+      const key = nameKeyOf(row[k]);
+      if (key && lk.byName.has(key)) { n = lk.byName.get(key); break; }
+    }
+  }
+  return n || null;
+}
+/* MAC 列的图标仍以 MAC 为第一优先，避免设备名列的 IP 优先策略把图标串到别的设备 */
+function topoNodeForMac(row, mac) {
   const lk = topoIconLookup;
   let n = lk.byMac.get(macKeyOf(mac));
   if (!n && row) {
@@ -45,7 +63,7 @@ function topoNodeFor(row, mac) {
   return n || null;
 }
 function topoIconFor(row, mac) {
-  const n = topoNodeFor(row, mac);
+  const n = topoNodeForMac(row, mac);
   return n && n.icon ? { url: n.icon, name: n.name } : null;
 }
 
@@ -155,8 +173,8 @@ function renderConfigPage(sec) {
       </div>
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
-        <th class="sortable" data-sort="#" style="width:52px" title="${t('sort_hint')}">#${sortMark('#')}</th>
-        ${cols.filter((c) => c !== '.id').map((c) => `<th class="sortable${numCol(c, sec) ? ' num' : ''}" data-sort="${esc(c)}" title="${t('sort_hint')}">${esc(fieldLabel(sec, c))}${sortMark(c)}</th>`).join('')}
+        <th class="sortable${(state.sort || {}).key === '#' ? ' sorted' : ''}" data-sort="#" style="width:52px" title="${t('sort_hint')}">#${sortMark('#')}</th>
+        ${cols.filter((c) => c !== '.id').map((c) => `<th class="sortable${numCol(c, sec) ? ' num' : ''}${(state.sort || {}).key === c ? ' sorted' : ''}" data-sort="${esc(c)}" title="${t('sort_hint')}">${esc(fieldLabel(sec, c))}${sortMark(c)}</th>`).join('')}
         ${writable ? `<th style="width:${sec.id === 'wireguard' || sec.id === 'wgPeers' ? 142 : 110}px"></th>` : ''}
       </tr></thead><tbody id="tbody"></tbody></table></div>
       <div class="pager"><span id="pageInfo"></span><button id="prevPage">${t('prev')}</button><button id="nextPage">${t('next')}</button></div>
@@ -230,7 +248,7 @@ function numCol(key, sec) { return /mac[-_]?address|bytes|port|mtu|distance|prio
 function fieldLabel(sec, key) {
   if (key === 'running') return L('运行', 'Running');
   if (key === '.id') return 'ID';
-  if (key === 'topoName') return L('拓扑设备名', 'Topology device');
+  if (key === 'topoName') return L('设备名', 'Device name');
   const f = sec.fields.find((x) => x.key === key);
   return f ? tx(f.label) : key;
 }
@@ -263,7 +281,7 @@ function sortedRows(sec) {
 }
 function sortMark(key) {
   const s = state.sort || {};
-  return s.key === key ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  return s.key === key ? `<span class="sort-ind">${s.dir === 'asc' ? '▲' : '▼'}</span>` : '';
 }
 function renderRows(sec) {
   const cols = visibleColumns(sec).filter((c) => c !== '.id');
