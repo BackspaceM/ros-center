@@ -302,6 +302,12 @@ const SECTIONS = [
       F('enabled', '启用', 'Enabled', 'readonly'), F('scheduled', '计划', 'Scheduled', 'readonly')],
     { writable: false, toggle: false, readonly: true }),
 
+  /* ---------- 链路探测 ---------- */
+  S('netwatch', 'network', '网络监控', 'Netwatch', '/tool/netwatch',
+    [F('.id', 'ID', 'ID', 'id'), F('host', '目标', 'Host', 'readonly'), F('status', '状态', 'Status', 'readonly'),
+      F('since', '自', 'Since', 'readonly'), F('comment', '备注', 'Comment', 'readonly')],
+    { writable: false, toggle: false, readonly: true, columns: ['host', 'status', 'since', 'comment'] }),
+
   /* ---------- 日志 ---------- */
   S('logs', 'logs', '系统日志', 'System log', '/log',
     [F('.id', 'ID', 'ID', 'id'), F('time', '时间', 'Time', 'readonly'), F('topics', '主题', 'Topics', 'readonly'),
@@ -517,6 +523,11 @@ const seed = {
     { '.id': '*1', name: 'routeros', version: '7.15.2', enabled: 'true', scheduled: 'false' },
     { '.id': '*2', name: 'wifi', version: '7.15.2', enabled: 'true', scheduled: 'false' },
     { '.id': '*3', name: 'container', version: '7.15.2', enabled: 'false', scheduled: 'false' },
+  ],
+  netwatch: [
+    { '.id': '*1', host: '10.0.0.1', status: 'up', since: '3d04:12:33', comment: '网关' },
+    { '.id': '*2', host: '223.5.5.5', status: 'up', since: '3d04:12:31', comment: 'DNS' },
+    { '.id': '*3', host: '1.1.1.1', status: 'up', since: '12:31:08', comment: '外部网站' },
   ],
   logs: [],
 };

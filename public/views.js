@@ -1,5 +1,7 @@
 'use strict';
 
+const connOther = (a, b, c) => Math.max(0, (Number(a) || 0) - (Number(b) || 0) - (Number(c) || 0)).toLocaleString();
+
 /* 只有演示模式才显示 DEMO 提示；实时状态不再挂 LIVE 徽标 */
 function demoBadge(id) {
   return `<span class="badge-demo"${id ? ` id="${id}"` : ''}${state.mode === 'demo' ? '' : ' hidden'}><span class="d"></span>${esc(t('demo_only'))}</span>`;
@@ -10,9 +12,6 @@ function renderDashboard() {
   const topoKeep = document.getElementById('topoPanel'); // 拓扑面板保持 DOM，避免每秒重绘打断拖拽
   const d = state.latest || {};
   const r = d.resource || {};
-  const cpu = num(r['cpu-load']);
-  const memPct = r['total-memory'] ? Math.round((1 - num(r['free-memory']) / num(r['total-memory'])) * 100) : 0;
-  const diskPct = r['total-hdd-space'] ? Math.round((1 - num(r['free-hdd-space']) / num(r['total-hdd-space'])) * 100) : 0;
   const active = (d.ifaces || []).filter((i) => i.running === 'true' && i.disabled !== 'true').length;
   const sel = state.selectedIface;
   const selIface = sel !== '__all__' ? (d.ifaces || []).find((i) => i.name === sel) : null;
@@ -64,9 +63,12 @@ function renderDashboard() {
           <div class="conn-total-main"><small>${t('conn_total_hint')}</small><b>${String((cn.total || 0).toLocaleString())}</b></div>
           <div class="conn-split"><span><i class="v4"></i>IPv4 <b>${String((cn.v4 || 0).toLocaleString())}</b></span><span><i class="v6"></i>IPv6 <b>${String((cn.v6 || 0).toLocaleString())}</b></span></div>
         </div>
-        ${connGroup('IPv4', cn.v4, cn.tcp4, cn.udp4, 'v4')}
-        ${connGroup('IPv6', cn.v6, cn.tcp6, cn.udp6, 'v6')}
-        <div class="panel-body" style="padding-top:2px"><div id="connSpark" style="height:84px"></div></div>
+        <div class="conn-compact">
+          <div class="conn-row head"><span></span><b>${t('conn_group_all')}</b><b>${t('conn_tcp')}</b><b>${t('conn_udp')}</b><b>${t('conn_other')}</b></div>
+          <div class="conn-row v4"><span>IPv4</span><b>${num(cn.v4).toLocaleString()}</b><b>${num(cn.tcp4).toLocaleString()}</b><b>${num(cn.udp4).toLocaleString()}</b><b>${connOther(cn.v4, cn.tcp4, cn.udp4)}</b></div>
+          <div class="conn-row v6"><span>IPv6</span><b>${num(cn.v6).toLocaleString()}</b><b>${num(cn.tcp6).toLocaleString()}</b><b>${num(cn.udp6).toLocaleString()}</b><b>${connOther(cn.v6, cn.tcp6, cn.udp6)}</b></div>
+        </div>
+        <div class="panel-body conn-spark"><div id="connSpark"></div></div>
       </div>
       <div class="panel" data-block="iftypes">
         <div class="panel-head"><div><h2>${t('ifdist_title') || L('接口类型分布', 'Interface types')}</h2><p class="sub">${t('ifdist_sub') || L('按实际接口类型统计', 'Counted by real interface type')}</p></div></div>
@@ -76,9 +78,12 @@ function renderDashboard() {
     <div class="grid-2 dash-extra">
       ${topTablePanel('topIfPanel', t('top_if'), t('top_if_sub'), ['#', t('iface'), t('rate_rx'), t('rate_tx'), t('total')], 'topif')}
       ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), ['#', L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')], 'topconn')}
-      ${dashResourceBlock(cpu, memPct, diskPct)}
-      ${dashDeviceBlock(r, d)}
-    </div>`;
+    </div>
+    <div class="grid-2 dash-extra">
+      ${dashLinksBlock(d)}
+      ${dashQualityBlock()}
+    </div>
+    ${dashSecurityBlock()}`;
   if (topoKeep) topoKeep.remove();
 
   drawLineChart('dashChart', 'dashTip', state.points, [
@@ -92,27 +97,112 @@ function renderDashboard() {
   drawConnSpark();
   renderTopTables(d);
   applyDashboardLayout();
+  const lb = $('linkCfgBtn');
+  if (lb) lb.onclick = (e) => { e.stopPropagation(); openLinkSettings(d); };
   if (window.paintDashIfacePop) window.paintDashIfacePop();
+  refreshDashExtras();
 }
-/* ---------- 仪表盘可选块：全部来自 /api/snapshot 的真实数据 ---------- */
-function dashResourceBlock(cpu, memPct, diskPct) {
-  const bar = (label, pct, cls) => `<div class="dash-bar"><span>${esc(label)}</span><div class="dash-bar-track"><i class="${cls}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></div><b>${Math.round(pct)}%</b></div>`;
-  return `<div class="panel" data-block="resource">
-    <div class="panel-head"><div><h2>${esc(L('系统资源', 'System resources'))}</h2><p class="sub">${esc(L('来自 /system/resource 的真实读数', 'Live readings from /system/resource'))}</p></div></div>
-    <div class="panel-body dash-bars">${bar('CPU', cpu, 'cpu')}${bar(L('内存', 'Memory'), memPct, 'mem')}${bar(L('磁盘', 'Disk'), diskPct, 'disk')}</div>
+/* ---------- 仪表盘可选块：全部来自真实接口速率 / Netwatch / 防火墙计数器 ---------- */
+const LINKS_KEY = () => 'rosCenter.links.' + (state.deviceId || '');
+function linkPrefs() {
+  try { const p = JSON.parse(localStorage.getItem(LINKS_KEY())); return Array.isArray(p) ? p : []; } catch (e) { return []; }
+}
+function gaugeSvg(pct) {
+  const c = 2 * Math.PI * 38;
+  const color = pct >= 95 ? 'var(--red)' : pct >= 85 ? 'var(--amber)' : pct >= 60 ? 'var(--blue)' : 'var(--green)';
+  return `<svg class="dash-gauge-svg" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="38" fill="none" stroke="var(--grid)" stroke-width="8"/>
+    <circle cx="50" cy="50" r="38" fill="none" stroke="${color}" stroke-width="8" stroke-linecap="round"
+      stroke-dasharray="${(c * Math.min(100, Math.max(0, pct)) / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 50 50)"/>
+    <text x="50" y="55" text-anchor="middle" class="dash-gauge-val">${Math.round(pct)}%</text></svg>`;
+}
+function dashLinksBlock(d) {
+  const ifaces = (d.ifaces || []).filter((i) => i.running === 'true' && i.disabled !== 'true');
+  let picked = linkPrefs().map((p) => { const i = ifaces.find((x) => x.name === p.name); return i ? { i, cap: Number(p.capMbps) || 0 } : null; }).filter(Boolean);
+  if (!picked.length) {
+    picked = ifaces.slice().sort((a, b) =>
+      ((num(b.rxBps) + num(b.txBps)) / (num(b.linkBps) || 1e9)) - ((num(a.rxBps) + num(a.txBps)) / (num(a.linkBps) || 1e9)))
+      .slice(0, 3).map((i) => ({ i, cap: num(i.linkBps) ? Math.round(num(i.linkBps) / 1e6) : 1000 }));
+  }
+  picked = picked.slice(0, 4);
+  const cards = picked.map(({ i, cap }) => {
+    const pct = cap > 0 ? (num(i.rxBps) + num(i.txBps)) / (cap * 1e6) * 100 : 0;
+    const lvl = pct >= 95 ? 'critical' : pct >= 85 ? 'warning_level' : 'normal';
+    return `<div class="dash-gauge"><div class="dash-gauge-wrap">${gaugeSvg(pct)}</div>
+      <b title="${esc(i.comment || i.name)}">${esc(i.name)}</b>
+      <small>↓${esc(fmtRate(i.rxBps).v)} ↑${esc(fmtRate(i.txBps).v)}</small>
+      <span class="tag ${pct >= 95 ? 'red' : pct >= 85 ? 'amber' : 'green'}">${t(lvl)}</span></div>`;
+  }).join('');
+  return `<div class="panel" data-block="links">
+    <div class="panel-head"><div><h2>${t('link_util_title')}</h2><p class="sub">${t('link_util_sub')}</p></div>
+      <button class="btn btn-sm" id="linkCfgBtn" type="button">⚙ ${t('link_settings')}</button></div>
+    <div class="panel-body dash-gauges">${cards || `<div class="empty">${t('no_data')}</div>`}</div>
   </div>`;
 }
-function dashDeviceBlock(r, d) {
-  const items = [
-    [L('板型', 'Board'), r['board-name'] || 'RouterOS'],
-    [L('版本', 'Version'), r.version || '—'],
-    [L('运行时间', 'Uptime'), fmtUptime(d.uptime)],
-    [L('接口总数', 'Interfaces'), String((d.ifaces || []).length)],
-  ];
-  return `<div class="panel" data-block="device">
-    <div class="panel-head"><div><h2>${esc(L('设备信息', 'Device info'))}</h2><p class="sub">${esc(d.deviceName || '')}</p></div></div>
-    <div class="panel-body dash-kv">${items.map(([k, v]) => `<div><span>${esc(k)}</span><b title="${esc(v)}">${esc(v)}</b></div>`).join('')}</div>
-  </div>`;
+function openLinkSettings(d) {
+  const ifaces = (d.ifaces || []).filter((i) => i.running === 'true');
+  const prefs = linkPrefs();
+  const rows = ifaces.map((i) => {
+    const saved = prefs.find((p) => p.name === i.name);
+    const cap = saved ? saved.capMbps : (num(i.linkBps) ? Math.round(num(i.linkBps) / 1e6) : 1000);
+    return `<label class="link-row"><input type="checkbox" data-link="${esc(i.name)}" ${saved ? 'checked' : ''}>
+      <span>${esc(i.name)} <small>${esc(i.comment || i.type)}</small></span>
+      <input type="number" min="1" max="100000" step="1" value="${cap}" data-cap="${esc(i.name)}" style="width:92px"> <small>${t('link_capacity')}</small></label>`;
+  }).join('');
+  openModal(t('link_settings'), `<div class="dash-block-editor"><p class="dash-block-tip">${esc(L('勾选要显示的链路并填写带宽（最多 4 条），带宽默认取路由器协商速率。', 'Pick up to 4 links and set their capacity (defaults to the negotiated interface speed).'))}</p>${rows || `<div class="empty">${t('no_data')}</div>`}</div>`,
+    `<button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
+    (m) => {
+      m.querySelector('[data-close]').onclick = closeModal;
+      m.querySelector('[data-save]').onclick = () => {
+        const chosen = [...m.querySelectorAll('[data-link]')].filter((c) => c.checked)
+          .slice(0, 4).map((c) => ({ name: c.dataset.link,
+            capMbps: Math.max(1, Number(m.querySelector(`[data-cap="${c.dataset.link}"]`)?.value) || 1000) }));
+        localStorage.setItem(LINKS_KEY(), JSON.stringify(chosen));
+        closeModal(); renderDashboard();
+      };
+    });
+}
+function dashQualityBlock() {
+  const rows = (state.quality && state.quality.rows) || [];
+  const body = !state.quality ? `<div class="empty">${t('loading')}</div>` : `<div class="table-scroll"><table class="mini-table">
+    <thead><tr><th>${t('th_target')}</th><th class="num">${t('th_delay')}</th><th class="num">${t('th_jitter')}</th><th class="num">${t('th_loss')}</th><th>${L('状态', 'Status')}</th></tr></thead>
+    <tbody>${rows.map((r) => {
+      const loss = num(r.loss), avg = num(r.avg), jit = num(r.jitter);
+      const bad = loss >= 10 || avg >= 100, warn = !bad && (loss > 0 || jit >= 10 || avg >= 50);
+      return `<tr><td><b>${esc(r.label || r.host)}</b><small>${esc(r.host)}</small></td>
+        <td class="num">${avg ? avg.toFixed(1) + ' ms' : '—'}</td><td class="num">${jit ? jit.toFixed(1) + ' ms' : '—'}</td>
+        <td class="num">${loss}%</td><td><span class="tag ${bad ? 'red' : warn ? 'amber' : 'green'}">${bad ? t('critical') : warn ? t('warning_level') : t('normal')}</span></td></tr>`;
+    }).join('') || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
+  return `<div class="panel" data-block="quality">
+    <div class="panel-head"><div><h2>${t('link_quality_title')}</h2><p class="sub">${t('link_quality_sub')}</p></div></div>
+    <div class="panel-body dash-mini-body">${body}</div></div>`;
+}
+function dashSecurityBlock() {
+  const data = state.security, rows = (data && data.rows) || [];
+  const body = !data ? `<div class="empty">${t('loading')}</div>` : `<div class="table-scroll"><table class="mini-table">
+    <thead><tr><th>${t('th_chain')}</th><th>${L('动作', 'Action')}</th><th>${t('th_rule')}</th><th class="num">${t('th_hits')}</th><th class="num">${t('th_bytes')}</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr><td>${esc(r.chain)}</td><td><span class="tag ${r.action === 'reject' ? 'amber' : 'red'}">${esc(r.action)}</span></td>
+      <td>${esc(r.comment || r.interface || r.id)}</td><td class="num">${num(r.packets).toLocaleString()}</td><td class="num">${fmtBytes(r.bytes)}</td></tr>`).join('')
+      || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
+  return `<div class="panel" data-block="security">
+    <div class="panel-head"><div><h2>${t('security_title')}</h2><p class="sub">${t('security_sub')}</p></div>
+      <span class="tag">${data ? num(data.total) + ' ' + L('条规则', 'rules') : '—'}</span></div>
+    <div class="panel-body dash-mini-body">${body}</div></div>`;
+}
+async function refreshDashExtras() {
+  const now = Date.now();
+  if (!state.securityLoading && now - state.securityAt > 30000) {
+    state.securityLoading = true;
+    try { state.security = await api('/api/security'); } catch (e) { state.security = { error: e.message, rows: [], total: 0 }; }
+    state.securityAt = Date.now(); state.securityLoading = false;
+    if (state.section === 'dashboard') renderDashboard();
+  }
+  if (!state.qualityLoading && now - state.qualityAt > 30000) {
+    state.qualityLoading = true;
+    try { state.quality = await api('/api/link-quality'); } catch (e) { state.quality = { error: e.message, rows: [] }; }
+    state.qualityAt = Date.now(); state.qualityLoading = false;
+    if (state.section === 'dashboard') renderDashboard();
+  }
 }
 
 const DASH_BLOCKS = [
@@ -121,8 +211,9 @@ const DASH_BLOCKS = [
   ['peak_tx', () => L('峰值上行速率', 'Peak upload')], ['trend', () => L('流量趋势', 'Traffic trend')],
   ['health', () => L('设备健康', 'Device health')], ['connections', () => L('连接状态', 'Connections')],
   ['iftypes', () => L('接口类型分布', 'Interface types')], ['topif', () => L('接口流量排行', 'Interface ranking')],
-  ['topconn', () => L('连接流量排行', 'Connection ranking')], ['resource', () => L('系统资源', 'System resources')],
-  ['device', () => L('设备信息', 'Device info')],
+  ['topconn', () => L('连接流量排行', 'Connection ranking')],
+  ['links', () => L('关键链路利用率', 'Link utilization')], ['quality', () => L('链路质量', 'Link quality')],
+  ['security', () => L('安全与策略状态', 'Security & policy')],
 ];
 const dashPrefsKey = () => 'rosCenter.dash.' + (state.deviceId || '');
 function dashPrefs() {
@@ -189,16 +280,6 @@ function openDashboardBlocks() {
     });
 }
 
-/* 连接状态：IPv4 / IPv6 各成一组，子项保持短小并可横向滑动 */
-function connGroup(name, total, tcp, udp, cls) {
-  const t4 = Number(tcp) || 0, u4 = Number(udp) || 0, all = Number(total) || 0;
-  const other = Math.max(0, all - t4 - u4);
-  const chip = (label, value, kind) => `<div class="conn-chip ${kind}"><small>${esc(label)}</small><b>${Number(value).toLocaleString()}</b></div>`;
-  return `<div class="conn-group">
-    <div class="conn-group-head"><span class="conn-badge ${cls}">${name}</span><b>${all.toLocaleString()}</b><span class="conn-scroll-hint">⇆</span></div>
-    <div class="conn-rail">${chip(t('conn_group_all'), all, 'all')}${chip(t('conn_tcp'), t4, 'tcp')}${chip(t('conn_udp'), u4, 'udp')}${chip(t('conn_other'), other, 'other')}</div>
-  </div>`;
-}
 function emptyRow(cols) { return `<tr><td colspan="${cols}" style="text-align:center;padding:36px;color:var(--muted)">${t('no_data')}</td></tr>`; }
 function topTablePanel(id, title, sub, heads, block) {
   return `<div class="panel"${block ? ` data-block="${esc(block)}"` : ''}><div class="panel-head"><div><h2>${esc(title)}</h2><p class="sub">${esc(sub)}</p></div></div>

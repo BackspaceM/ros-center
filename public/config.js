@@ -423,6 +423,46 @@ async function bulk(sec, action, ids) {
 }
 
 /* ================= 工具 / 系统操作 ================= */
+/* 运维工具：关键事件流 / 最近配置更改 / 备份状态（每 5 秒轮询日志） */
+let toolsTimer = null;
+const TOOLS_EVENT_RE = /(interface|link|vpn|l2tp|pptp|ovpn|ipsec|wireguard|user|logg|dhcp|firewall|wifi|wireless|up|down)/i;
+const TOOLS_CHANGE_RE = /(chang|config|backup|add|remov|delet|set |updat|修改|新增|删除|备份|更新)/i;
+function toolFeedHtml(rows, kind) {
+  const list = (rows || []).filter((r) => {
+    const text = String(r.message || '');
+    return (kind === 'event' ? TOOLS_EVENT_RE : TOOLS_CHANGE_RE).test(text + ' ' + String(r.topics || ''));
+  }).slice(0, 8);
+  if (!list.length) return `<div class="empty">${t('no_data')}</div>`;
+  return `<div class="tool-feed">${list.map((r) => {
+    const msg = String(r.message || '');
+    const cls = /fail|error|down|drop|disconnect|reject|失败|断开/i.test(msg) ? 'red'
+      : /warn|up|connect|backup|成功/i.test(msg) ? 'amber' : 'blue';
+    return `<div class="tool-feed-row"><time>${esc(String(r.time || ''))}</time><span class="tag ${cls}">${esc(String(r.topics || ''))}</span><span class="tool-feed-msg">${esc(msg)}</span></div>`;
+  }).join('')}</div>`;
+}
+async function refreshToolsPanels() {
+  try {
+    const d = await api('/api/config?section=logs');
+    const rows = d.rows || [];
+    const ev = $('toolEventFeed'), cf = $('toolChangeFeed');
+    if (ev) ev.innerHTML = toolFeedHtml(rows, 'event');
+    if (cf) cf.innerHTML = toolFeedHtml(rows, 'change');
+  } catch (e) {
+    const ev = $('toolEventFeed'), cf = $('toolChangeFeed');
+    if (ev) ev.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if (cf) cf.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+  try {
+    const d = await api('/api/backup/status');
+    const box = $('backupStatus');
+    if (box) {
+      const s = d.status;
+      box.innerHTML = s
+        ? `<b>${t('backup_status_title')}</b><span>${esc(new Date(s.at).toLocaleString())} · ${esc(s.name)}</span><small>${esc(s.location || '')}${s.demo ? ' · DEMO' : ''}</small>`
+        : `<b>${t('backup_status_title')}</b><span>${t('no_data')}</span>`;
+    }
+  } catch (e) { /* 备份状态不可用时留空，不影响主流程 */ }
+}
 function renderTools() {
   $('content').innerHTML = `
     <div class="page-head"><div><h1>${t('tools_title')}</h1><p>${t('tools_sub')}</p></div></div>
@@ -442,6 +482,7 @@ function renderTools() {
         <div class="panel-body">
           <div class="form-row"><label>${t('backup_name')}</label><div><input type="text" id="backupName" value="auto-backup"></div></div>
           <button class="btn primary" id="backupRun">${t('backup_title')}</button>
+          <div class="backup-status" id="backupStatus"></div>
         </div></div>
     </div>
     <div class="panel ping-panel" style="margin-top:14px"><div class="panel-head"><div><h2>${esc(L('网络诊断', 'Network diagnosis'))}</h2><p class="sub">ICMP echo · ${esc(L('逐条实时显示', 'results stream in real time'))}</p></div></div>
@@ -450,7 +491,13 @@ function renderTools() {
         <div class="form-row"><label>${esc(L('包数量', 'Packets'))}</label><div><input type="number" id="pingCount" min="1" value="5" style="width:110px"></div></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" id="pingRun" type="button">${esc(L('开始诊断', 'Start diagnosis'))}</button><button class="btn" id="pingStop" type="button">${esc(L('停止', 'Stop'))}</button><span id="pingStatus" class="topo-hint"></span></div>
         <div id="pingOut" class="ping-log"></div>
-      </div></div>`;
+      </div></div>
+    <div class="grid-2" style="margin-top:14px">
+      <div class="panel"><div class="panel-head"><div><h2>${t('event_stream_title')}</h2><p class="sub">${t('event_stream_sub')}</p></div>
+        <span class="tag green">● LIVE</span></div><div class="panel-body" id="toolEventFeed"></div></div>
+      <div class="panel"><div class="panel-head"><div><h2>${t('config_changes_title')}</h2><p class="sub">${t('config_changes_sub')}</p></div></div>
+        <div class="panel-body" id="toolChangeFeed"></div></div>
+    </div>`;
   /* ICMP 逐条流式诊断 */
   const stopPing = () => {
     if (window.__rosPingSource) { try { window.__rosPingSource.close(); } catch (e) { /* ignore */ } window.__rosPingSource = null; }
@@ -497,12 +544,19 @@ function renderTools() {
       const a = document.createElement('a'); a.href = href; a.download = name + '.rsc';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(href), 1500);
+      refreshToolsPanels();
     } catch (e) { toast(e.message, 'err'); }
   });
   $('rebootBtn').onclick = () => confirmModal(t('reboot_title'), `<b>${t('reboot_msg')}</b>`, true, async () => {
     try { await api('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reboot' }) }); toast(t('action_ok'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   });
+  if (toolsTimer) { clearInterval(toolsTimer); toolsTimer = null; }
+  refreshToolsPanels();
+  toolsTimer = setInterval(() => {
+    if (state.section !== 'systemTools') { clearInterval(toolsTimer); toolsTimer = null; return; }
+    refreshToolsPanels();
+  }, 5000);
 }
 
 /* ================= WireGuard 扫码添加 / 对端配置 ================= */

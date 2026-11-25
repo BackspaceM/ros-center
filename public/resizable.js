@@ -66,6 +66,17 @@
       e.stopPropagation(); delete sizeStore[key]; write(SZ_KEY, sizeStore); applyBlockSize(el, key);
     });
     el.appendChild(h);
+    /* 底部 / 右侧整条边缘：比右下角小手柄更容易抓到，尤其用于改高度 */
+    for (const cls of ['rz-edge-b', 'rz-edge-r']) {
+      const edge = document.createElement('span');
+      edge.className = cls;
+      edge.title = h.title;
+      edge.addEventListener('pointerdown', (e) => dragBlock(e, el, key, edge));
+      edge.addEventListener('dblclick', (e) => {
+        e.stopPropagation(); delete sizeStore[key]; write(SZ_KEY, sizeStore); applyBlockSize(el, key);
+      });
+      el.appendChild(edge);
+    }
   }
 
   function applyColWidth(table, idx, px) {

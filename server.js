@@ -41,6 +41,7 @@ const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
 const TOPOLOGY_FILE = path.join(DATA_DIR, 'topology.json');
 const TOPO_ICON_DIR = path.join(DATA_DIR, 'topology-icons');
+const BACKUP_STATUS_FILE = path.join(DATA_DIR, 'backup-status.json');
 const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
 let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
@@ -1085,9 +1086,10 @@ const SPECIAL = {
   },
   backup: async (dev, p) => {
     const name = String((p && p.name) || ('backup-' + new Date().toISOString().slice(0, 10))).replace(/[^a-zA-Z0-9_\-]/g, '');
-    if (dev.forceDemo) return { ok: true, name, demo: true, simulated: true };
+    if (dev.forceDemo) { writeBackupStatus(dev, name, true); return { ok: true, name, demo: true, simulated: true }; }
     if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未生成备份 / Router offline - backup not created');
     const r = await dev.api.exec(['/system/backup/save', `=name=${name}`]); if (r.status.type === 'trap') throw new Error(r.status.message);
+    writeBackupStatus(dev, name, false);
     return { ok: true, name };
   },
   ping: async (dev, p) => {
@@ -1143,18 +1145,20 @@ function demoSnapshot(dev) {
       name, type, comment, running: enabled ? 'true' : 'false', disabled: enabled ? 'false' : 'true',
       rxBps, txBps, rxPps: Math.round(rxBps / 8200 + Math.random() * 20), txPps: Math.round(txBps / 9100),
       rxBytes: Math.round(next.rx), txBytes: Math.round(next.tx), rxErrors: 0, txErrors: 0,
+      linkBps: type === 'wireguard' ? 1e8 : 1e9,
       rxDrops: idx === 3 && Math.random() > 0.85 ? 1 : 0, txDrops: 0,
     };
   });
 }
 async function collectLive(dev, client, useStream) {
-  const list = await client.exec(['/interface/print', '=.proplist=name,type,comment,disabled,running,rx-byte,tx-byte,rx-packet,tx-packet,rx-error,tx-error,rx-drop,tx-drop']);
+  const list = await client.exec(['/interface/print', '=.proplist=name,type,comment,disabled,running,speed,rx-byte,tx-byte,rx-packet,tx-packet,rx-error,tx-error,rx-drop,tx-drop']);
   if (list.status.type === 'trap') throw new Error('interface print: ' + (list.status.message || 'trap'));
   dev.ifaceMeta.clear();
   for (const row of list.re) {
     if (!row.name) continue;
     dev.ifaceMeta.set(row.name, {
       type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: row.disabled || 'false',
+      linkBps: linkSpeedBps(row.speed),
       rxErrors: num(row['rx-error']), txErrors: num(row['tx-error']), rxDrops: num(row['rx-drop']), txDrops: num(row['tx-drop']),
     });
   }
@@ -1178,6 +1182,7 @@ async function collectLive(dev, client, useStream) {
     if (!useStream) dev.lastRates.set(row.name, { rxBps, txBps, rxPps, txPps }); // 轮询模式同样是 monitor-traffic 真实值
     out.push({
       name: row.name, type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: 'false',
+      linkBps: linkSpeedBps(row.speed),
       rxBps, txBps, rxPps, txPps,
       rxBytes: hasCounters ? num(row['rx-byte']) : null, txBytes: hasCounters ? num(row['tx-byte']) : null,
       countersReal: hasCounters,
@@ -1249,6 +1254,7 @@ function ifacesFromCache(dev) {
     const total = dev.ifaceTotals.get(name) || null;   // 只缓存真实计数器，没有就是未知
     out.push({
       name, type: meta.type, comment: meta.comment, running: meta.running, disabled: 'false',
+      linkBps: meta.linkBps || 0,
       rxBps: rate.rxBps || 0, txBps: rate.txBps || 0, rxPps: rate.rxPps || 0, txPps: rate.txPps || 0,
       rxBytes: total ? Math.round(total.rx) : null, txBytes: total ? Math.round(total.tx) : null,
       countersReal: !!total,
@@ -1403,6 +1409,93 @@ async function pollDevice(dev) {
   } catch (e) { console.error(`[poll] ${dev.name}:`, e.message); }
   finally { dev.polling = false; }
 }
+/* ---- 链路带宽：RouterOS speed 字段（1Gbps / 100Mbps / auto）解析为 bit/s ---- */
+function linkSpeedBps(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, '');
+  const m = s.match(/^(\d+(?:\.\d+)?)([kmgt]?)b?ps$/);
+  if (!m) return 0;
+  const mul = { '': 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12 }[m[2]] || 1;
+  return Math.round(num(m[1]) * mul);
+}
+
+/* ---- 备份状态：只记录本机成功落盘/路由器保存的事实，不记录凭据 ---- */
+function readBackupStatus() {
+  try { return JSON.parse(fs.readFileSync(BACKUP_STATUS_FILE, 'utf8')) || {}; } catch (e) { return {}; }
+}
+function writeBackupStatus(dev, name, demo, location) {
+  try {
+    const all = readBackupStatus();
+    all[dev.id] = { name, at: Date.now(), location: location || ('/flash/' + name + '.backup'), demo: !!demo };
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(BACKUP_STATUS_FILE, JSON.stringify(all, null, 2) + '\n', { mode: 0o600 });
+  } catch (e) { /* 状态写失败不影响备份本身 */ }
+}
+
+/* ---- 关键防火墙规则命中计数（只取 drop/reject，避免规则表噪音） ---- */
+const SECURITY_TTL = 30000;
+async function securitySnapshot(dev) {
+  if (dev.forceDemo) {
+    const seedRows = [
+      ['input', 'drop', '拒绝外网 SSH', 18422, 2147483648],
+      ['forward', 'drop', '阻断恶意地址', 9321, 1073741824],
+      ['input', 'drop', 'WAN 入站默认丢弃', 5128, 536870912],
+      ['forward', 'reject', '拒绝 LAN→访客网', 204, 18874368],
+    ];
+    return { ok: true, ts: Date.now(), total: seedRows.length,
+      rows: seedRows.map((r, i) => ({ id: '*' + (i + 1), chain: r[0], action: r[1], comment: r[2], packets: r[3], bytes: r[4],
+        interface: i === 0 ? 'ether1' : '' })) };
+  }
+  if (dev.securityCache && Date.now() - dev.securityCache.at < SECURITY_TTL) return dev.securityCache.data;
+  const rows = await rosPrint(dev, SECTION_MAP.firewallFilter);
+  const hits = (rows || []).filter((r) => r && /^(drop|reject)$/i.test(String(r.action || '')) && !bool(r.disabled))
+    .map((r) => ({ id: String(r['.id'] || ''), chain: String(r.chain || ''), action: String(r.action || ''),
+      comment: String(r.comment || ''), interface: String(r['in-interface'] || ''),
+      packets: num(r.packets), bytes: num(r.bytes) }))
+    .sort((a, b) => b.packets - a.packets);
+  const data = { ok: true, ts: Date.now(), total: hits.length, rows: hits.slice(0, 10) };
+  dev.securityCache = { at: Date.now(), data };
+  return data;
+}
+
+/* ---- 链路质量：Netwatch 目标 + ICMP 延迟/抖动/丢包（按目标缓存，避免高频 ping） ---- */
+const QUALITY_TTL = 20000;
+function pingOne(dev, host) {
+  if (!/^[a-zA-Z0-9_.:-]+$/.test(host)) return Promise.resolve({ avg: null, jitter: null, loss: 100, error: 'bad host' });
+  if (dev.forceDemo) {
+    const seed = (host.length * 37) % 17;
+    const avg = 2 + seed * 1.7, jitter = 0.4 + (seed % 5) * 0.6, loss = seed === 0 ? 20 : (seed === 3 ? 10 : 0);
+    return Promise.resolve({ avg: Number(avg.toFixed(1)), jitter: Number(jitter.toFixed(1)), loss });
+  }
+  return dev.api.exec(['/ping', `=address=${host}`, '=count=10']).then((r) => {
+    if (r.status && r.status.type === 'trap') throw new Error(r.status.message || 'ping trap');
+    const times = (r.re || []).map((x) => num(String(x.time || '').replace(/ms$/i, ''))).filter((n) => n > 0);
+    if (!times.length) return { avg: null, jitter: null, loss: 100 };
+    const avg = times.reduce((a, b) => a + b, 0) / times.length;
+    const jitter = times.reduce((a, b) => a + Math.abs(b - avg), 0) / times.length;
+    return { avg: Number(avg.toFixed(1)), jitter: Number(jitter.toFixed(1)),
+      loss: Math.round((1 - times.length / 10) * 100) };
+  }).catch((e) => ({ avg: null, jitter: null, loss: 100, error: e.message }));
+}
+async function linkQualitySnapshot(dev) {
+  if (dev.qualityCache && Date.now() - dev.qualityCache.at < QUALITY_TTL) return dev.qualityCache.data;
+  let targets = [];
+  if (dev.forceDemo) {
+    targets = [{ host: '10.0.0.1', label: '网关' }, { host: '223.5.5.5', label: 'DNS' }, { host: '1.1.1.1', label: '外部网站' }];
+  } else {
+    try {
+      const rows = await rosPrint(dev, SECTION_MAP.netwatch);
+      targets = (rows || []).filter((r) => r && r.host).map((r) => ({ host: String(r.host), label: String(r.comment || r.host), netwatch: String(r.status || '') }));
+    } catch (e) { /* 未配置 Netwatch：退回到网关 + 公共 DNS */ }
+  }
+  if (!targets.length) targets = [{ host: String(dev.cfg.host || '1.1.1.1'), label: '网关' }, { host: '1.1.1.1', label: '外部网站' }];
+  targets = targets.slice(0, 5);
+  const rows = [];
+  for (const t of targets) rows.push({ ...t, ...(await pingOne(dev, t.host)) });
+  const data = { ok: true, ts: Date.now(), rows };
+  dev.qualityCache = { at: Date.now(), data };
+  return data;
+}
+
 function snapshotOf(dev) {
   if (!dev) return { ifaces: [], history: [], resourceHistory: [] };
   return { ...(dev.lastPacket || { deviceId: dev.id, deviceName: dev.name, mode: dev.mode, host: dev.cfg.host, ifaces: [] }),
@@ -2082,6 +2175,21 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, deviceId: dev.id, deviceName: dev.name,
       interval: IP_RATE_INTERVAL, error: dev.ipRateError || '', rows });
   }
+  /* 安全与策略状态：关键 drop/reject 规则命中计数 */
+  if (p === '/api/security' && req.method === 'GET') {
+    try { return json(res, 200, await securitySnapshot(reqDevice(req, url))); }
+    catch (e) { return json(res, 500, { error: e.message }); }
+  }
+  /* 链路质量：Netwatch 目标的延迟 / 抖动 / 丢包 */
+  if (p === '/api/link-quality' && req.method === 'GET') {
+    try { return json(res, 200, await linkQualitySnapshot(reqDevice(req, url))); }
+    catch (e) { return json(res, 500, { error: e.message }); }
+  }
+  /* 最近一次成功备份的状态与位置 */
+  if (p === '/api/backup/status' && req.method === 'GET') {
+    const dev = reqDevice(req, url);
+    return json(res, 200, { ok: true, deviceId: dev && dev.id, status: (dev && readBackupStatus()[dev.id]) || null });
+  }
   /* 网络拓扑：自动发现 + 用户自定义节点（custom 按设备持久化） */
   if (p === '/api/topology') {
     const dev = reqDevice(req, url);
@@ -2345,6 +2453,7 @@ const server = http.createServer(async (req, res) => {
     const name = raw || ('config-' + new Date().toISOString().slice(0, 10));
     try {
       if (dev.forceDemo) {
+        writeBackupStatus(dev, name, true, '浏览器下载 / Browser download · ' + name + '.rsc');
         return json(res, 200, { name, demo: true, text: `# ROS Center DEMO export\n# device: ${dev.name}\n# 演示模式：以下为示例文本，不是真实配置\n/interface print\n/system resource print\n` });
       }
       if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法导出配置 / Router offline');
@@ -2352,6 +2461,7 @@ const server = http.createServer(async (req, res) => {
       if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '导出失败');
       const lines = ((r && r.re) || []).map((x) => x && (x.output !== undefined ? x.output : x.ret !== undefined ? x.ret : x.line)).filter((v) => v !== undefined && v !== null).map(String);
       const text = (lines.length ? lines.join('\n') : '') + '\n';
+      writeBackupStatus(dev, name, false, '浏览器下载 / Browser download · ' + name + '.rsc');
       return json(res, 200, { name, text });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
