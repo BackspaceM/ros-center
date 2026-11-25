@@ -352,8 +352,18 @@ function fmtBytes(b) { const p = splitBytes(b); return p.v + ' ' + p.u; }
 function fmtBytesExact(b) { return (Number(b) || 0).toLocaleString('en-US'); }
 function fmtUptime(s) {
   if (s == null || !Number.isFinite(Number(s))) return '—';
-  s = Number(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
-  return lang === 'zh' ? (d ? d + '天' : '') + (h ? h + '时' : '') + m + '分' : (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm';
+  s = Math.max(0, Math.floor(Number(s)));
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  if (lang === 'zh') {
+    if (d) return `${d}天${h}时${m}分`;
+    if (h) return `${h}时${m}分`;
+    if (m) return `${m}分${sec}秒`;
+    return `${sec}秒`;
+  }
+  if (d) return `${d}d ${h}h ${m}m`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
 }
 function fmtTime(ts) { const d = new Date(ts); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); }
 function toast(msg, kind = '') {

@@ -2,7 +2,12 @@
 /* 一键配置向导：上网方式 / 内网 DHCP / 防火墙 / 管理员账号 -> 脚本预览、下载、应用 */
 (function () {
   let previewTimer = null;
-  const val = (id) => { const el = $(id); return el ? String(el.value || '').trim() : ''; };
+  /* combo 输入框显示的是 label，真实值存 data-combo-value；普通输入框读 value */
+  const val = (id) => {
+    const el = $(id); if (!el) return '';
+    const real = el.getAttribute('data-combo-value');
+    return String((real !== null ? real : el.value) || '').trim();
+  };
   const checked = (id) => { const el = $(id); return !!(el && el.checked); };
   const num = (id, d) => Number(val(id)) || d;
   /* LAN 二选一：新建 bridge-lan 网桥，或直接使用现有接口 */
@@ -154,7 +159,8 @@
     /* 无真实接口时用常见默认值，菜单始终可用 */
     const all = live ? [...new Set(names)] : [...new Set(['ether1', 'ether2', 'ether3', 'ether4', 'ether5', 'bridge-lan'])];
     const head = `<div class="qs-combo-head">${esc(L('来自', 'From'))} <b>${esc(devName)}</b>${live ? '' : ' · ' + esc(L('未连接，显示常用接口', 'Offline — common ports'))}</div>`;
-    document.querySelectorAll('[data-combo-menu]').forEach((menu) => {
+    /* 只填接口类 combo；DNS 等固定选项的菜单不要覆盖 */
+    document.querySelectorAll('[data-combo-menu="qsWan"], [data-combo-menu="qsLan"]').forEach((menu) => {
       menu.innerHTML = head + (all.map((n) => `<button type="button" class="qs-combo-opt" data-val="${esc(n)}">${esc(n)}</button>`).join('')
         || `<div class="qs-combo-empty">${esc(L('没有扫描到接口，可直接输入', 'No interfaces found — type a name'))}</div>`);
     });
@@ -193,6 +199,15 @@
       <div class="qs-combo-menu" data-combo-menu="${inputId}" hidden></div>
     </div>
     ${help ? `<div class="form-hint">${esc(help)}</div>` : ''}`;
+    /* 固定选项的下拉也用同样的 combo 风格（与接口下拉一致） */
+    const selectCombo = (id, def, options, help) => {
+      const hit = options.find(([v]) => v === def) || options[0];
+      return `<div class="qs-combo" data-combo="${id}">
+      <input type="text" id="${id}" value="${esc(hit ? hit[1] : def)}" data-combo-value="${esc(hit ? hit[0] : def)}" readonly aria-label="${esc(id)}" placeholder="${esc(L('请选择', 'Select'))}" autocomplete="off">
+      <button type="button" class="qs-combo-btn" data-combo-btn="${id}" aria-label="${esc(L('展开选项', 'Show options'))}">▾</button>
+      <div class="qs-combo-menu" data-combo-menu="${id}" hidden>${options.map(([v, label]) => `<button type="button" class="qs-combo-opt${v === def ? ' selected' : ''}" data-val="${esc(v)}" data-label="${esc(label)}">${esc(label)}</button>`).join('')}</div>
+    </div>${help ? `<div class="form-hint">${esc(help)}</div>` : ''}`;
+    };
     $('content').innerHTML = `
       <div class="qs-hero">
         <div class="qs-hero-icon">⚙</div>
@@ -275,10 +290,12 @@
             ${ifaceInput('qsLan', 'bridge-lan', L('从下拉选择，或直接输入接口名。', 'Pick from the list or type an interface name.'))}</div>
           <div class="qs-inline2">
             <div class="qs-field"><label>${esc(L('上游 DNS', 'Upstream DNS'))}</label><input type="text" id="qsDns" value="223.5.5.5,119.29.29.29"></div>
-            <div class="qs-field"><label>${esc(L('下发给客户端的 DNS', 'DNS for clients'))}</label><select id="qsDnsForClients">
-              <option value="gateway">${esc(L('网关自身（DNS 缓存）', 'Router itself (DNS cache)'))}</option>
-              <option value="upstream">${esc(L('直接上游 DNS', 'Upstream DNS'))}</option>
-              <option value="custom">${esc(L('自定义', 'Custom'))}</option></select></div>
+            <div class="qs-field"><label>${esc(L('下发给客户端的 DNS', 'DNS for clients'))}</label>
+              ${selectCombo('qsDnsForClients', 'gateway', [
+                ['gateway', L('网关自身（DNS 缓存）', 'Router itself (DNS cache)')],
+                ['upstream', L('直接上游 DNS', 'Upstream DNS')],
+                ['custom', L('自定义', 'Custom')],
+              ])}</div>
           </div>
           <div class="qs-field" id="qsCustomDnsRow" style="display:none"><label>${esc(L('自定义 DNS', 'Custom DNS'))}</label><input type="text" id="qsCustomDns" placeholder="10.0.0.2,10.0.0.3"></div>
           <div class="qs-inline2">
@@ -375,7 +392,13 @@
       menu.onclick = (e) => {
         const opt = e.target.closest('[data-val]'); if (!opt) return;
         const input = $(menu.dataset.comboMenu);
-        if (input) { input.value = opt.dataset.val; input.dispatchEvent(new Event('input')); }
+        if (input) {
+          input.value = opt.dataset.label !== undefined ? opt.dataset.label : opt.dataset.val;
+          input.setAttribute('data-combo-value', opt.dataset.val);
+          menu.querySelectorAll('.qs-combo-opt').forEach((x) => x.classList.toggle('selected', x === opt));
+          input.dispatchEvent(new Event('input'));
+          input.dispatchEvent(new Event('change'));   // 触发 toggleMode 等联动（DNS 选自定义要显示输入框）
+        }
         menu.hidden = true;
       };
     });

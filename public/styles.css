@@ -1278,3 +1278,23 @@ input[type=text], input[type=password], input[type=number], select, textarea {
 .table-tools input[type=search] { border-radius: 8px; }
 .health-item { padding: 5px 10px; border-radius: 8px; background: var(--soft); border: 1px solid var(--line); }
 .health-item b { color: var(--ink); }
+
+/* ---------- 23. 各分组页面视觉增强（统一质感、减少单调） ---------- */
+/* 配置表格页：面板顶部强调线 + 表格斑马纹 + 首列编号 */
+.panel > .table-tools { border-top: 2px solid color-mix(in srgb, var(--blue) 22%, transparent); }
+#content > .panel { position: relative; }
+tbody tr:nth-child(even):not(.selected) { background: color-mix(in srgb, var(--soft) 45%, transparent); }
+tbody td.num:first-of-type { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* 分组标题左侧色条（侧栏分组展开处） */
+.nav-group-title { letter-spacing: .3px; }
+/* 空状态：柔和插画感 */
+.empty, .topo-empty { position: relative; }
+.empty::before { content: '◌'; display: block; font-size: 26px; color: var(--blue); opacity: .35; margin-bottom: 8px; }
+/* 按钮组与工具条间距呼吸感 */
+.page-actions .btn, .qs-actions .btn { box-shadow: 0 1px 3px rgba(16,24,40,.05); }
+/* 面板内标题区增加微弱渐变底 */
+.panel-head { background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 3%, transparent), transparent); }
+/* 固定宽度下的表格行高更舒展 */
+.table-scroll table td, .table-scroll table th { padding-top: 10px; padding-bottom: 10px; }
+/* 折叠说明块圆角统一 */
+details.panel, details.upd-help { border-radius: var(--ui-radius); }

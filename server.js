@@ -975,7 +975,9 @@ function demoResource(dev) {
     'cpu-load': String(cpu), 'total-memory': '1073741824',
     'free-memory': String(Math.round(1073741824 * (0.32 + Math.random() * 0.08))),
     'total-hdd-space': '16777216', 'free-hdd-space': String(Math.round(16777216 * 0.71)),
-    uptime: fmtDuration((Date.now() - dev.startedAt) / 1000), 'board-name': 'RB5009UG+S+',
+    /* 演示路由器的运行时间：用固定基准 + 进程存活时间递增，不随 WebUI 重启从 0 开始
+       （原来是 Date.now()-startedAt，WebUI 刚起就显示"运行 4分"，明显不对）。 */
+    uptime: fmtDuration(12 * 86400 + 7 * 3600 + 34 * 60 + (Date.now() - dev.startedAt) / 1000), 'board-name': 'RB5009UG+S+',
     version: '7.15.2 (stable)', 'build-time': '2024-06-18 12:34:56',
   };
 }
@@ -1225,6 +1227,8 @@ async function pollDevice(dev) {
       if (dev.forceDemo) { resource = demoResource(dev); dev.mode = 'demo'; }
       else resource = dev.lastResource || {};
     }
+    /* 演示模式的 resource 也要落到 lastResource，否则 packetUptime 读不到，界面一直显示"运行 —" */
+    if (!dev.lastResource || dev.forceDemo) dev.lastResource = resource;
     await refreshConnections(dev, realSample);
 
     const totalRx = ifaces.reduce((s, i) => s + i.rxBps, 0), totalTx = ifaces.reduce((s, i) => s + i.txBps, 0);
