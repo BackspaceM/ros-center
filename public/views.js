@@ -35,29 +35,30 @@ function renderDashboard() {
           <span class="dash-iface-txt"><small>${esc(t('dash_iface'))}</small><b class="dash-iface-name">${esc(dashIfaceLabel())}</b></span>
           <span class="dash-iface-caret">⌄</span>
         </button>
+        <button class="btn" id="dashBlocksBtn" type="button" title="${esc(L('拖动块排序，或显示/隐藏块', 'Drag to reorder or show/hide blocks'))}">▦ ${esc(L('块设置', 'Blocks'))}</button>
         ${demoBadge()}
       </div>
     </div>
     <div class="cards">
-      <div class="card rx"><div class="card-label">${t('total_rx')}${scopeTag}</div><div class="card-value">${rx.v}<small>${rx.u}</small></div><div class="card-foot">${rxFoot}</div></div>
-      <div class="card tx"><div class="card-label">${t('total_tx')}${scopeTag}</div><div class="card-value">${tx.v}<small>${tx.u}</small></div><div class="card-foot">${txFoot}</div></div>
-      <div class="card ok"><div class="card-label">${t('active_if')}</div><div class="card-value">${active}<small>/ ${(d.ifaces || []).length}</small></div><div class="card-foot">${t('if_hint')}</div></div>
-      <div class="card warn"><div class="card-label">${t('peak_rx')}${scopeTag}</div><div class="card-value">${pk.v}<small>${pk.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
-      <div class="card warn"><div class="card-label">${t('peak_tx')}${scopeTag}</div><div class="card-value">${pkt.v}<small>${pkt.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
+      <div class="card rx" data-block="rx"><div class="card-label">${t('total_rx')}${scopeTag}</div><div class="card-value">${rx.v}<small>${rx.u}</small></div><div class="card-foot">${rxFoot}</div></div>
+      <div class="card tx" data-block="tx"><div class="card-label">${t('total_tx')}${scopeTag}</div><div class="card-value">${tx.v}<small>${tx.u}</small></div><div class="card-foot">${txFoot}</div></div>
+      <div class="card ok" data-block="active"><div class="card-label">${t('active_if')}</div><div class="card-value">${active}<small>/ ${(d.ifaces || []).length}</small></div><div class="card-foot">${t('if_hint')}</div></div>
+      <div class="card warn" data-block="peak_rx"><div class="card-label">${t('peak_rx')}${scopeTag}</div><div class="card-value">${pk.v}<small>${pk.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
+      <div class="card warn" data-block="peak_tx"><div class="card-label">${t('peak_tx')}${scopeTag}</div><div class="card-value">${pkt.v}<small>${pkt.u}</small></div><div class="card-foot">${t('uptime')} ${fmtUptime(d.uptime)}</div></div>
     </div>
     <div class="grid-2">
-      <div class="panel">
+      <div class="panel" data-block="trend">
         <div class="panel-head"><div><h2>${t('trend_title')}</h2><p class="sub">${t('trend_sub')}</p></div>
           <div class="legend"><span><i style="background:var(--blue)"></i>${t('legend_rx')}</span><span><i style="background:var(--violet)"></i>${t('legend_tx')}</span></div></div>
         <div class="chart-wrap"><canvas id="dashChart"></canvas><div class="tooltip" id="dashTip" hidden></div></div>
       </div>
-      <div class="panel">
+      <div class="panel" data-block="health">
         <div class="panel-head"><div><h2>${t('health_title')}</h2><p class="sub">${t('health_sub')}</p></div></div>
         <div class="chart-wrap"><canvas id="healthChart"></canvas><div class="tooltip" id="healthTip" hidden></div></div>
       </div>
     </div>
     <div class="grid-32">
-      <div class="panel conn-panel">
+      <div class="panel conn-panel" data-block="connections">
         <div class="panel-head"><div><h2>${t('conn_title')}</h2><p class="sub">${t('conn_sub')}${d.connectionsReal === false ? ' · ' + L('非实时，显示上次真实值', 'Not live, showing last real values') : ''}</p></div></div>
         <div class="conn-total">
           <div class="conn-total-main"><small>${t('conn_total_hint')}</small><b>${String((cn.total || 0).toLocaleString())}</b></div>
@@ -67,14 +68,16 @@ function renderDashboard() {
         ${connGroup('IPv6', cn.v6, cn.tcp6, cn.udp6, 'v6')}
         <div class="panel-body" style="padding-top:2px"><div id="connSpark" style="height:84px"></div></div>
       </div>
-      <div class="panel">
+      <div class="panel" data-block="iftypes">
         <div class="panel-head"><div><h2>${t('ifdist_title') || L('接口类型分布', 'Interface types')}</h2><p class="sub">${t('ifdist_sub') || L('按实际接口类型统计', 'Counted by real interface type')}</p></div></div>
         ${ifTypeDonutHtml(d.ifaces || [], active)}
       </div>
     </div>
-    <div class="grid-2">
-      ${topTablePanel('topIfPanel', t('top_if'), t('top_if_sub'), ['#', t('iface'), t('rate_rx'), t('rate_tx'), t('total')])}
-      ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), ['#', L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')])}
+    <div class="grid-2 dash-extra">
+      ${topTablePanel('topIfPanel', t('top_if'), t('top_if_sub'), ['#', t('iface'), t('rate_rx'), t('rate_tx'), t('total')], 'topif')}
+      ${topTablePanel('topConnPanel', t('top_conn'), t('top_conn_sub'), ['#', L('源地址', 'Source'), L('目标地址', 'Destination'), L('协议', 'Protocol'), L('流量', 'Bytes')], 'topconn')}
+      ${dashResourceBlock(cpu, memPct, diskPct)}
+      ${dashDeviceBlock(r, d)}
     </div>`;
   if (topoKeep) topoKeep.remove();
 
@@ -88,8 +91,104 @@ function renderDashboard() {
   ], (v) => v.toFixed(1) + '%');
   drawConnSpark();
   renderTopTables(d);
+  applyDashboardLayout();
   if (window.paintDashIfacePop) window.paintDashIfacePop();
 }
+/* ---------- 仪表盘可选块：全部来自 /api/snapshot 的真实数据 ---------- */
+function dashResourceBlock(cpu, memPct, diskPct) {
+  const bar = (label, pct, cls) => `<div class="dash-bar"><span>${esc(label)}</span><div class="dash-bar-track"><i class="${cls}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></div><b>${Math.round(pct)}%</b></div>`;
+  return `<div class="panel" data-block="resource">
+    <div class="panel-head"><div><h2>${esc(L('系统资源', 'System resources'))}</h2><p class="sub">${esc(L('来自 /system/resource 的真实读数', 'Live readings from /system/resource'))}</p></div></div>
+    <div class="panel-body dash-bars">${bar('CPU', cpu, 'cpu')}${bar(L('内存', 'Memory'), memPct, 'mem')}${bar(L('磁盘', 'Disk'), diskPct, 'disk')}</div>
+  </div>`;
+}
+function dashDeviceBlock(r, d) {
+  const items = [
+    [L('板型', 'Board'), r['board-name'] || 'RouterOS'],
+    [L('版本', 'Version'), r.version || '—'],
+    [L('运行时间', 'Uptime'), fmtUptime(d.uptime)],
+    [L('接口总数', 'Interfaces'), String((d.ifaces || []).length)],
+  ];
+  return `<div class="panel" data-block="device">
+    <div class="panel-head"><div><h2>${esc(L('设备信息', 'Device info'))}</h2><p class="sub">${esc(d.deviceName || '')}</p></div></div>
+    <div class="panel-body dash-kv">${items.map(([k, v]) => `<div><span>${esc(k)}</span><b title="${esc(v)}">${esc(v)}</b></div>`).join('')}</div>
+  </div>`;
+}
+
+const DASH_BLOCKS = [
+  ['rx', () => L('下行速率', 'Download')], ['tx', () => L('上行速率', 'Upload')],
+  ['active', () => L('活跃接口', 'Active interfaces')], ['peak_rx', () => L('峰值下行速率', 'Peak download')],
+  ['peak_tx', () => L('峰值上行速率', 'Peak upload')], ['trend', () => L('流量趋势', 'Traffic trend')],
+  ['health', () => L('设备健康', 'Device health')], ['connections', () => L('连接状态', 'Connections')],
+  ['iftypes', () => L('接口类型分布', 'Interface types')], ['topif', () => L('接口流量排行', 'Interface ranking')],
+  ['topconn', () => L('连接流量排行', 'Connection ranking')], ['resource', () => L('系统资源', 'System resources')],
+  ['device', () => L('设备信息', 'Device info')],
+];
+const dashPrefsKey = () => 'rosCenter.dash.' + (state.deviceId || '');
+function dashPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(dashPrefsKey()));
+    if (p && Array.isArray(p.order)) return { order: p.order, hidden: Array.isArray(p.hidden) ? p.hidden : [] };
+  } catch (e) { /* ignore */ }
+  return { order: DASH_BLOCKS.map((x) => x[0]), hidden: [] };
+}
+function applyDashboardLayout() {
+  const root = $('content'); if (!root) return;
+  const prefs = dashPrefs(), hidden = new Set(prefs.hidden);
+  const blocks = [...root.querySelectorAll('[data-block]')];
+  let dragId = '';
+  const save = () => {
+    const order = [...root.querySelectorAll('[data-block]')].map((b) => b.dataset.block);
+    const hide = [...root.querySelectorAll('[data-block]')].filter((b) => b.hidden).map((b) => b.dataset.block);
+    localStorage.setItem(dashPrefsKey(), JSON.stringify({ order, hidden: hide }));
+  };
+  for (const b of blocks) {
+    b.classList.add('dash-block');
+    b.hidden = hidden.has(b.dataset.block);
+    const handle = b.querySelector('.panel-head') || b;
+    handle.classList.add('dash-drag-handle');
+    handle.draggable = true;
+    handle.ondragstart = (e) => { dragId = b.dataset.block; e.dataTransfer.effectAllowed = 'move'; b.classList.add('dragging'); };
+    handle.ondragend = () => { dragId = ''; root.querySelectorAll('.dragging,.dash-over').forEach((x) => x.classList.remove('dragging', 'dash-over')); };
+    b.ondragover = (e) => { if (!dragId || dragId === b.dataset.block) return; e.preventDefault(); b.classList.add('dash-over'); };
+    b.ondragleave = () => b.classList.remove('dash-over');
+    b.ondrop = (e) => {
+      e.preventDefault(); b.classList.remove('dash-over');
+      if (!dragId || dragId === b.dataset.block) return;
+      const src = root.querySelector(`[data-block="${dragId}"]`);
+      if (!src || src.parentElement !== b.parentElement) return;
+      const kids = [...b.parentElement.children];
+      if (kids.indexOf(src) < kids.indexOf(b)) b.parentElement.insertBefore(src, b.nextSibling);
+      else b.parentElement.insertBefore(src, b);
+      dragId = ''; save();
+    };
+  }
+  for (const parent of new Set(blocks.map((b) => b.parentElement))) {
+    const order = prefs.order;
+    [...parent.children].filter((x) => x.dataset && x.dataset.block)
+      .sort((a, b) => { const ia = order.indexOf(a.dataset.block), ib = order.indexOf(b.dataset.block); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); })
+      .forEach((x) => parent.appendChild(x));
+  }
+  const btn = $('dashBlocksBtn');
+  if (btn) btn.onclick = openDashboardBlocks;
+}
+function openDashboardBlocks() {
+  const prefs = dashPrefs(), hidden = new Set(prefs.hidden);
+  const rows = DASH_BLOCKS.map(([id, label]) => `<label class="dash-block-row"><input type="checkbox" data-block-toggle="${id}" ${hidden.has(id) ? '' : 'checked'}><span>${esc(label())}</span><small>${esc(id)}</small></label>`).join('');
+  openModal(L('仪表盘块', 'Dashboard blocks'),
+    `<div class="dash-block-editor"><p class="dash-block-tip">${esc(L('勾选要显示的块；拖动画面中的块可调整顺序。设置按设备保存。', 'Pick visible blocks; drag blocks on the dashboard to reorder. Saved per device.'))}</p>${rows}</div>`,
+    `<button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" data-save type="button">${esc(t('confirm'))}</button>`,
+    (m) => {
+      m.querySelector('[data-close]').onclick = closeModal;
+      m.querySelector('[data-save]').onclick = () => {
+        const hide = [...m.querySelectorAll('[data-block-toggle]')].filter((c) => !c.checked).map((c) => c.dataset.blockToggle);
+        const order = [...document.querySelectorAll('[data-block]')].map((b) => b.dataset.block);
+        localStorage.setItem(dashPrefsKey(), JSON.stringify({ order, hidden: hide }));
+        closeModal(); renderDashboard();
+      };
+    });
+}
+
 /* 连接状态：IPv4 / IPv6 各成一组，子项保持短小并可横向滑动 */
 function connGroup(name, total, tcp, udp, cls) {
   const t4 = Number(tcp) || 0, u4 = Number(udp) || 0, all = Number(total) || 0;
@@ -101,8 +200,8 @@ function connGroup(name, total, tcp, udp, cls) {
   </div>`;
 }
 function emptyRow(cols) { return `<tr><td colspan="${cols}" style="text-align:center;padding:36px;color:var(--muted)">${t('no_data')}</td></tr>`; }
-function topTablePanel(id, title, sub, heads) {
-  return `<div class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2><p class="sub">${esc(sub)}</p></div></div>
+function topTablePanel(id, title, sub, heads, block) {
+  return `<div class="panel"${block ? ` data-block="${esc(block)}"` : ''}><div class="panel-head"><div><h2>${esc(title)}</h2><p class="sub">${esc(sub)}</p></div></div>
     <div class="table-scroll"><table><thead><tr>${heads.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody id="${id}Body"></tbody></table></div></div>`;
 }
 /* 接口类型分布：全部来自真实接口列表，不再编造 2.4G/5G/干扰/负载 等数据 */

@@ -14,8 +14,8 @@
   const ANIMS = ['none', 'pulse', 'flow', 'ripple'];
   const ANIM_ZH = { none: '无（只选中）', pulse: '节点脉冲', flow: '链路流动', ripple: '涟漪扩散' };
   const ANIM_EN = { none: 'None (select only)', pulse: 'Node pulse', flow: 'Link flow', ripple: 'Ripple' };
-  /* 恢复早期紧凑卡片：三段式 = icon（原宽度、满高按比例）| 名称/IP/MAC | 实时速率 */
-  const NODE_W = 190, NODE_H = 62, ICON_W = 26, RATE_W = 46, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
+  /* 紧凑三段式：icon（最早 26px，等比略放大到 32px）| 名称/IP/MAC | 实时速率/空闲 */
+  const NODE_W = 190, NODE_H = 62, ICON_W = 40, ICON_SZ = 32, RATE_W = 46, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
   let data = null, loading = false, iconUrl = '', iconLib = [], iconLabel = '';
   let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
@@ -334,21 +334,24 @@
     for (const n of nodes) {
       const p = pos.get(n.id); if (!p) continue;
       const name = String(n.name || '').slice(0, 9);
-      const ix = -NODE_W / 2 + 1, iy = -NODE_H / 2 + 1, iw = ICON_W - 2, ih = NODE_H - 2;
+      /* icon 等比略放大：26 → 32，垂直居中，不拉伸 */
+      const ix = -NODE_W / 2 + (ICON_W - ICON_SZ) / 2, iy = -ICON_SZ / 2;
       const icon = n.icon
-        ? `<image class="topo-icon-img" href="${esc(n.icon)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid meet" clip-path="url(#topoIconClip)"/>`
-        : `<rect class="topo-icon-bg type-${esc(n.type)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6"/><text class="topo-icon-t" x="${ix + iw / 2}" y="4" text-anchor="middle">${BADGE[n.type] || '?'}</text>`;
+        ? `<image class="topo-icon-img" href="${esc(n.icon)}" x="${ix}" y="${iy}" width="${ICON_SZ}" height="${ICON_SZ}" preserveAspectRatio="xMidYMid meet" clip-path="url(#topoIconClip)"/>`
+        : `<rect class="topo-icon-bg type-${esc(n.type)}" x="${ix}" y="${iy}" width="${ICON_SZ}" height="${ICON_SZ}" rx="7"/><text class="topo-icon-t" x="${ix + ICON_SZ / 2}" y="4" text-anchor="middle">${BADGE[n.type] || '?'}</text>`;
       const rate = effectiveRate(n.id);
       const hasRate = !!(rate.rxBps || rate.txBps);
       const upText = hasRate ? '↑' + fmtRate(rate.txBps) : '';
       const downText = hasRate ? '↓' + fmtRate(rate.rxBps) : '';
-      /* 三段式：icon 保持原宽度并满高按比例缩放，中间文字，右侧速率 */
+      /* 无流量用灰色「空闲」小标签，比空白更容易判断设备是否在线 */
+      const idleLabel = hasRate ? '' : `<g class="topo-idle"><rect x="${NODE_W / 2 - RATE_W + 6}" y="-8" width="28" height="16" rx="8"/><text x="${NODE_W / 2 - RATE_W + 20}" y="3" text-anchor="middle">${esc(L('空闲', 'Idle'))}</text></g>`;
       const cx = (-NODE_W / 2 + ICON_W) + (NODE_W - ICON_W - RATE_W) / 2;
       const mac = String(n.mac || '').toUpperCase().slice(0, 15) || typeLabel(n.type);
       const fx = activeFx && activeFx.id === n.id ? ' fx-' + activeFx.type : '';
       nodeHtml.push(`<g class="topo-node type-${esc(n.type)} ${n.auto ? 'auto' : 'custom'}${selectedId === n.id ? ' selected' : ''}${fx}" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})">
         ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="24"/>' : ''}
         <rect class="node-card" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="8"/>
+        <rect class="topo-type-bar type-${esc(n.type)}" x="${-NODE_W / 2}" y="${-NODE_H / 2 + 8}" width="3" height="${NODE_H - 16}" rx="1.5"/>
         ${icon}
         <rect class="topo-rate-divider" x="${NODE_W / 2 - RATE_W - 2}" y="${-NODE_H / 2 + 10}" width="1" height="${NODE_H - 20}"/>
         <text class="topo-name" x="${cx}" y="-16" text-anchor="middle">${esc(name)}</text>
@@ -356,10 +359,11 @@
         <text class="topo-mac" x="${cx}" y="14" text-anchor="middle">${esc(mac)}</text>
         <text class="topo-rate up" x="${NODE_W / 2 - 7}" y="-12" text-anchor="end">${esc(upText)}</text>
         <text class="topo-rate down" x="${NODE_W / 2 - 7}" y="16" text-anchor="end">${esc(downText)}</text>
+        ${idleLabel}
       </g>`);
     }
     const svg = `<svg class="topo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${baseW} ${baseH}" preserveAspectRatio="xMidYMid meet">
-      <defs><clipPath id="topoIconClip"><rect x="${-NODE_W / 2 + 1}" y="${-NODE_H / 2 + 1}" width="${ICON_W - 2}" height="${NODE_H - 2}" rx="6"/></clipPath></defs>
+      <defs><clipPath id="topoIconClip"><rect x="${-NODE_W / 2 + (ICON_W - ICON_SZ) / 2}" y="${-ICON_SZ / 2}" width="${ICON_SZ}" height="${ICON_SZ}" rx="7"/></clipPath></defs>
       <g class="topo-layer-links">${links.join('')}</g>
       <g class="topo-layer-nodes">${nodeHtml.join('')}</g>
     </svg>`;

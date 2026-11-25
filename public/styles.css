@@ -1376,9 +1376,10 @@ td.rownum { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-
 .col-editor-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 7px 10px; border-bottom: 1px solid var(--line); }
 .col-editor-row:last-child { border-bottom: 0; }
-.col-editor-row.drag-over { background: var(--blue-soft); box-shadow: inset 0 2px 0 var(--blue); }
-.col-drag { cursor: grab; color: var(--muted); font-size: 12px; letter-spacing: -2px; padding: 2px 4px; user-select: none; }
-.col-drag:active { cursor: grabbing; color: var(--blue); }
+.th-draggable { cursor: grab; }
+.th-draggable:active { cursor: grabbing; }
+th.dragging { opacity: .45; }
+th.th-over { box-shadow: inset 0 2px 0 var(--blue); background: var(--blue-soft); }
 .col-editor-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--ink); }
 .col-editor-row small { color: var(--muted); font-size: 10px; }
 .col-editor-move { display: inline-flex; gap: 4px; }
@@ -1419,6 +1420,40 @@ table tbody td { padding-top: 9px; padding-bottom: 9px; }
 .topo-node .topo-mac { font-size: 8.5px; }
 .topo-node .topo-rate { font-size: 9px; }
 .topo-icon-t { font-size: 12px; }
+/* 类型色：与图例圆点一致，节点左侧竖条呼应设备类型 */
+.topo-type-bar.type-router { fill: var(--blue); }
+.topo-type-bar.type-switch { fill: var(--green); }
+.topo-type-bar.type-ap { fill: var(--violet); }
+.topo-type-bar.type-nas { fill: var(--amber); }
+.topo-type-bar.type-client,
+.topo-type-bar.type-other { fill: var(--muted); }
+.topo-idle rect { fill: var(--soft); stroke: var(--line); stroke-width: 1; }
+.topo-idle text { fill: var(--muted); font-size: 8px; font-weight: 600; }
+/* 仪表盘：块对齐、拖拽反馈与可选块 */
+.grid-32 { align-items: stretch; }
+.grid-32 > .panel { height: 100%; }
+.dash-extra { align-items: stretch; }
+.dash-extra > .panel { height: 100%; }
+.dash-drag-handle { cursor: grab; }
+.dash-drag-handle:active { cursor: grabbing; }
+.dash-block.dragging { opacity: .45; }
+.dash-block.dash-over { outline: 2px dashed var(--blue); outline-offset: 2px; }
+.dash-bars { display: flex; flex-direction: column; gap: 15px; padding-top: 12px; }
+.dash-bar { display: grid; grid-template-columns: 56px 1fr 38px; align-items: center; gap: 9px; font-size: 11.5px; color: var(--muted); }
+.dash-bar b { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+.dash-bar-track { height: 7px; border-radius: 99px; background: var(--soft); overflow: hidden; }
+.dash-bar-track i { display: block; height: 100%; border-radius: 99px; }
+.dash-bar-track i.cpu { background: var(--green); }
+.dash-bar-track i.mem { background: var(--blue); }
+.dash-bar-track i.disk { background: var(--amber); }
+.dash-kv { display: grid; gap: 9px; padding-top: 12px; }
+.dash-kv > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11.5px; }
+.dash-kv span { color: var(--muted); }
+.dash-kv b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-block-editor { display: grid; gap: 6px; }
+.dash-block-tip { margin: 0 0 6px; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
+.dash-block-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.dash-block-row small { margin-left: auto; color: var(--muted); font-size: 10px; }
 .reboot-panel { border-top: 3px solid var(--red); }
 .reboot-actions { display: flex; align-items: center; gap: 12px; padding: 13px 14px;
   border: 1px solid color-mix(in srgb, var(--red) 25%, var(--line)); border-radius: 10px; background: var(--red-soft); }
