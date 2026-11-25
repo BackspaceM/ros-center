@@ -5,14 +5,27 @@
   const val = (id) => { const el = $(id); return el ? String(el.value || '').trim() : ''; };
   const checked = (id) => { const el = $(id); return !!(el && el.checked); };
   const num = (id, d) => Number(val(id)) || d;
+  /* LAN 二选一：新建 bridge-lan 网桥，或直接使用现有接口 */
+  const lanMode = () => {
+    const r = document.querySelector('input[name="qsLanMode"]:checked');
+    return r ? r.value : 'bridge';
+  };
+  function toggleLanMode() {
+    const bridge = lanMode() === 'bridge';
+    const bp = $('qsBridgePortsRow'), lr = $('qsLanIfaceRow');
+    if (bp) bp.style.display = bridge ? '' : 'none';
+    if (lr) lr.style.display = bridge ? 'none' : '';
+    /* 与旧字段保持同步，兼容其它读取 qsBridge 的地方 */
+    const cb = $('qsBridge'); if (cb) cb.checked = bridge;
+  }
 
   function collect() {
     return {
       device: state.deviceId || '',
       mode: val('qsMode') || 'pppoe',
       wanInterface: val('qsWan') || 'ether1',
-      lanInterface: val('qsLan') || 'bridge-lan',
-      createBridge: checked('qsBridge'),
+      lanInterface: lanMode() === 'bridge' ? 'bridge-lan' : (val('qsLan') || 'bridge-lan'),
+      createBridge: lanMode() === 'bridge',
       bridgePorts: val('qsBridgePorts'),
       lanCidr: val('qsLanCidr') || '192.168.88.1/24',
       poolStart: val('qsPoolStart'), poolEnd: val('qsPoolEnd'),
@@ -135,14 +148,6 @@
       const names = (d.rows || []).map((r) => r.name).filter(Boolean);
       const dl = $('qsIfaceList');
       if (dl) dl.innerHTML = names.map((n) => `<option value="${esc(n)}"></option>`).join('');
-      /* WAN/LAN 接口下拉：真实接口优先，保留一个「自定义…」入口让用户手填 */
-      for (const id of ['qsWanSelect', 'qsLanSelect']) {
-        const sel = $(id); if (!sel) continue;
-        sel.innerHTML = names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')
-          + `<option value="__custom__">${esc(L('自定义…', 'Custom…'))}</option>`;
-        const input = $(id === 'qsWanSelect' ? 'qsWan' : 'qsLan');
-        if (input && input.value && names.includes(input.value)) sel.value = input.value;
-      }
     } catch (e) { /* 离线时用手工输入 */ }
   }
 
@@ -171,11 +176,10 @@
   }
 
   window.renderQuickSetupPage = function renderQuickSetupPage() {
-    const ifaceRow = (id, inputId, label, help) => `<div class="qs-iface-row">
-      <select id="${id}" class="qs-iface-select" aria-label="${esc(label)}"><option value="__custom__">${esc(L('自定义…', 'Custom…'))}</option></select>
-      <span class="qs-iface-or">${esc(L('或', 'or'))}</span>
-      <input type="text" id="${inputId}" list="qsIfaceList" value="${id === 'qsWanSelect' ? 'ether1' : 'bridge-lan'}" aria-label="${esc(label)}">
-      ${help ? `<div class="form-hint">${esc(help)}</div>` : ''}</div>`;
+    /* 原生 datalist：一个输入框既能下拉选已检测接口，也能直接手填任意名字 */
+    const ifaceInput = (inputId, def, help) => `<input type="text" id="${inputId}" list="qsIfaceList" value="${def}" aria-label="${esc(L('接口名', 'Interface'))}"
+      placeholder="${esc(L('选择或输入接口名', 'Select or type an interface'))}">
+      ${help ? `<div class="form-hint">${esc(help)}</div>` : ''}`;
     $('content').innerHTML = `
       <div class="qs-hero">
         <div class="qs-hero-icon">⚙</div>
@@ -210,7 +214,7 @@
             <select id="qsMode" hidden><option value="pppoe">PPPoE</option><option value="dhcp">DHCP</option><option value="static">Static</option></select>
           </div>
           <div class="qs-field"><label>${esc(L('WAN 接口', 'WAN interface'))}</label>
-            ${ifaceRow('qsWanSelect', 'qsWan', L('WAN 接口', 'WAN interface'), L('可从下拉选择真实接口，也可直接输入接口名。', 'Pick a detected interface or type a custom name.'))}</div>
+            ${ifaceInput('qsWan', 'ether1', L('点击下拉选择已检测接口，或直接输入接口名。', 'Click to pick a detected interface, or just type a name.'))}</div>
           <div class="qs-sub" id="qsPppoeRow">
             <div class="qs-inline2">
               <div class="qs-field"><label>${esc(L('PPPoE 账号', 'Username'))}</label><input type="text" id="qsPppoeUser" autocomplete="off" placeholder="user@isp"></div>
@@ -246,10 +250,17 @@
             <div><label>${esc(L('地址池止', 'Pool end'))}</label><input type="text" id="qsPoolEnd" placeholder="${esc(L('自动', 'auto'))}"></div>
             <div><label>${esc(L('租约', 'Lease'))}</label><input type="text" id="qsLease" value="1d"></div>
           </div>
-          <div class="qs-field"><label>${esc(L('LAN 接口', 'LAN interface'))}</label>
-            ${ifaceRow('qsLanSelect', 'qsLan', L('LAN 接口', 'LAN interface'))}</div>
-          <label class="qs-check"><input type="checkbox" id="qsBridge" checked><span>${esc(L('创建 LAN 网桥并加入端口', 'Create LAN bridge and add ports'))}</span></label>
-          <div class="qs-field"><label>${esc(L('桥接端口', 'Bridge ports'))}</label><input type="text" id="qsBridgePorts" value="ether2,ether3,ether4,ether5" placeholder="ether2,ether3"></div>
+          <div class="qs-field"><label>${esc(L('LAN 接口方式', 'LAN interface mode'))}</label>
+            <div class="qs-mode-cards qs-lan-mode">
+              <label class="qs-mode-card"><input type="radio" name="qsLanMode" value="bridge" checked><span class="qs-mode-ic">▦</span><span><b>bridge-lan</b><small>${esc(L('新建网桥，聚合多个端口', 'Create a bridge with ports'))}</small></span></label>
+              <label class="qs-mode-card"><input type="radio" name="qsLanMode" value="existing"><span class="qs-mode-ic">▤</span><span><b>${esc(L('现有接口', 'Existing interface'))}</b><small>${esc(L('直接用 ether/bridge 接口', 'Use an existing interface'))}</small></span></label>
+            </div>
+            <input type="checkbox" id="qsBridge" checked hidden>
+          </div>
+          <div class="qs-field" id="qsBridgePortsRow"><label>${esc(L('桥接端口（加入 bridge-lan）', 'Bridge ports (joined to bridge-lan)'))}</label>
+            <input type="text" id="qsBridgePorts" value="ether2,ether3,ether4,ether5" placeholder="ether2,ether3"></div>
+          <div class="qs-field" id="qsLanIfaceRow" style="display:none"><label>${esc(L('LAN 接口', 'LAN interface'))}</label>
+            ${ifaceInput('qsLan', 'bridge-lan', L('从下拉选择，或直接输入接口名。', 'Pick from the list or type an interface name.'))}</div>
           <div class="qs-inline2">
             <div class="qs-field"><label>${esc(L('上游 DNS', 'Upstream DNS'))}</label><input type="text" id="qsDns" value="223.5.5.5,119.29.29.29"></div>
             <div class="qs-field"><label>${esc(L('下发给客户端的 DNS', 'DNS for clients'))}</label><select id="qsDnsForClients">
@@ -331,12 +342,11 @@
     document.querySelectorAll('input[name="qsModeRadio"]').forEach((r) => {
       r.onchange = () => { const m = $('qsMode'); if (m) { m.value = r.value; m.dispatchEvent(new Event('change')); } };
     });
-    /* 接口下拉 → 同步到真实输入框 */
-    const bindIface = (selId, inputId) => {
-      const sel = $(selId); if (!sel) return;
-      sel.onchange = () => { if (sel.value === '__custom__') { $(inputId).focus(); return; } $(inputId).value = sel.value; $(inputId).dispatchEvent(new Event('input')); };
-    };
-    bindIface('qsWanSelect', 'qsWan'); bindIface('qsLanSelect', 'qsLan');
+    /* LAN 二选一切换 */
+    document.querySelectorAll('input[name="qsLanMode"]').forEach((r) => {
+      r.onchange = () => { toggleLanMode(); schedulePreview(); };
+    });
+    toggleLanMode();
     /* 步骤导航 */
     document.querySelectorAll('.qs-step-tab').forEach((tab) => { tab.onclick = () => goStep(Number(tab.dataset.qsStep)); });
     $('qsStepPrev').onclick = () => goStep(currentStep - 1);

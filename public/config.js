@@ -190,7 +190,13 @@ function cellHtml(row, key, sec) {
   if (key === 'running') return `<span class="tag ${boolOn(v) ? 'green' : 'red'}">${boolOn(v) ? t('running') : t('stopped')}</span>`;
   if (key === 'disabled') return `<span class="tag ${boolOn(v) ? 'red' : 'green'}">${boolOn(v) ? t('disabled') : t('enabled')}</span>`;
   if (/\.id$/.test(key)) return `<span style="color:#9aa5bd">${esc(v)}</span>`;
-  if (/bytes/i.test(key)) return fmtBytes(v);
+  if (/bytes/i.test(key)) {
+    /* 连接表：显示精确字节数，实时每秒递增可见；其余表格保留易读单位 */
+    if (sec && (sec.id === 'connections' || sec.id === 'connections6')) {
+      return `<span title="${fmtBytes(v)}">${fmtBytesExact(v)}</span>`;
+    }
+    return fmtBytes(v);
+  }
   if (key === 'password' || key === 'private-key' || /pre-?shared-key/.test(key)) return '<span class="tag">••••••••</span>';
   const f = sec.fields.find((x) => x.key === key);
   if (f && f.type === 'bool') return boolOn(v) ? `<span class="tag blue">✓</span>` : '';

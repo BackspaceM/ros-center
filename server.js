@@ -808,10 +808,26 @@ for (const id of Object.keys(usageStore.devices)) {
 if (usageDirty) saveUsage(true);
 
 /* ================= 演示数据（每设备独立） ================= */
+/* DEMO 连接表：字节数随实时帧递增，模拟真实连接表的累计流量。
+   否则 demoDB 是静态 seed，连接页字节永远不变、仪表盘 TOP10 也不动。 */
+function demoConnectionsRows(dev, sectionId) {
+  const base = (dev.demoDB[sectionId] || []).map((r) => ({ ...r }));
+  const t = Date.now() / 1000;
+  return base.map((r, i) => {
+    const speed = 1800 + ((i * 3719) % 9000);           // 每条连接一个稳定的伪速率
+    const add = Math.round(speed * (t % 3600) + i * 530);
+    const orig = num(r['orig-bytes']) + add, repl = num(r['repl-bytes']) + Math.round(add * 0.6);
+    if (r['orig-bytes'] !== undefined || r['repl-bytes'] !== undefined) {
+      r['orig-bytes'] = String(orig); r['repl-bytes'] = String(repl);
+    } else {
+      r.bytes = String(num(r.bytes) + add);
+    }
+    return normalizeConnectionRow(r);
+  });
+}
 function demoPrint(dev, sectionId) {
-  const rows = (dev.demoDB[sectionId] || []).map((r) => ({ ...r }));
-  return (sectionId === 'connections' || sectionId === 'connections6')
-    ? rows.map(normalizeConnectionRow) : rows;
+  if (sectionId === 'connections' || sectionId === 'connections6') return demoConnectionsRows(dev, sectionId);
+  return (dev.demoDB[sectionId] || []).map((r) => ({ ...r }));
 }
 function demoAdd(dev, sectionId, values) {
   const arr = dev.demoDB[sectionId] || (dev.demoDB[sectionId] = []);
@@ -1113,6 +1129,8 @@ function emitStreamPacket(dev) {
     dataReal: !dev.forceDemo && dev.mode === 'live',
     totalRx, totalTx, ifaces, resource: dev.lastResource || {}, resourceHistory: dev.resourceHistory,
     connections: dev.connections, connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
+    /* DEMO 模式随实时帧下发动态连接行，让连接页与仪表盘 TOP10 每秒变化（真实设备仍走 /api/config 拉取） */
+    connRows: dev.forceDemo ? { connections: demoConnectionsRows(dev, 'connections'), connections6: demoConnectionsRows(dev, 'connections6') } : null,
   };
   dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
   if (dev.history.length > HISTORY) dev.history.shift();
@@ -1216,6 +1234,8 @@ async function pollDevice(dev) {
       interval: INTERVAL, uptime: packetUptime(dev), error: dev.lastError, dataReal: realSample,
       totalRx, totalTx, ifaces, resource, connections: dev.connections,
       connectionsReal: dev.connectionsReal, connectionsAt: dev.connectionsAt,
+      /* DEMO 连接行随每次轮询动态生成，让连接页与仪表盘 TOP10 实时变化 */
+      connRows: dev.forceDemo ? { connections: demoConnectionsRows(dev, 'connections'), connections6: demoConnectionsRows(dev, 'connections6') } : null,
     };
     dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
     if (dev.history.length > HISTORY) dev.history.shift();

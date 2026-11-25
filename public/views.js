@@ -141,7 +141,7 @@ function renderTopTables(d) {
   let conns = [];
   if (state.connRows) conns = [...state.connRows].sort((a, b) => num(b.bytes) - num(a.bytes)).slice(0, 10);
   $('topConnPanelBody').innerHTML = conns.map((c, n) => `<tr><td class="num">${n + 1}</td><td>${esc(c['src-address'])}</td><td>${esc(c['dst-address'])}</td>
-    <td><span class="tag blue">${esc(c.protocol)}</span></td><td class="num">${fmtBytes(c.bytes)}</td></tr>`).join('') || emptyRow(5);
+    <td><span class="tag blue">${esc(c.protocol)}</span></td><td class="num" title="${fmtBytes(c.bytes)}">${fmtBytesExact(c.bytes)}</td></tr>`).join('') || emptyRow(5);
 }
 function drawConnSpark() {
   const host = $('connSpark'); if (!host) return;

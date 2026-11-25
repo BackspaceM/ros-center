@@ -348,6 +348,8 @@ function splitBytes(b) {
   return { v: b.toFixed(b >= 100 ? 0 : b >= 10 ? 1 : 2), u: u[i] };
 }
 function fmtBytes(b) { const p = splitBytes(b); return p.v + ' ' + p.u; }
+/* 精确字节（带千分位）：连接表/TOP10 用，每秒递增肉眼可见；悬浮 title 仍显示易读单位 */
+function fmtBytesExact(b) { return (Number(b) || 0).toLocaleString('en-US'); }
 function fmtUptime(s) {
   if (s == null || !Number.isFinite(Number(s))) return '—';
   s = Number(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
@@ -750,9 +752,18 @@ function applyData(d) {
   if (state.resourceHistory.length === 0 && d.resource) {
     state.resourceHistory.push({ ts: d.ts, cpu: num(d.resource['cpu-load']), free: num(d.resource['free-memory']), total: num(d.resource['total-memory']) });
   }
+  /* 实时帧携带的连接行（DEMO 动态生成）：直接更新数据源，让表格与仪表盘 TOP10 每秒变化 */
+  if (d.connRows) {
+    if (d.connRows.connections) state.connRows = d.connRows.connections;
+    if (state.section === 'connections' && d.connRows.connections) { state.rows = d.connRows.connections; renderRowsById('connections'); }
+    if (state.section === 'connections6' && d.connRows.connections6) { state.rows = d.connRows.connections6; renderRowsById('connections6'); }
+  }
   updateTopbar(d);
   if (state.section === 'dashboard') renderDashboard();
-  else if (state.section === 'connections' || state.section === 'connections6') refreshRowsIfLoaded();
+  else if (state.section === 'connections' || state.section === 'connections6') {
+    /* 真实设备：实时帧不带行数据，仍走 HTTP 拉取；但 demo 刚已更新，跳过重复请求 */
+    if (!d.connRows) refreshRowsIfLoaded();
+  }
   /* 统计页不随每秒实时帧整页重绘，但 DEMO 徽标必须即时更新 */
   if (state.section === 'trafficStats') updateStatsBadge(d);
   /* 设备管理页：WS 帧里的真实连接状态即时反映到列表（内部做了签名去重） */
@@ -881,6 +892,11 @@ function liveRowsSignature(sec) {
   const rows = state.rows || [];
   if (!key) return rows.length + ':' + rows.map((r) => r && r['.id']).join(',');
   return rows.length + ':' + rows.map((r) => [r && r['.id'], r && r[key], r && r['connection-state']].join('|')).join(',');
+}
+/* 按 section id 重绘表格（实时帧更新数据源后用，避免再发 HTTP） */
+function renderRowsById(id) {
+  const sec = state.schema && state.schema.sections.find((s) => s.id === id);
+  if (sec && typeof renderRows === 'function' && $('tbody')) renderRows(sec);
 }
 
 function applyLang() {
