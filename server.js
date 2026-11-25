@@ -1457,48 +1457,84 @@ async function securitySnapshot(dev) {
   return data;
 }
 
-/* ---- 链路质量：Netwatch 目标 + ICMP 延迟/抖动/丢包（按目标缓存，避免高频 ping） ---- */
+/* ---- 链路质量：优先 RouterOS 原生 Netwatch 探针状态，ping 仅补充延迟/抖动/丢包 ----
+   Netwatch 是路由器上持续运行的探针，只读 /tool/netwatch/print 即可拿到权威 up/down；
+   ping 需要 API 用户具备 test 策略，trap 时明确标记「未探测」而不是误报 100% 丢包。 */
 const QUALITY_TTL = 20000;
+function qualityState(r) {
+  const nw = String(r.nwStatus || '').toLowerCase();
+  if (/^(up|ok|reachable|true|yes|enabled)$/.test(nw)) return 'ok';
+  if (/^(down|fail|failed|false|no|unreachable|error|timeout|unknown)$/.test(nw)) return 'bad';
+  if (r.error || r.loss == null) return 'unknown';
+  const loss = num(r.loss), avg = num(r.avg), jit = num(r.jitter);
+  if (loss >= 10 || avg >= 100) return 'bad';
+  if (loss > 0 || jit >= 10 || avg >= 50) return 'warn';
+  return 'ok';
+}
 function pingOne(dev, host) {
-  if (!/^[a-zA-Z0-9_.:-]+$/.test(host)) return Promise.resolve({ avg: null, jitter: null, loss: 100, error: 'bad host' });
+  if (!/^[a-zA-Z0-9_.:-]+$/.test(host)) return Promise.resolve({ avg: null, jitter: null, loss: null, error: '地址格式不正确 / bad host' });
   if (dev.forceDemo) {
     const seed = (host.length * 37) % 17;
     const avg = 2 + seed * 1.7, jitter = 0.4 + (seed % 5) * 0.6, loss = seed === 0 ? 20 : (seed === 3 ? 10 : 0);
     return Promise.resolve({ avg: Number(avg.toFixed(1)), jitter: Number(jitter.toFixed(1)), loss });
   }
-  return dev.api.exec(['/ping', `=address=${host}`, '=count=10']).then((r) => {
-    if (r.status && r.status.type === 'trap') throw new Error(r.status.message || 'ping trap');
-    const times = (r.re || []).map((x) => num(String(x.time || '').replace(/ms$/i, ''))).filter((n) => n > 0);
-    if (!times.length) return { avg: null, jitter: null, loss: 100 };
+  if (!(dev.api && dev.api.connected)) return Promise.resolve({ avg: null, jitter: null, loss: null, error: '路由器未连接 / router offline' });
+  /* count=6 + interval=100ms：约 0.6s，避免默认 1s 间隔拖到 10 秒 */
+  return dev.api.exec(['/ping', `=address=${host}`, '=count=6', '=interval=100ms']).then((r) => {
+    if (r.status && r.status.type === 'trap') {
+      const msg = String(r.status.message || '');
+      return { avg: null, jitter: null, loss: null,
+        error: /permission|not enough/i.test(msg) ? 'API 用户缺少 test 策略，无法 ping / needs "test" policy' : (msg || 'ping 被拒绝 / ping rejected') };
+    }
+    const recs = r.re || [];
+    const times = recs.map((x) => num(String(x.time || '').replace(/ms$/i, ''))).filter((n) => n > 0);
+    if (!times.length) return { avg: null, jitter: null, loss: null, error: '无 ICMP 响应 / no ICMP reply' };
     const avg = times.reduce((a, b) => a + b, 0) / times.length;
     const jitter = times.reduce((a, b) => a + Math.abs(b - avg), 0) / times.length;
     return { avg: Number(avg.toFixed(1)), jitter: Number(jitter.toFixed(1)),
-      loss: Math.round((1 - times.length / 10) * 100) };
-  }).catch((e) => ({ avg: null, jitter: null, loss: 100, error: e.message }));
+      loss: Math.round((1 - times.length / Math.max(recs.length, 6)) * 100) };
+  }).catch((e) => ({ avg: null, jitter: null, loss: null, error: e.message }));
 }
 async function linkQualitySnapshot(dev, targetParam) {
   const key = String(targetParam || '');
   if (dev.qualityCache && dev.qualityCache.key === key && Date.now() - dev.qualityCache.at < QUALITY_TTL) return dev.qualityCache.data;
-  let targets = [];
-  /* 用户自定义目标优先：host|标签，逗号分隔，最多 5 个；非法地址直接忽略 */
+  /* 1) RouterOS 原生 Netwatch：只读、持续探测，状态最可信 */
+  let netwatch = [];
+  try {
+    const rows = await rosPrint(dev, SECTION_MAP.netwatch);
+    netwatch = (rows || []).filter((r) => r && r.host).map((r) => ({
+      host: String(r.host), label: String(r.comment || r.host),
+      nwStatus: String(r.status || '').toLowerCase(), since: String(r.since || ''),
+    }));
+  } catch (e) { /* 未配置 Netwatch 或无读取权限 */ }
+  /* 2) 用户自定义目标：host|标签，逗号分隔，最多 5 个 */
+  let custom = [];
   if (key) {
-    targets = key.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 5).map((x) => {
-      const parts = x.split('|');
-      return { host: String(parts[0] || '').trim(), label: String(parts[1] || parts[0] || '').trim() };
+    custom = key.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 5).map((x) => {
+      const p = x.split('|');
+      return { host: String(p[0] || '').trim(), label: String(p[1] || p[0] || '').trim() };
     }).filter((t) => /^[a-zA-Z0-9_.:-]+$/.test(t.host));
   }
+  /* 3) 合并：自定义优先 → Netwatch 条目 → 网关 + 公共 DNS 保底 */
+  let targets = custom.slice();
+  for (const n of netwatch) if (!targets.some((t) => t.host === n.host)) targets.push(n);
   if (!targets.length && dev.forceDemo) {
     targets = [{ host: '10.0.0.1', label: '网关' }, { host: '223.5.5.5', label: 'DNS' }, { host: '1.1.1.1', label: '外部网站' }];
-  } else if (!targets.length) {
-    try {
-      const rows = await rosPrint(dev, SECTION_MAP.netwatch);
-      targets = (rows || []).filter((r) => r && r.host).map((r) => ({ host: String(r.host), label: String(r.comment || r.host), netwatch: String(r.status || '') }));
-    } catch (e) { /* 未配置 Netwatch：退回到网关 + 公共 DNS */ }
   }
   if (!targets.length) targets = [{ host: String(dev.cfg.host || '1.1.1.1'), label: '网关' }, { host: '1.1.1.1', label: '外部网站' }];
   targets = targets.slice(0, 5);
+  /* 4) Netwatch 已有状态直接用；否则才 ping 补充，避免无 test 权限时误报严重 */
   const rows = [];
-  for (const t of targets) rows.push({ ...t, ...(await pingOne(dev, t.host)) });
+  for (const t of targets) {
+    const nw = netwatch.find((n) => n.host === t.host);
+    const probe = (nw && nw.nwStatus) ? { avg: null, jitter: null, loss: null }
+      : await pingOne(dev, t.host);
+    const row = { ...t, ...probe,
+      source: (nw && nw.nwStatus) ? 'netwatch' : 'ping',
+      nwStatus: nw ? nw.nwStatus : '', since: nw ? nw.since : '' };
+    row.state = qualityState(row);
+    rows.push(row);
+  }
   const data = { ok: true, ts: Date.now(), rows };
   dev.qualityCache = { at: Date.now(), key, data };
   return data;
@@ -1732,6 +1768,13 @@ function serveStatic(req, res, pathname) {
   if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); return; }
+    /* 首页脚本/样式注入版本 query：Docker 更新后版本变化 → URL 变化 → 浏览器必拉新文件，
+       避免「自动刷新一次仍是旧 JS，需手动再刷一次」。版本来自镜像内 package.json / version.json。 */
+    if (path.extname(filePath).toLowerCase() === '.html') {
+      const v = encodeURIComponent(runtimeInfo().version);
+      data = Buffer.from(data.toString('utf8')
+        .replace(/((?:src|href)=")(\/(?:[a-z0-9._-]+\.(?:js|css)))(")/gi, `$1$2?v=${v}$3`));
+    }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(data);
   });

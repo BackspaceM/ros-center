@@ -173,10 +173,16 @@ function dashQualityBlock() {
     <thead><tr><th>${t('th_target')}</th><th class="num">${t('th_delay')}</th><th class="num">${t('th_jitter')}</th><th class="num">${t('th_loss')}</th><th>${L('状态', 'Status')}</th></tr></thead>
     <tbody>${rows.map((r) => {
       const loss = num(r.loss), avg = num(r.avg), jit = num(r.jitter);
-      const bad = loss >= 10 || avg >= 100, warn = !bad && (loss > 0 || jit >= 10 || avg >= 50);
-      return `<tr><td><b>${esc(r.label || r.host)}</b><small>${esc(r.host)}</small></td>
+      const st = r.state || (r.error || r.loss == null ? 'unknown'
+        : (loss >= 10 || avg >= 100 ? 'bad' : (loss > 0 || jit >= 10 || avg >= 50 ? 'warn' : 'ok')));
+      const cls = st === 'ok' ? 'green' : st === 'warn' ? 'amber' : st === 'bad' ? 'red' : '';
+      const label = st === 'ok' ? t('normal') : st === 'warn' ? t('warning_level') : st === 'bad' ? t('critical') : t('unknown_status');
+      const src = r.source === 'netwatch' ? L('Netwatch 探针', 'Netwatch') : L('ICMP 探测', 'ICMP');
+      const tip = r.error ? `${src} · ${r.error}` : (r.source === 'netwatch' ? `${src}${r.since ? ' · ' + L('自', 'since') + ' ' + esc(r.since) : ''}` : src);
+      return `<tr><td><b>${esc(r.label || r.host)}</b><small>${esc(r.host)} · ${esc(src)}</small></td>
         <td class="num">${avg ? avg.toFixed(1) + ' ms' : '—'}</td><td class="num">${jit ? jit.toFixed(1) + ' ms' : '—'}</td>
-        <td class="num">${loss}%</td><td><span class="tag ${bad ? 'red' : warn ? 'amber' : 'green'}">${bad ? t('critical') : warn ? t('warning_level') : t('normal')}</span></td></tr>`;
+        <td class="num">${r.loss == null ? '—' : loss + '%'}</td>
+        <td><span class="tag ${cls}" title="${esc(tip)}">${label}</span></td></tr>`;
     }).join('') || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
   return `<div class="panel" data-block="quality">
     <div class="panel-head"><div><h2>${t('link_quality_title')}</h2><p class="sub">${t('link_quality_sub')}</p></div>
