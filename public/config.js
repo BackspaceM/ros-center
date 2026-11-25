@@ -191,9 +191,10 @@ function cellHtml(row, key, sec) {
   if (key === 'disabled') return `<span class="tag ${boolOn(v) ? 'red' : 'green'}">${boolOn(v) ? t('disabled') : t('enabled')}</span>`;
   if (/\.id$/.test(key)) return `<span style="color:#9aa5bd">${esc(v)}</span>`;
   if (/mac[-_]?address/i.test(key) && v) {
-    /* MAC 厂商识别：内置 OUI 离线查表，知名厂商在 MAC 后附彩色小标 */
+    /* MAC 厂商识别：内置 OUI 离线查表，知名厂商显示原厂配色徽标（无背景） */
     const vendor = typeof ouiVendor === 'function' ? ouiVendor(v) : '';
-    return `<span class="mac-cell" title="${esc(v)}${vendor ? ' · ' + esc(vendor) : ''}">${esc(v)}${vendor ? ` <em class="mac-vendor">${esc(vendor)}</em>` : ''}</span>`;
+    const logo = vendor && typeof ouiLogo === 'function' ? ouiLogo(vendor) : '';
+    return `<span class="mac-cell" title="${esc(v)}${vendor ? ' · ' + esc(vendor) : ''}">${esc(v)}${logo ? ` <span class="mac-logo" title="${esc(vendor)}">${logo}</span>` : ''}</span>`;
   }
   if (/bytes/i.test(key)) {
     /* 连接表：显示精确字节数，实时每秒递增可见；其余表格保留易读单位 */

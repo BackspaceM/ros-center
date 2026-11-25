@@ -107,7 +107,24 @@
     '0C8BFD': 'Amazon', '40B4F2': 'Amazon', '74C246': 'Amazon', 'FC71C8': 'Amazon',
   };
 
-  /* 查厂商：接受 xx:xx:xx:xx:xx:xx / xx-xx-.. / xxxx.xxxx.xxxx 等格式 */
+  /* 图形徽标：Simple Icons 官方品牌路径 + 原厂主色，透明背景、无底板。
+     路径与浅/深色主题配色内置于 oui-logos.js，离线可用，不发起外部请求。 */
+  function escAttr(x) { return String(x).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+  window.ouiLogo = function ouiLogo(vendor, size) {
+    if (!vendor) return '';
+    const db = (typeof window.OUI_LOGOS === 'object' && window.OUI_LOGOS) ? window.OUI_LOGOS : null;
+    const data = db && db[vendor];
+    if (!data) return '';
+    const s = Math.max(12, Math.min(32, Number(size) || 18));
+    const inner = data.d
+      ? '<path d="' + data.d + '"/>'
+      : '<text x="12" y="12" text-anchor="middle" dominant-baseline="central" ' +
+        'font-family="Arial,sans-serif" font-weight="700" font-size="15">' +
+        escAttr(data.a || String(vendor).charAt(0)) + '</text>';
+    return '<svg class="oui-logo" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
+      'style="--oui-c:' + data.c + ';--oui-dk:' + data.dk + '" role="img" aria-label="' + escAttr(vendor) + '">' +
+      inner + '</svg>';
+  };
   window.ouiVendor = function ouiVendor(mac) {
     const s = String(mac || '').toUpperCase().replace(/[^0-9A-F]/g, '');
     if (s.length < 6) return '';

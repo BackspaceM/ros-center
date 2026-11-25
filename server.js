@@ -364,12 +364,19 @@ async function pollIpRates() {
     const targets = ipRateTargets(dev);
     if (!targets.length) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
     if (dev.forceDemo) {
-      /* 演示模式：为开启测速的节点生成合理的模拟速率 */
+      /* 演示模式：按 IP 生成「量级不同 + 相位不同」的速率，避免多台设备看起来一个样。
+         用 IP 的稳定哈希决定基准量级（0.3x~2.4x），末段再决定波动相位。 */
       const t = now / 1000;
       for (const tg of targets) {
-        const seed = tg.ip.split('.').reduce((a, x) => a + Number(x), 0);
-        const rx = Math.max(0, Math.round(2.4e6 + Math.sin(t / 5 + seed) * 1.6e6 + (Math.random() - .5) * 2e5));
-        const tx = Math.max(0, Math.round(6.8e5 + Math.sin(t / 7 + seed * .3) * 4.2e5 + (Math.random() - .5) * 1e5));
+        const parts = tg.ip.split('.').map(Number);
+        const last = parts[parts.length - 1] || 1;
+        /* 稳定哈希：同一 IP 每次启动得到相同基准，不同 IP 量级明显不同 */
+        const h = parts.reduce((a, x, i) => (a * 31 + x * (i + 7)) >>> 0, 17);
+        const scale = 0.35 + (h % 100) / 100 * 2.1;          // 0.35x ~ 2.45x
+        const phase = (last * 2.399 + (h % 17)) % 6.283;      // 相位错开
+        /* 基准速率占主导（量级差异），波动只 ±18%，保证不同 IP 一眼可区分 */
+        const rx = Math.max(0, Math.round((3.2e6 * scale) * (1 + Math.sin(t / 5 + phase) * 0.18) + (Math.random() - .5) * 1e5));
+        const tx = Math.max(0, Math.round((9e5 * scale) * (1 + Math.sin(t / 7 + phase * .6) * 0.18) + (Math.random() - .5) * 4e4));
         dev.ipRates.set(tg.ip, { rxBps: rx, txBps: tx, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id });
       }
       continue;
