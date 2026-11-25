@@ -829,15 +829,22 @@ body.topology-page .topo-legend { padding: 0; gap: 12px; font-size: 10.5px; marg
 .topo-node .node-card { fill: var(--card); stroke: var(--line); stroke-width: 1.4; }
 .topo-node:hover .node-card { stroke: color-mix(in srgb, var(--blue) 55%, var(--line)); stroke-width: 2; }
 .topo-node.selected .node-card { stroke: var(--blue); stroke-width: 2.2; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--blue) 38%, transparent)); }
-/* 类型色只落在 icon 角标上：一眼能认出，又不让整张画布五颜六色 */
-.topo-type-dot { stroke: var(--card); stroke-width: 1.2; }
-.topo-type-dot.type-router, .lg-router { fill: var(--blue); background: var(--blue); }
-.topo-type-dot.type-switch, .lg-switch { fill: var(--green); background: var(--green); }
-.topo-type-dot.type-ap, .lg-ap { fill: var(--violet); background: var(--violet); }
-.topo-type-dot.type-nas, .lg-nas { fill: var(--amber); background: var(--amber); }
-.topo-type-dot.type-dns, .lg-dns { fill: #0e9aa7; background: #0e9aa7; }
-.topo-type-dot.type-proxy, .lg-proxy { fill: #c26793; background: #c26793; }
-.topo-type-dot.type-client, .topo-type-dot.type-other, .lg-client { fill: var(--muted); background: var(--muted); }
+/* 类型色灯光：从卡片顶部射向 icon，颜色与图例圆点一致，强弱随实时流量 */
+.topo-light { filter: blur(1.4px); pointer-events: none; transition: opacity .6s ease; }
+.light-stop-router { stop-color: var(--blue); }
+.light-stop-switch { stop-color: var(--green); }
+.light-stop-ap { stop-color: var(--violet); }
+.light-stop-nas { stop-color: var(--amber); }
+.light-stop-dns { stop-color: #0e9aa7; }
+.light-stop-proxy { stop-color: #c26793; }
+.light-stop-client, .light-stop-other { stop-color: var(--muted); }
+.lg-router { fill: var(--blue); background: var(--blue); }
+.lg-switch { fill: var(--green); background: var(--green); }
+.lg-ap { fill: var(--violet); background: var(--violet); }
+.lg-nas { fill: var(--amber); background: var(--amber); }
+.lg-dns { fill: #0e9aa7; background: #0e9aa7; }
+.lg-proxy { fill: #c26793; background: #c26793; }
+.lg-client { fill: var(--muted); background: var(--muted); }
 .topo-icon-bg.type-router { fill: #e8f0ff; }
 .topo-icon-bg.type-switch { fill: #e6f7f0; }
 .topo-icon-bg.type-ap { fill: #efeaff; }

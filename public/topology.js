@@ -310,6 +310,14 @@
     return { rxBps, txBps };
   }
 
+  /* 灯光强度：空闲 ~0.22（微微一束），有流量按对数映射到 0.3~1.0，参考 10KB/s 起 */
+  function lightIntensity(rate) {
+    const bps = Math.max(Number(rate && rate.rxBps) || 0, Number(rate && rate.txBps) || 0);
+    if (bps < 8000) return 0.22;
+    const norm = Math.min(1, Math.max(0, (Math.log10(bps) - 4) / 5)); // 10^4 ~ 10^9 B/s
+    return Math.round((0.3 + norm * 0.7) * 100) / 100;
+  }
+
   function flowDuration(id) {
     /* 只取该节点的下行速率，并按对数比例映射到 3.6s~0.45s */
     const bps = effectiveRate(id).rxBps;
@@ -346,13 +354,17 @@
       /* 无流量用灰色「空闲」小标签，比空白更容易判断设备是否在线 */
       const idleLabel = hasRate ? '' : `<g class="topo-idle"><rect x="${NODE_W / 2 - RATE_W + 6}" y="-8" width="28" height="16" rx="8"/><text x="${NODE_W / 2 - RATE_W + 20}" y="3" text-anchor="middle">${esc(L('空闲', 'Idle'))}</text></g>`;
       const cx = (-NODE_W / 2 + ICON_W) + (NODE_W - ICON_W - RATE_W) / 2;
+      /* 类型色灯光：从卡片顶部内侧射下、尾端到 icon 上方，宽度与 icon 一致；
+         强度按实时速率在 paintRates() 里更新（空闲微微一束，有流量按 log 比例增强）。 */
+      const lightX = ix, lightTop = -NODE_H / 2 + 1, lightBottom = -ICON_SZ / 2 + 1;
+      const light = `<path class="topo-light" d="M ${lightX} ${lightTop} L ${lightX + ICON_SZ} ${lightTop} L ${lightX + ICON_SZ - 3} ${lightBottom} L ${lightX + 3} ${lightBottom} Z" fill="url(#topoLight-${esc(n.type)})" opacity="${lightIntensity(rate)}"/>`;
       const mac = String(n.mac || '').toUpperCase().slice(0, 15) || typeLabel(n.type);
       const fx = activeFx && activeFx.id === n.id ? ' fx-' + activeFx.type : '';
       nodeHtml.push(`<g class="topo-node type-${esc(n.type)} ${n.auto ? 'auto' : 'custom'}${selectedId === n.id ? ' selected' : ''}${fx}" data-id="${esc(n.id)}" transform="translate(${p.x},${p.y})">
         ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="24"/>' : ''}
         <rect class="node-card type-${esc(n.type)}" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="8"/>
+        ${light}
         ${icon}
-        <circle class="topo-type-dot type-${esc(n.type)}" cx="${ix + ICON_SZ / 2}" cy="${-NODE_H / 2 + 6}" r="3.6"/>
         <rect class="topo-rate-divider" x="${NODE_W / 2 - RATE_W - 2}" y="${-NODE_H / 2 + 10}" width="1" height="${NODE_H - 20}"/>
         <text class="topo-name" x="${cx}" y="-16" text-anchor="middle">${esc(name)}</text>
         <text class="topo-sub" x="${cx}" y="-2" text-anchor="middle">${esc(String(n.ip || typeLabel(n.type)).slice(0, 12))}</text>
@@ -363,7 +375,14 @@
       </g>`);
     }
     const svg = `<svg class="topo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${baseW} ${baseH}" preserveAspectRatio="xMidYMid meet">
-      <defs><clipPath id="topoIconClip"><rect x="${-NODE_W / 2 + (ICON_W - ICON_SZ) / 2}" y="${-ICON_SZ / 2}" width="${ICON_SZ}" height="${ICON_SZ}" rx="7"/></clipPath></defs>
+      <defs>
+        <clipPath id="topoIconClip"><rect x="${-NODE_W / 2 + (ICON_W - ICON_SZ) / 2}" y="${-ICON_SZ / 2}" width="${ICON_SZ}" height="${ICON_SZ}" rx="7"/></clipPath>
+        ${TYPES.map((tp) => `<linearGradient id="topoLight-${tp}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" class="light-stop-${tp}" stop-opacity="1"/>
+          <stop offset="55%" class="light-stop-${tp}" stop-opacity=".6"/>
+          <stop offset="100%" class="light-stop-${tp}" stop-opacity="0"/>
+        </linearGradient>`).join('')}
+      </defs>
       <g class="topo-layer-links">${links.join('')}</g>
       <g class="topo-layer-nodes">${nodeHtml.join('')}</g>
     </svg>`;
@@ -466,11 +485,12 @@
     const stage = $('topoStage'); if (!stage) return;
     stage.querySelectorAll('.topo-node').forEach((g) => {
       const n = map.get(g.dataset.id); if (!n) return;
-      const up = g.querySelector('.topo-rate.up'), down = g.querySelector('.topo-rate.down');
+      const up = g.querySelector('.topo-rate.up'), down = g.querySelector('.topo-rate.down'), light = g.querySelector('.topo-light');
       const r = effectiveRate(n.id);
       const has = !!(r.rxBps || r.txBps);
       if (up) up.textContent = has ? '↑' + fmtRate(r.txBps) : '';
       if (down) down.textContent = has ? '↓' + fmtRate(r.rxBps) : '';
+      if (light) light.setAttribute('opacity', String(lightIntensity(r)));
     });
     /* 连线流速由下级设备的下行速率决定，与父节点是否新增无关 */
     stage.querySelectorAll('.topo-link[data-to]').forEach((path) => {
