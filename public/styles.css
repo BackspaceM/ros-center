@@ -1017,6 +1017,20 @@ tr.row-fail td { color: var(--red); }
 .qs-iface-row input:focus { border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent); }
 .qs-iface-or { font-size:11px; color:var(--muted); }
 .qs-iface-row .form-hint { flex-basis:100%; }
+/* 接口组合控件：输入框 + ▾ 菜单（点按钮必展开，解决隐藏 datalist 不弹下拉） */
+.qs-combo { position:relative; display:flex; align-items:center; }
+.qs-combo > input[type=text] { width:100%; box-sizing:border-box; height:36px; padding:0 40px 0 11px; border:1px solid var(--line);
+  border-radius:8px; background:var(--input); color:var(--ink); font-size:12.5px; outline:0; }
+.qs-combo > input[type=text]:focus { border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent); }
+.qs-combo-btn { position:absolute; right:5px; top:5px; width:26px; height:26px; border:0; border-radius:6px; background:var(--soft);
+  color:var(--muted); cursor:pointer; font-size:13px; line-height:1; }
+.qs-combo-btn:hover { background:var(--blue-soft); color:var(--blue); }
+.qs-combo-menu { position:absolute; z-index:30; left:0; right:0; top:calc(100% + 4px); max-height:230px; overflow:auto;
+  background:var(--card); border:1px solid var(--line); border-radius:9px; box-shadow:0 10px 28px rgba(10,20,40,.16); padding:5px; }
+.qs-combo-menu[hidden] { display:none; }
+.qs-combo-opt { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--ink);
+  padding:8px 10px; border-radius:6px; font-size:12.5px; cursor:pointer; }
+.qs-combo-opt:hover { background:var(--blue-soft); color:var(--blue); }
 .qs-check-list { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
 .qs-review-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
 .qs-review-card { display:flex; flex-direction:column; gap:5px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--soft); }

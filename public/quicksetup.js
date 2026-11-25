@@ -143,12 +143,18 @@
   }
 
   async function loadInterfaces() {
+    let names = [];
     try {
       const d = await api('/api/config?section=interfaces');
-      const names = (d.rows || []).map((r) => r.name).filter(Boolean);
-      const dl = $('qsIfaceList');
-      if (dl) dl.innerHTML = names.map((n) => `<option value="${esc(n)}"></option>`).join('');
-    } catch (e) { /* 离线时用手工输入 */ }
+      names = (d.rows || []).map((r) => r.name).filter(Boolean);
+    } catch (e) { /* 离线/未连接：用默认接口列表 */ }
+    /* 合并默认项与真实接口并去重；无论是否连上路由器都要填菜单，否则下拉是空的 */
+    const all = [...new Set([...names, 'ether1', 'ether2', 'ether3', 'ether4', 'ether5', 'bridge-lan'])];
+    const dl = $('qsIfaceList');
+    if (dl) dl.innerHTML = all.map((n) => `<option value="${esc(n)}"></option>`).join('');
+    document.querySelectorAll('[data-combo-menu]').forEach((menu) => {
+      menu.innerHTML = all.map((n) => `<button type="button" class="qs-combo-opt" data-val="${esc(n)}">${esc(n)}</button>`).join('');
+    });
   }
 
   /* ---------- 向导步骤 ---------- */
@@ -176,10 +182,14 @@
   }
 
   window.renderQuickSetupPage = function renderQuickSetupPage() {
-    /* 原生 datalist：一个输入框既能下拉选已检测接口，也能直接手填任意名字 */
-    const ifaceInput = (inputId, def, help) => `<input type="text" id="${inputId}" list="qsIfaceList" value="${def}" aria-label="${esc(L('接口名', 'Interface'))}"
-      placeholder="${esc(L('选择或输入接口名', 'Select or type an interface'))}">
-      ${help ? `<div class="form-hint">${esc(help)}</div>` : ''}`;
+    /* 组合控件：输入框可手填 + ▾ 按钮展开接口菜单（菜单由 loadInterfaces 填充，确保点一下就有反应） */
+    const ifaceInput = (inputId, def, help) => `<div class="qs-combo" data-combo="${inputId}">
+      <input type="text" id="${inputId}" list="qsIfaceList" value="${def}" aria-label="${esc(L('接口名', 'Interface'))}"
+        placeholder="${esc(L('选择或输入接口名', 'Select or type an interface'))}" autocomplete="off">
+      <button type="button" class="qs-combo-btn" data-combo-btn="${inputId}" aria-label="${esc(L('展开接口列表', 'Show interfaces'))}">▾</button>
+      <div class="qs-combo-menu" data-combo-menu="${inputId}" hidden></div>
+    </div>
+    ${help ? `<div class="form-hint">${esc(help)}</div>` : ''}`;
     $('content').innerHTML = `
       <div class="qs-hero">
         <div class="qs-hero-icon">⚙</div>
@@ -202,9 +212,10 @@
           ].map(([n, t1, t2]) => `<button type="button" class="qs-step-tab" data-qs-step="${n}"><span class="qs-step-dot">${n}</span><span class="qs-step-txt"><b>${esc(t1)}</b><small>${esc(t2)}</small></span></button>`).join('')}
         </div>
 
+        <datalist id="qsIfaceList"><option value="ether1"><option value="ether2"><option value="ether3"><option value="ether4"><option value="ether5"><option value="bridge-lan"></datalist>
+
         <div class="qs-step-pane active" data-qs-step="1">
           <div class="qs-pane-head"><span class="qs-pane-num">1</span><div><h2>${esc(L('上网方式', 'WAN / uplink'))}</h2><p>${esc(L('选择路由器如何接入互联网', 'How the router connects to the internet'))}</p></div></div>
-          <datalist id="qsIfaceList"><option value="ether1"><option value="bridge-lan"></datalist>
           <div class="qs-field"><label>${esc(L('接入类型', 'Connection type'))}</label>
             <div class="qs-mode-cards">
               <label class="qs-mode-card"><input type="radio" name="qsModeRadio" value="pppoe" checked><span class="qs-mode-ic">PPP</span><span><b>PPPoE</b><small>${esc(L('拨号上网', 'Dial-up'))}</small></span></label>
@@ -347,6 +358,30 @@
       r.onchange = () => { toggleLanMode(); schedulePreview(); };
     });
     toggleLanMode();
+    /* 接口组合控件：点 ▾ 展开菜单，点选项填入；点外部收起 */
+    const closeMenus = () => document.querySelectorAll('[data-combo-menu]').forEach((m) => { m.hidden = true; });
+    document.querySelectorAll('[data-combo-btn]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const menu = document.querySelector(`[data-combo-menu="${btn.dataset.comboBtn}"]`);
+        if (!menu) return;
+        const willOpen = menu.hidden;
+        closeMenus();
+        menu.hidden = !willOpen;
+      };
+    });
+    document.querySelectorAll('[data-combo-menu]').forEach((menu) => {
+      menu.onclick = (e) => {
+        const opt = e.target.closest('[data-val]'); if (!opt) return;
+        const input = $(menu.dataset.comboMenu);
+        if (input) { input.value = opt.dataset.val; input.dispatchEvent(new Event('input')); }
+        menu.hidden = true;
+      };
+    });
+    if (!window.__qsComboDocBound) {
+      window.__qsComboDocBound = true;
+      document.addEventListener('click', (e) => { if (!e.target.closest('.qs-combo')) closeMenus(); });
+    }
     /* 步骤导航 */
     document.querySelectorAll('.qs-step-tab').forEach((tab) => { tab.onclick = () => goStep(Number(tab.dataset.qsStep)); });
     $('qsStepPrev').onclick = () => goStep(currentStep - 1);
