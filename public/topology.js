@@ -352,7 +352,7 @@
         ${activeFx && activeFx.id === n.id && activeFx.type === 'ripple' ? '<circle class="topo-ripple" r="24"/>' : ''}
         <rect class="node-card type-${esc(n.type)}" x="${-NODE_W / 2}" y="${-NODE_H / 2}" width="${NODE_W}" height="${NODE_H}" rx="8"/>
         ${icon}
-        <circle class="topo-type-dot type-${esc(n.type)}" cx="${ix + 7}" cy="${iy + 7}" r="3.6"/>
+        <circle class="topo-type-dot type-${esc(n.type)}" cx="${ix + ICON_SZ / 2}" cy="${-NODE_H / 2 + 6}" r="3.6"/>
         <rect class="topo-rate-divider" x="${NODE_W / 2 - RATE_W - 2}" y="${-NODE_H / 2 + 10}" width="1" height="${NODE_H - 20}"/>
         <text class="topo-name" x="${cx}" y="-16" text-anchor="middle">${esc(name)}</text>
         <text class="topo-sub" x="${cx}" y="-2" text-anchor="middle">${esc(String(n.ip || typeLabel(n.type)).slice(0, 12))}</text>
