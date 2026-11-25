@@ -1385,3 +1385,36 @@ td.rownum { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-
 .col-editor-move button { width: 24px; height: 24px; border: 1px solid var(--line); background: var(--card);
   border-radius: 6px; color: var(--muted); cursor: pointer; }
 .col-editor-move button:hover { color: var(--blue); border-color: var(--blue); }
+
+/* ---------- 27. 视觉收敛：UniFi 的克制 + iKuai OS 的信息密度 ---------- */
+:root { --ui-shadow-lift: 0 10px 28px rgba(16,24,40,.07), 0 1px 2px rgba(16,24,40,.04); }
+:root[data-scheme="dark"] { --ui-shadow-lift: 0 10px 28px rgba(0,0,0,.30), 0 1px 2px rgba(0,0,0,.20); }
+.page-head h1 { font-size: 23px; font-weight: 650; letter-spacing: -.7px; }
+.page-head p { line-height: 1.5; }
+.card, .panel { border-radius: 13px; box-shadow: var(--ui-shadow-lift); }
+.btn { border-radius: 9px; font-weight: 550; height: 34px; padding: 0 13px; }
+.btn-sm { height: 30px; padding: 0 10px; }
+.btn.primary { background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 90%, #fff), var(--blue));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--blue) 26%, transparent); }
+.btn:not(.primary):not(.danger):not(.ghost-danger):hover { background: var(--blue-soft); border-color: color-mix(in srgb, var(--blue) 38%, var(--line)); }
+.topbar { box-shadow: 0 1px 0 var(--line), 0 6px 18px rgba(16,24,40,.035); }
+.sidebar .nav-item { border-radius: 9px; height: 35px; margin: 1px 8px; }
+.sidebar .nav-item.active { box-shadow: inset 3px 0 0 var(--side-accent-line); }
+table thead th { font-size: 11px; letter-spacing: .35px; text-transform: uppercase; color: var(--muted); }
+table tbody td { padding-top: 9px; padding-bottom: 9px; }
+.tag { border-radius: 999px; font-weight: 600; letter-spacing: .1px; }
+
+/* 拓扑：更轻的连线、点阵底纹、卡片投影与独立速率列 */
+.topo-stage { background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 10%, transparent) .8px, transparent .8px);
+  background-size: 24px 24px; background-position: -2px -2px; }
+:root[data-scheme="dark"] .topo-stage { background-image: radial-gradient(circle, rgba(255,255,255,.07) .8px, transparent .8px); }
+.topo-link { stroke-width: 1.15; opacity: .8; }
+.topo-link.manual { opacity: .38; stroke-dasharray: none; }
+.topo-link.flowing { stroke-dasharray: 7 9; opacity: .55; }
+.topo-node .node-card { filter: drop-shadow(0 5px 12px rgba(16,24,40,.10)); }
+:root[data-scheme="dark"] .topo-node .node-card { filter: drop-shadow(0 5px 14px rgba(0,0,0,.38)); }
+.topo-rate-divider { fill: none; stroke: var(--line); stroke-width: 1; opacity: .85; }
+.topo-node .topo-name { font-size: 12.5px; }
+.topo-node .topo-sub { font-size: 10px; }
+.topo-node .topo-mac { font-size: 9px; }
+.topo-node .topo-rate { font-size: 10.5px; }
