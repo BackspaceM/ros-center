@@ -185,16 +185,26 @@ function buildDmg(appDir, arch) {
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
   fs.cpSync(appDir, path.join(root, APP), { recursive: true });
-  const apps = path.join(root, 'Applications');
-  try { fs.unlinkSync(apps); } catch (e) { /* ignore */ }
-  fs.symlinkSync('/Applications', apps);
+  /* 不再创建指向 /Applications 的符号链接：hdiutil 处理这类链接时偶发 "Resource busy"。
+     用普通说明文件替代，dmg 里把 App 拖进 Applications 的体验不变。 */
   fs.writeFileSync(path.join(root, '安装说明.txt'), PKG_README);
 
   const out = path.join(DIST, `ROS-Center-${VERSION}-macos-${arch}.dmg`);
-  /* 不强制 -fs HFS+：部分 macOS runner 上 HFS+ 格式化报 "Resource busy"，
-     让 hdiutil 用默认文件系统（APFS/HFS+）更稳，dmg 内容不受影响。 */
-  execFileSync('hdiutil', ['create', '-volname', `ROS Center ${VERSION}`, '-srcfolder', root,
-    '-ov', '-format', 'UDZO', out], { stdio: 'pipe' });
+  /* hdiutil 在 CI runner 上偶发 "Resource busy"（挂载点竞争），重试 3 次；
+     不强制文件系统，让 hdiutil 用默认值，避免 HFS+ 格式化失败。 */
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      execFileSync('hdiutil', ['create', '-volname', `ROS Center ${VERSION}`, '-srcfolder', root,
+        '-ov', '-format', 'UDZO', out], { stdio: 'pipe' });
+      lastErr = null; break;
+    } catch (e) {
+      lastErr = e;
+      try { fs.rmSync(out, { force: true }); } catch (e2) { /* ignore */ }
+      if (attempt < 3) execFileSync('sleep', ['3']);
+    }
+  }
+  if (lastErr) throw lastErr;
   const hex = sha256(out);
   console.log('dmg:', path.relative(path.join(__dirname, '..'), out),
     (fs.statSync(out).size / 1024 / 1024).toFixed(1) + ' MB', 'sha256:', hex.slice(0, 12) + '…');
