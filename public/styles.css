@@ -1329,7 +1329,8 @@ details.panel, details.upd-help { border-radius: var(--ui-radius); }
 .ipm-dot { width:9px; height:9px; flex:none; border-radius:50%; background:var(--muted); opacity:.55; }
 .ipm-dot.live { background:var(--green); opacity:1; box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent); }
 .ipm-card-title { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-.ipm-card-title b { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ipm-card-title b { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ipm-icon { width:18px; height:18px; flex:none; object-fit:contain; border-radius:5px; }
 .ipm-card-title small { font-size:10.5px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .ipm-edit { width:26px; height:26px; flex:none; border:1px solid var(--line); border-radius:7px; background:var(--input);
   color:var(--muted); cursor:pointer; font-size:12px; }
@@ -1369,16 +1370,15 @@ td.rownum { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-
 .cfg-sum-item.warn b { color: var(--amber); }
 .cfg-sum-item.info { border-left: 3px solid var(--blue); }
 .cfg-sum-item.info b { color: var(--blue); }
-#content.cfg-dhcpLeases .panel { border-top: 3px solid var(--blue); border-radius: 13px; }
-#content.cfg-dhcpLeases .table-tools { padding: 12px 16px; }
-#content.cfg-dhcpLeases tbody tr { transition: background .15s; }
-#content.cfg-dhcpLeases tbody tr:hover td { background: color-mix(in srgb, var(--blue) 5%, transparent); }
 #content.cfg-dhcpLeases .tag.amber { color: var(--amber); background: color-mix(in srgb, var(--amber) 11%, transparent); border-color: color-mix(in srgb, var(--amber) 32%, transparent); }
 .col-editor-list { max-height: 330px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; }
 .col-editor-tip { margin: 0 0 10px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
 .col-editor-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 7px 10px; border-bottom: 1px solid var(--line); }
 .col-editor-row:last-child { border-bottom: 0; }
+.col-editor-row.drag-over { background: var(--blue-soft); box-shadow: inset 0 2px 0 var(--blue); }
+.col-drag { cursor: grab; color: var(--muted); font-size: 12px; letter-spacing: -2px; padding: 2px 4px; user-select: none; }
+.col-drag:active { cursor: grabbing; color: var(--blue); }
 .col-editor-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--ink); }
 .col-editor-row small { color: var(--muted); font-size: 10px; }
 .col-editor-move { display: inline-flex; gap: 4px; }
@@ -1414,7 +1414,16 @@ table tbody td { padding-top: 9px; padding-bottom: 9px; }
 .topo-node .node-card { filter: drop-shadow(0 5px 12px rgba(16,24,40,.10)); }
 :root[data-scheme="dark"] .topo-node .node-card { filter: drop-shadow(0 5px 14px rgba(0,0,0,.38)); }
 .topo-rate-divider { fill: none; stroke: var(--line); stroke-width: 1; opacity: .85; }
-.topo-node .topo-name { font-size: 12.5px; }
-.topo-node .topo-sub { font-size: 10px; }
-.topo-node .topo-mac { font-size: 9px; }
-.topo-node .topo-rate { font-size: 10.5px; }
+.topo-node .topo-name { font-size: 11px; }
+.topo-node .topo-sub { font-size: 9.5px; }
+.topo-node .topo-mac { font-size: 8.5px; }
+.topo-node .topo-rate { font-size: 9px; }
+.topo-icon-t { font-size: 12px; }
+.reboot-panel { border-top: 3px solid var(--red); }
+.reboot-actions { display: flex; align-items: center; gap: 12px; padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--red) 25%, var(--line)); border-radius: 10px; background: var(--red-soft); }
+.reboot-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 50%;
+  background: color-mix(in srgb, var(--red) 14%, var(--card)); color: var(--red); font-size: 18px; }
+.reboot-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.reboot-copy b { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.reboot-copy small { font-size: 11px; line-height: 1.5; color: var(--muted); }

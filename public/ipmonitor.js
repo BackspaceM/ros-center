@@ -3,6 +3,24 @@
    数据来自服务端连接表聚合（/api/ip-rates），不改路由器配置。 */
 (function () {
   let timer = null, history = new Map(), lastRows = [];
+  let iconById = new Map(), iconByIp = new Map();
+
+  /* 复用网络拓扑里上传的设备图标：优先按节点 id，再按 IP，避免 IP 写错时串台 */
+  async function loadIcons() {
+    try {
+      const d = await api('/api/topology');
+      const all = new Map();
+      for (const n of (d.auto || [])) all.set(n.id, n);
+      for (const n of (d.custom || [])) { if (n.deleted) all.delete(n.id); else all.set(n.id, n); }
+      iconById = new Map(); iconByIp = new Map();
+      for (const n of all.values()) {
+        if (!n.icon) continue;
+        iconById.set(n.id, n.icon);
+        if (n.ip) iconByIp.set(String(n.ip).trim(), n.icon);
+      }
+    } catch (e) { iconById = new Map(); iconByIp = new Map(); }
+  }
+  function iconFor(r) { return iconById.get(r.id) || iconByIp.get(r.ip) || ''; }
 
   function rate(bps) {
     const r = typeof fmtRate === 'function' ? fmtRate(bps || 0) : { v: '0', u: 'B/s' };
@@ -29,10 +47,11 @@
   function card(r) {
     const key = r.ip, h = history.get(key) || { rx: [], tx: [] };
     const rx = rate(r.rxBps), tx = rate(r.txBps);
+    const icon = iconFor(r);
     return `<article class="ipm-card">
       <div class="ipm-card-head">
         <span class="ipm-dot${(r.rxBps || r.txBps) ? ' live' : ''}"></span>
-        <div class="ipm-card-title"><b>${esc(r.name || r.ip)}</b><small>${esc(r.ip)}</small></div>
+        <div class="ipm-card-title"><b>${icon ? `<img class="ipm-icon" src="${esc(icon)}" alt="" loading="lazy">` : ''}${esc(r.name || r.ip)}</b><small>${esc(r.ip)}</small></div>
         <button class="ipm-edit" type="button" data-ip-edit="${esc(r.id)}" title="${esc(L('在网络拓扑中编辑', 'Edit in topology'))}">✎</button>
       </div>
       <div class="ipm-rates">
@@ -96,7 +115,8 @@
       <div class="ipm-grid" id="ipmGrid"></div>
       <div class="empty" id="ipmEmpty" hidden>${esc(L('暂无设备开启 IP 测速。请到网络拓扑中编辑设备，填写 IP 并勾选「按 IP 实时测速」。', 'No devices with IP monitoring yet. Edit a device in the topology, enter its IP and enable "Live rate by IP".'))}</div>`;
     $('ipmTopo').onclick = () => navigate('topology');
-    refresh(); timer = setInterval(refresh, 1000);
+    loadIcons().then(refresh);
+    timer = setInterval(refresh, 1000);
   };
   /* 离开页面时停止轮询 */
   document.addEventListener('visibilitychange', () => {

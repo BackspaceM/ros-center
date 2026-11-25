@@ -68,9 +68,11 @@ function openColumnSettings(sec) {
   const all = availableColumns(sec), cur = visibleColumns(sec);
   let draft = [...cur, ...all.filter((k) => !cur.includes(k))];
   let checked = new Set(cur);
+  let dragKey = '';
   const list = (m) => {
     const box = m.querySelector('.col-editor-list'); if (!box) return;
     box.innerHTML = draft.map((k, i) => `<div class="col-editor-row" data-key="${esc(k)}">
+      <span class="col-drag" draggable="true" title="${esc(L('拖动排序', 'Drag to reorder'))}">⋮⋮</span>
       <label><input type="checkbox" class="col-chk" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label>
       <span class="col-editor-move"><button type="button" data-move="${i}" data-dir="-1" title="↑">↑</button><button type="button" data-move="${i}" data-dir="1" title="↓">↓</button></span>
     </div>`).join('');
@@ -84,9 +86,26 @@ function openColumnSettings(sec) {
         [draft[i], draft[j]] = [draft[j], draft[i]]; list(m);
       };
     });
+    box.querySelectorAll('.col-drag').forEach((h) => {
+      h.ondragstart = (e) => { dragKey = h.closest('.col-editor-row').dataset.key; e.dataTransfer.effectAllowed = 'move'; };
+      h.ondragend = () => { dragKey = ''; box.querySelectorAll('.col-editor-row').forEach((x) => x.classList.remove('drag-over')); };
+    });
+    box.querySelectorAll('.col-editor-row').forEach((row) => {
+      row.ondragover = (e) => { if (!dragKey) return; e.preventDefault(); row.classList.add('drag-over'); };
+      row.ondragleave = () => row.classList.remove('drag-over');
+      row.ondrop = (e) => {
+        e.preventDefault(); row.classList.remove('drag-over');
+        const target = row.dataset.key;
+        if (!dragKey || target === dragKey) return;
+        const from = draft.indexOf(dragKey), to = draft.indexOf(target);
+        if (from < 0 || to < 0) return;
+        draft.splice(from, 1); draft.splice(to, 0, dragKey);
+        dragKey = ''; list(m);
+      };
+    });
   };
   openModal(L('表头字段', 'Table columns'),
-    `<div class="col-editor"><p class="col-editor-tip">${esc(L('勾选要显示的字段，用 ↑ ↓ 调整顺序。设置按当前设备与分类保存。', 'Pick visible columns and reorder them. Saved per device and section.'))}</p><div class="col-editor-list"></div></div>`,
+    `<div class="col-editor"><p class="col-editor-tip">${esc(L('勾选要显示的字段，拖动 ⋮⋮ 或用 ↑ ↓ 调整顺序（例如把设备名移到最前面）。设置按当前设备与分类保存。', 'Pick visible columns, then drag the handle or use ↑ ↓ to reorder (e.g. move device name to the top). Saved per device and section.'))}</p><div class="col-editor-list"></div></div>`,
     `<button class="btn" data-reset type="button">${esc(L('恢复默认', 'Reset'))}</button><button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" data-save type="button">${esc(t('confirm'))}</button>`,
     (m) => {
       list(m);
@@ -117,16 +136,6 @@ function syncConfigTag() {
   el.className = 'badge-demo';
 }
 
-function paintConfigSummary(sec) {
-  const box = $('cfgSummary'); if (!box || sec.id !== 'dhcpLeases') return;
-  const rows = state.rows || [];
-  const bound = rows.filter((r) => /bound/i.test(String(r.status || ''))).length;
-  const waiting = rows.filter((r) => /waiting/i.test(String(r.status || ''))).length;
-  const matched = rows.filter((r) => !!topoNodeFor(r, r['mac-address'])).length;
-  const vals = [rows.length, bound, waiting, matched];
-  box.querySelectorAll('b').forEach((b, i) => { if (vals[i] != null) b.textContent = String(vals[i]); });
-}
-
 function renderConfigPage(sec) {
   const cols = visibleColumns(sec).filter((c) => c !== '.id');
   const writable = sec.writable !== false;
@@ -143,7 +152,6 @@ function renderConfigPage(sec) {
       </div>
     </div>
     ${state.configDemo ? `<div class="card" style="border-left:3px solid var(--amber);margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:#8a6514">${t('demo_mode_tip')}</div>` : ''}
-    ${sec.id === 'dhcpLeases' ? `<div class="cfg-summary" id="cfgSummary"><span class="cfg-sum-item">${esc(L('租约总数', 'Leases'))} <b>—</b></span><span class="cfg-sum-item ok">${esc(L('已绑定', 'Bound'))} <b>—</b></span><span class="cfg-sum-item warn">${esc(L('等待中', 'Waiting'))} <b>—</b></span><span class="cfg-sum-item info">${esc(L('拓扑匹配', 'Topology matched'))} <b>—</b></span></div>` : ''}
     <div class="panel">
       <div class="table-tools">
         <input type="search" id="rowSearch" placeholder="${t('search')}…" value="${esc(state.rowFilter)}">
@@ -190,7 +198,7 @@ function renderConfigPage(sec) {
   };
   $('prevPage').onclick = () => { if (state.page > 1) { state.page--; renderRows(sec); } };
   $('nextPage').onclick = () => { if (state.page < Math.max(1, Math.ceil(sortedRows(sec).length / state.pageSize))) { state.page++; renderRows(sec); } };
-  loadRows(sec).then(() => { syncConfigTag(); paintConfigSummary(sec); renderRows(sec); }).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
+  loadRows(sec).then(() => { syncConfigTag(); renderRows(sec); }).catch((e) => { $('tbody').innerHTML = `<tr><td colspan="20" class="empty">${t('load_fail')}: ${esc(e.message)}</td></tr>`; });
 }
 
 /* 单例配置（DNS / 设备标识 / 时钟 / NTP）：只展示一组参数，避免误用新增/删除 */
@@ -406,12 +414,12 @@ function renderTools() {
   $('content').innerHTML = `
     <div class="page-head"><div><h1>${t('tools_title')}</h1><p>${t('tools_sub')}</p></div></div>
     <div class="grid-2">
-      <div class="panel"><div class="panel-head"><div><h2>${t('system_title')}</h2></div></div>
+      <div class="panel reboot-panel"><div class="panel-head"><div><h2>${t('reboot_title')}</h2><p class="sub">${t('reboot_msg')}</p></div></div>
         <div class="panel-body">
-          <div class="card" style="border-left:3px solid var(--red);padding:12px 14px">
-            <div style="font-weight:600;margin-bottom:6px">${t('reboot_title')}</div>
-            <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">${t('reboot_msg')}</div>
-            <button class="btn ghost-danger" id="rebootBtn">${t('reboot_title')}</button>
+          <div class="reboot-actions">
+            <span class="reboot-icon" aria-hidden="true">⟳</span>
+            <div class="reboot-copy"><b>${t('reboot_title')}</b><small>${t('reboot_msg')}</small></div>
+            <button class="btn ghost-danger" id="rebootBtn" type="button">${t('reboot_title')}</button>
           </div>
           <div class="modal-note" style="margin-top:16px;font-size:11.5px;color:var(--muted)">
             <b>${t('note')}:</b> ${t('write_warn')}
