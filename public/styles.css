@@ -300,6 +300,10 @@ button { cursor: pointer; }
 .brand-name { display: flex; align-items: baseline; gap: 5px; line-height: 1.2; min-width: 0; }
 .brand-name b { color: var(--side-bright); font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
 .brand-name small { font-size: 10.5px; font-weight: 500; color: var(--side-muted); letter-spacing: .2px; }
+.brand-ver { font-size: 9.5px; font-weight: 600; color: var(--blue); background: var(--blue-soft);
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--side-line)); border-radius: 999px;
+  padding: 1px 6px; letter-spacing: .1px; white-space: nowrap; margin-left: 2px; }
+.sidebar.collapsed .brand-ver { display: none; }
 .side-collapse { margin-left: auto; background: none; border: 0; color: var(--side-muted); font-size: 17px; line-height: 1; padding: 4px 6px; border-radius: 5px; }
 .side-collapse:hover { background: var(--side-hover); color: var(--side-bright); }
 .sidebar.collapsed .side-collapse { transform: rotate(180deg); margin: 0; position: absolute; right: -9px; top: 20px; background: var(--side); border: 1px solid var(--side-line); border-radius: 50%; width: 20px; height: 20px; font-size: 13px; padding: 0; }
@@ -1328,3 +1332,9 @@ details.panel, details.upd-help { border-radius: var(--ui-radius); }
 .ipm-spark { width:100%; height:32px; display:block; }
 .ipm-card-foot { display:flex; justify-content:space-between; gap:8px; margin-top:10px; padding-top:10px;
   border-top:1px dashed var(--line); font-size:10.5px; color:var(--muted); }
+
+/* ---------- 25. MAC 厂商标签（OUI 离线识别） ---------- */
+.mac-cell { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.mac-vendor { font-style: normal; font-family: var(--font-sans); font-size: 10px; font-weight: 600;
+  color: var(--blue); background: var(--blue-soft); border: 1px solid color-mix(in srgb, var(--blue) 25%, transparent);
+  border-radius: 999px; padding: 1px 6px; margin-left: 5px; white-space: nowrap; }

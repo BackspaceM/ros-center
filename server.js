@@ -1852,7 +1852,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   /* ---- 登录：无需鉴权 ---- */
-  if (p === '/api/health') return json(res, 200, { ok: true, app: 'ros-center', pid: process.pid, port: PORT, ts: Date.now() });
+  if (p === '/api/health') return json(res, 200, { ok: true, app: 'ros-center', version: runtimeInfo().version, pid: process.pid, port: PORT, ts: Date.now() });
   if (p === '/login' || p === '/login.html') return serveStatic(req, res, '/login.html');
   if (p === '/api/auth' && req.method === 'GET') {
     return json(res, 200, { enabled: authEnabled(), authenticated: !authEnabled() || !!sessionUser(req),

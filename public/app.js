@@ -1037,6 +1037,11 @@ async function boot() {
   if (new URLSearchParams(location.search).get('action') === 'deviceadd' && state.section === 'connectionSettings') {
     setTimeout(() => { $('devAdd').onclick(); }, 600);
   }
+  /* 侧栏品牌旁显示当前版本，方便截图识别 */
+  fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()).then((h) => {
+    const el = $('brandVer');
+    if (el && h && h.version) el.textContent = 'v' + String(h.version).replace(/^v/i, '');
+  }).catch(() => {});
   await loadSnapshot();   // 首屏先拿到真实运行模式，避免一上来误标 DEMO
   connect();
   // 预加载连接数据供仪表盘 TOP 表格使用
