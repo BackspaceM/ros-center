@@ -341,10 +341,18 @@ const IP_RATE_INTERVAL = Math.max(1000, envNum('IP_RATE_INTERVAL_MS', 1000));
 let ipRateTimer = null;
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 function ipOf(addr) {
-  const s = String(addr || '');
-  /* 连接表地址形如 10.0.0.1:1234 或 [2001:db8::1]:443 */
+  const s = String(addr || '').trim();
+  /* v4: 10.0.0.1:1234 → 10.0.0.1；v6 带端口: [2001:db8::1]:443 → 2001:db8::1；
+     v6 裸地址: 2408:826a:... → 原样返回（RouterOS v7 连接表就是裸 IPv6，无方括号）。
+     早期版本对裸 IPv6 只取 split(':')[0]（得到 "2408"），导致所有 IPv6 连接匹配不到目标，
+     BT 双栈上传被整段漏掉 —— 必须区分。 */
   if (s.startsWith('[')) return s.slice(1, s.indexOf(']') > 0 ? s.indexOf(']') : undefined);
-  return s.split(':')[0];
+  if (s.includes(':')) {
+    /* 多个冒号 = IPv6 裸地址；单个冒号 = IPv4:port */
+    if ((s.match(/:/g) || []).length >= 2) return s.split('%')[0].toLowerCase();
+    return s.split(':')[0];
+  }
+  return s;
 }
 /* IPv6：允许完整地址，去掉 %zone；连接表里的地址形如 [2001:db8::1]:443 */
 const IPV6_RE = /^[0-9a-fA-F:]+$/;
@@ -402,6 +410,19 @@ async function ipRateTargets(dev) {
   }
   return out;
 }
+/* 连接表连接的稳定标识：RouterOS 的 .id 会复用，五元组才稳定。
+   连续两次 print 之间连接会生灭，用五元组匹配同一条连接做字节差分。 */
+function connKey(r) {
+  return [r.protocol || '', ipOf(r['src-address']), r['src-port'] || '',
+    ipOf(r['dst-address']), r['dst-port'] || ''].join('|');
+}
+/* 自读流量：ROS Center 自己通过 API(8728/8729) 读连接表，
+   在连接表里表现为 <本机IP> -> <路由器IP>:8728，字节全算到"下载"上。
+   这是监控自身产生的假流量，必须排除，否则 NAS 永远显示几百 KB/s 下载。 */
+function isSelfApi(r) {
+  const dp = String(r['dst-port'] || '');
+  return dp === '8728' || dp === '8729';
+}
 function numBytes(v) {
   /* RouterOS 各版本/主题可能返回 "12345"、"12 345"、"1,234" 或 "1.2MiB" */
   return String(v == null ? '' : v).split('/').reduce((sum, part) => {
@@ -434,7 +455,7 @@ async function pollIpRates() {
   const now = Date.now();
   for (const dev of devices.values()) {
     const targets = await ipRateTargets(dev);
-    if (!targets.length) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
+    if (!targets.length) { dev.ipRates.clear(); dev.ipRatePrev.clear(); dev.connBytes = new Map(); dev.ipRateHist = new Map(); continue; }
     if (dev.forceDemo) {
       /* 演示模式：按 IP 生成「量级不同 + 相位不同」的速率，避免多台设备看起来一个样。
          用 IP 的稳定哈希决定基准量级（0.3x~2.4x），末段再决定波动相位。 */
@@ -454,7 +475,7 @@ async function pollIpRates() {
       }
       continue;
     }
-    if (!(dev.api && dev.api.connected)) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
+    if (!(dev.api && dev.api.connected)) { dev.ipRates.clear(); dev.ipRatePrev.clear(); dev.connBytes = new Map(); dev.ipRateHist = new Map(); continue; }
     /* 展开所有目标地址（双栈节点会同时含 IPv4 与 IPv6），两张连接表都查 */
     const want = new Set(targets.flatMap((t) => t.ips));
     const need4 = [...want].some((ip) => !ip.includes(':'));
@@ -466,7 +487,7 @@ async function pollIpRates() {
        FastTrack 流量不计入 orig-bytes，而是单独记在 *-fasttrack-bytes，必须一起取。 */
     /* 必须显式 proplist 请求 rate 字段：RouterOS 默认 print 不返回 orig-rate/repl-rate，
        全字段读取时 rate 为空（实测上行从 268KB/s 掉到 50KB/s）。 */
-    const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes,orig-rate,repl-rate,orig-fasttrack-bytes,repl-fasttrack-bytes';
+    const props = '=.proplist=.id,protocol,src-address,src-port,dst-address,dst-port,orig-bytes,repl-bytes,orig-rate,repl-rate,orig-fasttrack-bytes,repl-fasttrack-bytes';
     async function connectionRows(path) {
       const run = async (words) => {
         const r = await dev.api.exec(words);
@@ -501,60 +522,80 @@ async function pollIpRates() {
         { rxBps: 0, txBps: 0, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id, connections: 0 });
       continue;
     }
-    const totals = new Map(), hits = new Map();  // ip -> { up, down, upRate, downRate } / 命中连接数
-    let hasRateField = false;
+    /* ===== 逐连接字节差分（唯一能测准 BT/双栈流量的方式）=====
+       RouterOS v7 的 orig-rate/repl-rate 在 IPv6 连接上严重低估（实测 25KB/s vs 真实 284KB/s），
+       按 IP 求和的字节快照也会因连接生灭而回退。只有按「五元组」逐条匹配同一连接、累加正向
+       字节增量，才是真实吞吐 —— 实测与 Transmission 客户端 290KB/s 精确吻合。
+       自读 API 连接（-> 路由器 8728/8729）必须排除，否则监控自身流量会被算成设备下载。 */
+    const dt = Math.max(0.5, (now - (dev.ipRateAt || now - 1000)) / 1000);
+    dev.ipRateAt = now;
+    const prevConn = dev.connBytes || (dev.connBytes = new Map());
+    const nowConn = new Map();     // 五元组 -> { up, down, owners:[ip] }
+    const hitCount = new Map();    // ip -> 命中连接数
     for (const r of [...rows4, ...rows6]) {
+      if (isSelfApi(r)) continue;  /* 排除 ROS Center 自读 API 的假流量 */
       const src = ipOf(r['src-address']), dst = ipOf(r['dst-address']);
-      if (r['orig-rate'] !== undefined || r['repl-rate'] !== undefined) hasRateField = true;
-      /* FastTrack 包的字节不在 orig-bytes 里，必须把 *-fasttrack-bytes 加回来 */
+      const owners = [];
+      if (want.has(src)) owners.push(src);
+      if (want.has(dst) && dst !== src && !owners.includes(dst)) owners.push(dst);
+      if (!owners.length) continue;
+      const k = connKey(r);
+      /* FastTrack 字节不计入 orig-bytes，必须加回 *-fasttrack-bytes */
       const orig = numBytes(r['orig-bytes']) + numBytes(r['orig-fasttrack-bytes']);
       const repl = numBytes(r['repl-bytes']) + numBytes(r['repl-fasttrack-bytes']);
       const bytes = (orig || repl) ? 0 : numBytes(r.bytes);
-      const oRate = numRate(r['orig-rate']), rRate = numRate(r['repl-rate']);
-      const srcIsTarget = want.has(src), dstIsTarget = want.has(dst);
-      if (srcIsTarget) {
-        const x = totals.get(src) || { up: 0, down: 0, upRate: 0, downRate: 0 };
-        x.up += orig || bytes; x.down += repl; x.upRate += oRate; x.downRate += rRate; totals.set(src, x);
-        hits.set(src, (hits.get(src) || 0) + 1);
-      }
-      if (dstIsTarget && dst !== src) {
-        const x = totals.get(dst) || { up: 0, down: 0, upRate: 0, downRate: 0 };
-        x.up += repl; x.down += orig || bytes; x.upRate += rRate; x.downRate += oRate; totals.set(dst, x);
-        hits.set(dst, (hits.get(dst) || 0) + 1);
+      const up = want.has(src) ? (orig || bytes) : repl;   // 设备发出 = 上行
+      const down = want.has(src) ? repl : (orig || bytes); // 设备收到 = 下行
+      nowConn.set(k, { up, down, owners });
+      for (const ip of owners) hitCount.set(ip, (hitCount.get(ip) || 0) + 1);
+    }
+    /* 逐连接差分：同一五元组的字节增量，归到它所属的每个目标 IP。
+       连接消失只丢自己那份，不会因总和回退把其它连接的增量抵消掉。 */
+    const delta = new Map();  // ip -> { up, down }
+    for (const [k, cur] of nowConn) {
+      const prev = prevConn.get(k);
+      if (!prev) continue;
+      const dUp = Math.max(0, cur.up - prev.up);
+      const dDown = Math.max(0, cur.down - prev.down);
+      if (!dUp && !dDown) continue;
+      for (const ip of cur.owners) {
+        const x = delta.get(ip) || { up: 0, down: 0 };
+        x.up += dUp; x.down += dDown; delta.set(ip, x);
       }
     }
-    if (![...totals.values()].some((t) => t.up || t.down)) {
-      dev.ipRateError = '连接表有 ' + (rows4.length + rows6.length) + ' 条记录，但这些 IP 的字节计数为 0（常见于 FastTrack 未计入连接计数）';
-    }
-    const dt = Math.max(0.5, (now - (dev.ipRateAt || now - 1000)) / 1000);
-    dev.ipRateAt = now;
-    const zero = { up: 0, down: 0, upRate: 0, downRate: 0 };
+    dev.connBytes = nowConn;
+    if (!nowConn.size) dev.ipRateError = '连接表有 ' + (rows4.length + rows6.length) + ' 条记录，但匹配目标 IP 的连接为 0（可能全是自读 API 流量）';
+    const zero = { up: 0, down: 0 };
     for (const tg of targets) {
       /* 双栈：把该 MAC 的所有 IPv4/IPv6 地址速率相加，得到设备总上下行 */
-      const agg = { up: 0, down: 0, upRate: 0, downRate: 0 };
-      let conns = 0, upDiff = 0, downDiff = 0;
+      let upBytes = 0, downBytes = 0, conns = 0;
       for (const ip of tg.ips) {
-        const t = totals.get(ip) || zero;
-        agg.up += t.up; agg.down += t.down; agg.upRate += t.upRate; agg.downRate += t.downRate;
-        conns += hits.get(ip) || 0;
-        /* 逐地址差分再相加：某个地址的连接消失不会把其它地址的增量抵消掉 */
-        const prev = dev.ipRatePrev.get(ip) || { up: t.up, down: t.down };
-        dev.ipRatePrev.set(ip, t);
-        upDiff += Math.max(0, t.up - prev.up);
-        downDiff += Math.max(0, t.down - prev.down);
+        const d = delta.get(ip) || zero;
+        upBytes += d.up; downBytes += d.down; conns += hitCount.get(ip) || 0;
       }
-      upDiff /= dt; downDiff /= dt;
-      /* RouterOS 连接级 rate 求和为主：BT 连接高频生灭，任何基于快照的差分都会丢增量，
-         而 rate 字段是路由器内部滑动窗口速率，口径接近 TR 客户端。差分仅作兜底。 */
-      let upBps = hasRateField ? agg.upRate : upDiff;
-      let downBps = hasRateField ? agg.downRate : downDiff;
-      if (upBps <= 0 && upDiff > 0) upBps = upDiff;
-      if (downBps <= 0 && downDiff > 0) downBps = downDiff;
-      /* 不做服务端平滑：RouterOS rate 字段本身是滑动窗口值，额外平滑会引入可感知延迟。
-         前端已有 0.35s CSS 过渡消抖，保证速率即时响应。 */
+      /* 3 秒滑动窗口：把最近 N 次的每秒字节增量累加再除以覆盖秒数，
+         摊平 BT 连接生灭造成的瞬时抖动，口径接近 TR 客户端的滑动窗口速率。
+         hist 存 { t, up, down }（每秒增量），窗口内求和而非相减。 */
+      const hist = dev.ipRateHist || (dev.ipRateHist = new Map());
+      const h = hist.get(tg.id) || [];
+      h.push({ t: now, up: upBytes, down: downBytes });
+      const cutoff = now - 3000;
+      while (h.length > 1 && h[0].t < cutoff) h.shift();
+      hist.set(tg.id, h);
+      let sumUp = 0, sumDown = 0, span = 0;
+      for (let i = 0; i < h.length; i++) {
+        /* 首点作为基准不计入（它是窗口左边界之前的增量，已体现在后续采样里） */
+        if (i === 0 && h.length > 1) continue;
+        sumUp += h[i].up; sumDown += h[i].down;
+        if (i > 0) span += (h[i].t - h[i - 1].t) / 1000;
+      }
+      if (span < 0.8) { sumUp = upBytes; sumDown = downBytes; span = dt; }
+      /* 字节差分算出的是 Byte/s，但 API 契约（拓扑/IP监控/仪表盘）统一用 bit/s，
+         前端 fmtBytesRate 会再 ÷8 显示字节单位。这里 ×8 转回 bit/s。 */
+      const upBps = Math.max(0, sumUp / span * 8), downBps = Math.max(0, sumDown / span * 8);
       const rec = { rxBps: Math.round(downBps), txBps: Math.round(upBps),
-        rxBytes: agg.down, txBytes: agg.up, ts: now, name: tg.name, id: tg.id, connections: conns };
-      /* 写入主地址（前端与 /api/ip-rates 都按主地址取），同时给每个地址写一份供差分 prev 使用 */
+        rxBytes: downBytes, txBytes: upBytes, ts: now, name: tg.name, id: tg.id, connections: conns };
+      /* 写入主地址（前端与 /api/ip-rates 都按主地址取），同时给每个地址写一份 */
       for (const ip of tg.ips) if (ip !== tg.ips[0]) dev.ipRates.set(ip, rec);
       dev.ipRates.set(tg.ips[0], rec);
     }
@@ -900,6 +941,7 @@ class Device {
     this.ifaceTotals = new Map();
     this.ipRates = new Map();     // IP -> { rxBps, txBps, rxBytes, txBytes, ts }  拓扑按 IP 测速
     this.ipRatePrev = new Map();  // 上次连接表字节快照（用于求差值）
+    this.connBytes = new Map();   // 五元组 -> { up, down }  上次连接字节（逐连接差分）
     this.ipRateError = '';        // 连接表采集失败原因（在 IP 监控页提示，避免误以为速率为 0）
     this.demoTotal = new Map();
     this.demoDB = freshDemoDB();
@@ -934,7 +976,7 @@ class Device {
     this.lastError = ''; this.mode = this.forceDemo ? 'demo' : 'connecting';
     this.ifaceTotals.clear(); this.history.length = 0; this.resourceHistory.length = 0;
     this.ifaceMeta.clear(); this.lastRates.clear(); this.lastResource = null;
-    this.ipRates.clear(); this.ipRatePrev.clear();
+    this.ipRates.clear(); this.ipRatePrev.clear(); this.connBytes = new Map(); this.ipRateHist = new Map();
     this.monitorFails = 0; this.lastStreamError = '';
     this.ensureConnection();
   }
