@@ -370,6 +370,19 @@ function numBytes(v) {
     return sum + n;
   }, 0);
 }
+function numRate(v) {
+  /* RouterOS orig-rate/repl-rate：0bps / 298.4kbps / 1.2Mbps，API 也可能返回裸数字（bps） */
+  const s = String(v == null ? '' : v).trim().toLowerCase().replace(/[\s,]/g, '');
+  const m = s.match(/^([\d.]+)([kmgt]?)(?:bps|\/s|b)?$/);
+  if (!m) return 0;
+  let n = Number(m[1]) || 0;
+  const u = m[2];
+  if (u === 'k') n *= 1000;
+  else if (u === 'm') n *= 1e6;
+  else if (u === 'g') n *= 1e9;
+  else if (u === 't') n *= 1e12;
+  return n;
+}
 async function pollIpRates() {
   const now = Date.now();
   for (const dev of devices.values()) {
@@ -400,8 +413,10 @@ async function pollIpRates() {
     const need6 = targets.some((t) => t.ip.includes(':'));
     /* 关键：v7 连接表没有 bytes 字段，把它写进 proplist 会让 print trap。
        api.exec 对 trap 仍是 resolve，旧代码直接读空 re，于是所有 IP 速率为 0，
-       前端回退到同一个接口的总速率 —— 表现为「所有设备速率一模一样」。 */
-    const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes';
+       前端回退到同一个接口的总速率 —— 表现为「所有设备速率一模一样」。
+       orig-rate/repl-rate 是 RouterOS 原生实时速率（bps），比字节差分更及时、更准；
+       FastTrack 流量不计入 orig-bytes，而是单独记在 *-fasttrack-bytes，必须一起取。 */
+    const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes,orig-rate,repl-rate,orig-fasttrack-bytes,repl-fasttrack-bytes';
     async function connectionRows(path) {
       const run = async (words) => {
         const r = await dev.api.exec(words);
@@ -437,20 +452,25 @@ async function pollIpRates() {
         { rxBps: 0, txBps: 0, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id, connections: 0 });
       continue;
     }
-    const totals = new Map(), hits = new Map();  // ip -> { up, down } / 命中连接数
+    const totals = new Map(), hits = new Map();  // ip -> { up, down, upRate, downRate } / 命中连接数
+    let hasRateField = false;
     for (const r of [...rows4, ...rows6]) {
       const src = ipOf(r['src-address']), dst = ipOf(r['dst-address']);
-      const orig = numBytes(r['orig-bytes']), repl = numBytes(r['repl-bytes']);
+      if (r['orig-rate'] !== undefined || r['repl-rate'] !== undefined) hasRateField = true;
+      /* FastTrack 包的字节不在 orig-bytes 里，必须把 *-fasttrack-bytes 加回来 */
+      const orig = numBytes(r['orig-bytes']) + numBytes(r['orig-fasttrack-bytes']);
+      const repl = numBytes(r['repl-bytes']) + numBytes(r['repl-fasttrack-bytes']);
       const bytes = (orig || repl) ? 0 : numBytes(r.bytes);
+      const oRate = numRate(r['orig-rate']), rRate = numRate(r['repl-rate']);
       const srcIsTarget = want.has(src), dstIsTarget = want.has(dst);
       if (srcIsTarget) {
-        const x = totals.get(src) || { up: 0, down: 0 };
-        x.up += orig || bytes; x.down += repl; totals.set(src, x);
+        const x = totals.get(src) || { up: 0, down: 0, upRate: 0, downRate: 0 };
+        x.up += orig || bytes; x.down += repl; x.upRate += oRate; x.downRate += rRate; totals.set(src, x);
         hits.set(src, (hits.get(src) || 0) + 1);
       }
       if (dstIsTarget && dst !== src) {
-        const x = totals.get(dst) || { up: 0, down: 0 };
-        x.up += repl; x.down += orig || bytes; totals.set(dst, x);
+        const x = totals.get(dst) || { up: 0, down: 0, upRate: 0, downRate: 0 };
+        x.up += repl; x.down += orig || bytes; x.upRate += rRate; x.downRate += oRate; totals.set(dst, x);
         hits.set(dst, (hits.get(dst) || 0) + 1);
       }
     }
@@ -460,12 +480,17 @@ async function pollIpRates() {
     const dt = Math.max(0.5, (now - (dev.ipRateAt || now - 1000)) / 1000);
     dev.ipRateAt = now;
     for (const tg of targets) {
-      const t = totals.get(tg.ip) || { up: 0, down: 0 };
+      const t = totals.get(tg.ip) || { up: 0, down: 0, upRate: 0, downRate: 0 };
       const prev = dev.ipRatePrev.get(tg.ip) || { up: t.up, down: t.down };
       dev.ipRatePrev.set(tg.ip, t);
       /* 连接生灭会让总数回退，差值为负时按 0 处理，避免假速率 */
-      const up = Math.max(0, t.up - prev.up), down = Math.max(0, t.down - prev.down);
-      dev.ipRates.set(tg.ip, { rxBps: Math.round(down / dt), txBps: Math.round(up / dt),
+      const upDiff = Math.max(0, t.up - prev.up) / dt, downDiff = Math.max(0, t.down - prev.down) / dt;
+      /* 优先用 RouterOS 原生实时速率（含 FastTrack、响应快），字段缺失时回退字节差分 */
+      let upBps = hasRateField ? t.upRate : upDiff;
+      let downBps = hasRateField ? t.downRate : downDiff;
+      if (upBps <= 0 && upDiff > 0) upBps = upDiff;
+      if (downBps <= 0 && downDiff > 0) downBps = downDiff;
+      dev.ipRates.set(tg.ip, { rxBps: Math.round(downBps), txBps: Math.round(upBps),
         rxBytes: t.down, txBytes: t.up, ts: now, name: tg.name, id: tg.id, connections: hits.get(tg.ip) || 0 });
     }
     for (const k of [...dev.ipRatePrev.keys()]) if (!want.has(k)) dev.ipRatePrev.delete(k);
@@ -2518,6 +2543,114 @@ const server = http.createServer(async (req, res) => {
       const text = (lines.length ? lines.join('\n') : '') + '\n';
       writeBackupStatus(dev, name, false, '浏览器下载 / Browser download · ' + name + '.rsc');
       return json(res, 200, { name, text });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+
+  /* ---- 备份与导入：① ROS Center 全量设置（服务端 data + 浏览器 localStorage 由前端合并） ---- */
+  const WEBUI_BACKUP_FILES = ['devices.json', 'topology.json', 'update.json', 'auth.json', 'secret.key', 'settings.json'];
+  if (p === '/api/webui/backup' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    try {
+      const files = {};
+      for (const name of WEBUI_BACKUP_FILES) {
+        const fp = path.join(DATA_DIR, name);
+        if (fs.existsSync(fp)) files[name] = fs.readFileSync(fp).toString('base64');
+      }
+      const icons = {};
+      try {
+        for (const name of fs.readdirSync(TOPO_ICON_DIR)) {
+          const fp = path.join(TOPO_ICON_DIR, name);
+          if (fs.statSync(fp).isFile() && /^[a-zA-Z0-9_\-\u4e00-\u9fff .]+\.(png|jpe?g|webp|gif|svg)$/i.test(name)) {
+            icons[name] = fs.readFileSync(fp).toString('base64');
+          }
+        }
+      } catch (e) { /* 图标目录不存在则跳过 */ }
+      return json(res, 200, { format: 'ros-center-backup', version: runtimeInfo().version,
+        createdAt: new Date().toISOString(), files, icons });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+  if (p === '/api/webui/restore' && req.method === 'POST') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    try {
+      const b = await readBodyLimit(req, 16 * 1024 * 1024);
+      if (!b || b.format !== 'ros-center-backup' || !b.files) throw new Error('备份文件格式不正确 / Invalid backup file');
+      /* 先给当前 settings 做一份保险副本，导入失败可找回 */
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const safeDir = path.join(DATA_DIR, 'pre-restore-' + stamp);
+      fs.mkdirSync(safeDir, { recursive: true });
+      for (const name of WEBUI_BACKUP_FILES) {
+        const fp = path.join(DATA_DIR, name);
+        if (fs.existsSync(fp)) fs.copyFileSync(fp, path.join(safeDir, name));
+      }
+      let written = 0;
+      for (const [name, b64] of Object.entries(b.files)) {
+        if (!WEBUI_BACKUP_FILES.includes(name)) continue;
+        if (typeof b64 !== 'string' || b64.length > 12 * 1024 * 1024) continue;
+        fs.writeFileSync(path.join(DATA_DIR, name), Buffer.from(b64, 'base64'), { mode: 0o600 });
+        written++;
+      }
+      let icons = 0;
+      if (b.icons && typeof b.icons === 'object') {
+        fs.mkdirSync(TOPO_ICON_DIR, { recursive: true });
+        for (const [name, b64] of Object.entries(b.icons)) {
+          if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff .]+\.(png|jpe?g|webp|gif|svg)$/i.test(name)) continue;
+          if (typeof b64 !== 'string' || b64.length > 8 * 1024 * 1024) continue;
+          fs.writeFileSync(path.join(TOPO_ICON_DIR, name), Buffer.from(b64, 'base64'));
+          icons++;
+        }
+      }
+      return json(res, 200, { ok: true, written, icons, safeDir: path.basename(safeDir), restartRequired: true });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+
+  /* ---- ② RouterOS 配置完整导出（含敏感项，可完美还原）与导入 ---- */
+  if (p === '/api/routeros/export' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 400, { error: '没有可用设备 / No device' });
+    const name = String(url.searchParams.get('name') || '').replace(/[^a-zA-Z0-9_\-]/g, '') || ('routeros-full-' + new Date().toISOString().slice(0, 10));
+    try {
+      if (dev.forceDemo) return json(res, 200, { name, demo: true, text: '# ROS Center DEMO - RouterOS full export\n/interface print\n' });
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接 / Router offline');
+      /* hide-sensitive=no：带上账号密码等敏感配置，才能完美还原 */
+      const r = await dev.api.exec(['/export', '=hide-sensitive=no']);
+      if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '导出失败');
+      const lines = ((r && r.re) || []).map((x) => x && (x.output !== undefined ? x.output : x.ret !== undefined ? x.ret : x.line)).filter((v) => v !== undefined && v !== null).map(String);
+      if (!lines.length) throw new Error('路由器未返回配置内容（检查 read 权限）');
+      writeBackupStatus(dev, name, false, '完整导出 / Full export · ' + name + '.rsc');
+      return json(res, 200, { name, text: lines.join('\n') + '\n', sensitive: true });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+  if (p === '/api/routeros/import' && req.method === 'POST') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    try {
+      const b = await readBodyLimit(req, 8 * 1024 * 1024);
+      const text = String((b && b.text) || '');
+      if (!text.trim()) throw new Error('配置内容为空 / Empty configuration');
+      const dev = reqDevice(req, url, b);
+      if (!dev) throw new Error('没有可用设备 / No device');
+      if (dev.forceDemo) return json(res, 200, { ok: true, demo: true, simulated: true, lines: text.split('\n').length });
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接 / Router offline');
+      /* 导入前自动保留一份当前 .backup，出问题可在 RouterOS 上 load 回滚 */
+      const roll = 'ros-center-before-import-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      try { await dev.api.exec(['/system/backup/save', `=name=${roll}`]); } catch (e) { /* 回滚点失败不阻断导入 */ }
+      /* 逐行执行 .rsc：跳过注释与空行，命令按 / 开头；支持分号结尾 */
+      const lines = text.split(/\r?\n/).map((x) => x.trim()).filter((x) => x && !x.startsWith('#'));
+      let ok = 0; const failed = [];
+      for (const line of lines) {
+        const cmd = line.replace(/;$/, '').trim();
+        if (!cmd) continue;
+        const words = cmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+        if (!words.length) continue;
+        if (!/^\//.test(words[0])) continue; /* 跳过脚本语句 */
+        try {
+          const r = await dev.api.exec(words);
+          if (r && r.status && r.status.type === 'trap') failed.push({ line: cmd, error: r.status.message || 'trap' });
+          else ok++;
+        } catch (e) { failed.push({ line: cmd, error: e.message || String(e) }); }
+      }
+      writeBackupStatus(dev, roll, false, '导入前自动备份 / Pre-import backup');
+      return json(res, 200, { ok: true, executed: ok, failed, rollback: roll, total: lines.length });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
 

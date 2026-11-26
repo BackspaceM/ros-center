@@ -31,7 +31,8 @@
     if (v >= 1e9) return (v / 1e9).toFixed(1) + 'G';
     if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
     if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
-    return Math.round(v) + '';
+    /* 小于 1K 也要带单位，避免出现没有单位的裸数字 */
+    return Math.round(v) + 'bps';
   };
 
   window.renderTopologyPage = function renderTopologyPage() {
@@ -310,12 +311,13 @@
     return { rxBps, txBps };
   }
 
-  /* 灯光强度：空闲 ~0.22（微微一束），有流量按对数映射到 0.3~1.0，参考 10KB/s 起 */
+  /* 灯光强度：空闲 ~0.10（微微一束），有流量按对数映射到 0.42~1.0，
+     把常见 10Kbps~100Mbps 区间拉满整段，强弱变化一眼可见 */
   function lightIntensity(rate) {
     const bps = Math.max(Number(rate && rate.rxBps) || 0, Number(rate && rate.txBps) || 0);
-    if (bps < 8000) return 0.22;
-    const norm = Math.min(1, Math.max(0, (Math.log10(bps) - 4) / 5)); // 10^4 ~ 10^9 B/s
-    return Math.round((0.3 + norm * 0.7) * 100) / 100;
+    if (bps < 4000) return 0.10;
+    const norm = Math.min(1, Math.max(0, (Math.log10(bps) - 4) / 4)); // 10^4 ~ 10^8 bps
+    return Math.round((0.42 + norm * 0.58) * 100) / 100;
   }
 
   function flowDuration(id) {
@@ -479,7 +481,8 @@
         paintRates();
       } catch (e) { /* ignore */ }
     };
-    tick(); rateTimer = setInterval(tick, 2500);
+    /* 后端 1s 采样，前端同频 1s 拉取，避免设备跑 1~2 秒才显示 */
+    tick(); rateTimer = setInterval(tick, 1000);
   }
   function paintRates() {
     const stage = $('topoStage'); if (!stage) return;

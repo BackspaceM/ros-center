@@ -13,7 +13,11 @@
 <div class="layout">
   <aside class="sidebar" id="sidebar">
     <div class="side-brand">
-      <div class="logo" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <div class="logo" aria-hidden="true"><svg class="logo-svg" viewBox="0 0 64 64">
+        <g stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".8"><path d="M32 32 L32 16"/><path d="M32 32 L16 43"/><path d="M32 32 L48 43"/></g>
+        <g fill="currentColor"><circle cx="32" cy="14" r="5.5"/><circle cx="14" cy="44" r="5.5"/><circle cx="50" cy="44" r="5.5"/></g>
+        <circle cx="32" cy="32" r="9.5" fill="currentColor"/><circle cx="32" cy="32" r="4.2" fill="var(--blue)"/>
+      </svg></div>
       <div class="brand-name"><b data-i18n="brand">ROS</b><small data-i18n="brand_sub">Center</small><span class="brand-ver" id="brandVer" title="当前版本 / Current version"></span></div>
       <button class="side-collapse" id="collapseBtn" type="button" title="收起 / Collapse">‹</button>
     </div>

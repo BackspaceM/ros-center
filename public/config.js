@@ -549,10 +549,23 @@ function renderTools() {
             <b>${t('note')}:</b> ${t('write_warn')}
           </div>
         </div></div>
-      <div class="panel"><div class="panel-head"><div><h2>${t('backup_title')}</h2><p class="sub">${t('backup_msg')}</p></div></div>
-        <div class="panel-body">
-          <div class="form-row"><label>${t('backup_name')}</label><div><input type="text" id="backupName" value="auto-backup"></div></div>
-          <button class="btn primary" id="backupRun">${t('backup_title')}</button>
+      <div class="panel"><div class="panel-head"><div><h2>${t('bak_tools_title')}</h2><p class="sub">${t('bak_tools_sub')}</p></div></div>
+        <div class="panel-body backup-tools">
+          <div class="bak-group">
+            <div class="bak-group-head"><b>${t('bak_webui_title')}</b><small>${t('bak_webui_sub')}</small></div>
+            <div class="bak-actions">
+              <button class="btn primary" id="webuiBackupBtn" type="button">${t('bak_webui_export')}</button>
+              <button class="btn" id="webuiImportBtn" type="button">${t('bak_webui_import')}</button>
+            </div>
+          </div>
+          <div class="bak-group">
+            <div class="bak-group-head"><b>${t('bak_ros_title')}</b><small>${t('bak_ros_sub')}</small></div>
+            <div class="bak-actions">
+              <button class="btn" id="rosBackupBtn" type="button">${t('bak_ros_export')}</button>
+              <button class="btn ghost-danger" id="rosImportBtn" type="button">${t('bak_ros_import')}</button>
+            </div>
+          </div>
+          <input type="file" id="bakFileInput" accept=".json,.rsc,.txt" hidden>
           <div class="backup-status" id="backupStatus"></div>
         </div></div>
     </div>
@@ -604,17 +617,64 @@ function renderTools() {
     };
     es.onerror = () => { if (window.__rosPingSource === es) { status.textContent = L('诊断中断', 'Diagnosis interrupted'); stopPing(); } };
   };
-  /* 配置备份：导出为浏览器文件，下载到用户当前使用的设备 */
-  $('backupRun').onclick = () => confirmModal(t('backup_title'), `${t('backup_msg')}<br><br>${t('backup_name')}: <b>${esc($('backupName').value)}</b><br><span class="form-hint">${esc(L('文件将下载到当前浏览器所在设备（电脑或手机），不会保存到 RouterOS。', 'The file is downloaded to the device running this browser, not stored on RouterOS.'))}</span>`, false, async () => {
+  /* ---- 备份与导入 ---- */
+  const downloadText = (text, name, mime) => {
+    const href = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = href; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1500);
+  };
+  const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const pickFile = (accept) => new Promise((resolve) => {
+    const inp = $('bakFileInput'); inp.value = ''; inp.accept = accept;
+    inp.onchange = () => { const f = inp.files && inp.files[0]; resolve(f ? f.text() : null); };
+    inp.click();
+  });
+  /* ① ROS Center：服务端 data + 浏览器 localStorage 合并为一个 .json */
+  $('webuiBackupBtn').onclick = () => confirmModal(t('bak_webui_export'), esc(t('bak_webui_sub')), false, async () => {
     try {
-      const name = ($('backupName').value.trim().replace(/[^a-zA-Z0-9_\-]/g, '') || 'config-backup');
-      const qs = '?name=' + encodeURIComponent(name) + (state.deviceId ? '&device=' + encodeURIComponent(state.deviceId) : '');
-      const r = await api('/api/export' + qs);
-      const blob = new Blob([r.text || ''], { type: 'text/plain;charset=utf-8' });
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = href; a.download = name + '.rsc';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(href), 1500);
+      const r = await api('/api/webui/backup');
+      const local = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i); if (k && k.startsWith('ros-')) local[k] = localStorage.getItem(k);
+      }
+      r.localStorage = local;
+      downloadText(JSON.stringify(r, null, 2), 'ros-center-backup-' + stamp() + '.json', 'application/json');
+      toast(t('bak_export_ok'), 'ok'); refreshToolsPanels();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $('webuiImportBtn').onclick = () => confirmModal(t('bak_webui_import'), esc(t('bak_import_webui_confirm')), true, async () => {
+    try {
+      const text = await pickFile('.json,application/json'); if (!text) return;
+      const b = JSON.parse(text);
+      if (b.format !== 'ros-center-backup' || !b.files) throw new Error(t('bad_file') || 'Invalid backup file');
+      const r = await api('/api/webui/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      if (b.localStorage && typeof b.localStorage === 'object') {
+        for (const [k, v] of Object.entries(b.localStorage)) { try { localStorage.setItem(k, v); } catch (e) {} }
+      }
+      toast(`${t('bak_import_ok')} · ${r.written} files · ${r.icons} icons`, 'ok');
+      setTimeout(() => location.reload(), 1200);
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  /* ② RouterOS 完整配置导出 / 导入 */
+  $('rosBackupBtn').onclick = () => confirmModal(t('bak_ros_export'), esc(t('bak_ros_sub')), false, async () => {
+    try {
+      const qs = '?name=routeros-full-' + stamp() + (state.deviceId ? '&device=' + encodeURIComponent(state.deviceId) : '');
+      const r = await api('/api/routeros/export' + qs);
+      downloadText(r.text || '', (r.name || 'routeros-full') + '.rsc');
+      toast(t('bak_export_ok'), 'ok'); refreshToolsPanels();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $('rosImportBtn').onclick = () => confirmModal(t('bak_ros_import'), esc(t('bak_import_ros_confirm')), true, async () => {
+    try {
+      const text = await pickFile('.rsc,.txt,text/plain'); if (!text) return;
+      if (!/^\s*#|^\s*\//m.test(text)) throw new Error(t('bad_file') || 'Invalid RouterOS config');
+      const r = await api('/api/routeros/import', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, device: state.deviceId || undefined }) });
+      const msg = (t('bak_import_result') || 'Executed {n} commands, {f} failed, rollback: {r}')
+        .replace('{n}', r.executed || 0).replace('{f}', (r.failed || []).length).replace('{r}', r.rollback || '-');
+      toast(`${t('bak_import_ok')} · ${msg}`, (r.failed || []).length ? 'err' : 'ok');
+      if ((r.failed || []).length) console.warn('[ros-import] failed lines', r.failed);
       refreshToolsPanels();
     } catch (e) { toast(e.message, 'err'); }
   });

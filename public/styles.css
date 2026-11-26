@@ -306,20 +306,16 @@ button { cursor: pointer; }
 .side-brand { display: flex; align-items: center; gap: 10px; padding: 14px 16px; min-height: 61px; border-bottom: 1px solid var(--side-line); }
 .logo {
   width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--blue);
-  display: flex; align-items: flex-end; justify-content: center; gap: 2.5px; padding-bottom: 7px;
+  display: flex; align-items: center; justify-content: center; color: var(--on-accent);
   box-shadow: 0 2px 6px color-mix(in srgb, var(--blue) 26%, transparent);
 }
-.logo span { width: 3px; border-radius: 2px; background: var(--on-accent); }
-.logo span:nth-child(1) { height: 7px; opacity: .6; }
-.logo span:nth-child(2) { height: 11px; opacity: .78; }
-.logo span:nth-child(3) { height: 9px; opacity: .9; }
-.logo span:nth-child(4) { height: 15px; }
+.logo-svg { width: 22px; height: 22px; display: block; }
 .brand-name { display: flex; align-items: baseline; gap: 5px; line-height: 1.2; min-width: 0; }
 .brand-name b { color: var(--side-bright); font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
 .brand-name small { font-size: 10.5px; font-weight: 500; color: var(--side-muted); letter-spacing: .2px; }
-.brand-ver { font-size: 9.5px; font-weight: 600; color: var(--blue); background: var(--blue-soft);
-  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--side-line)); border-radius: 999px;
-  padding: 1px 6px; letter-spacing: .1px; white-space: nowrap; margin-left: 2px; }
+.brand-ver { font-size: 10px; font-weight: 500; color: var(--side-muted); white-space: nowrap;
+  margin-left: 1px; letter-spacing: .2px; font-variant-numeric: tabular-nums; }
+.brand-ver::before { content: '·'; margin-right: 4px; color: var(--blue); font-weight: 700; }
 .sidebar.collapsed .brand-ver { display: none; }
 .side-collapse { margin-left: auto; background: none; border: 0; color: var(--side-muted); font-size: 17px; line-height: 1; padding: 4px 6px; border-radius: 5px; }
 .side-collapse:hover { background: var(--side-hover); color: var(--side-bright); }
@@ -831,28 +827,29 @@ body.topology-page .topo-legend { padding: 0; gap: 12px; font-size: 10.5px; marg
 .topo-node:hover .node-card { stroke: color-mix(in srgb, var(--blue) 55%, var(--line)); stroke-width: 2; }
 .topo-node.selected .node-card { stroke: var(--blue); stroke-width: 2.2; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--blue) 38%, transparent)); }
 /* 类型色灯光：从卡片顶部射向 icon，颜色与图例圆点一致，强弱随实时流量 */
-.topo-light { filter: blur(1.4px); pointer-events: none; transition: opacity .6s ease; }
+.topo-light { filter: blur(1.4px); pointer-events: none; transition: opacity .35s ease; }
 .light-stop-router { stop-color: var(--blue); }
 .light-stop-switch { stop-color: var(--green); }
 .light-stop-ap { stop-color: var(--violet); }
 .light-stop-nas { stop-color: var(--amber); }
 .light-stop-dns { stop-color: #0e9aa7; }
 .light-stop-proxy { stop-color: #c26793; }
-.light-stop-client, .light-stop-other { stop-color: var(--muted); }
+.light-stop-client { stop-color: #ff7a45; }
+.light-stop-other { stop-color: var(--muted); }
 .lg-router { fill: var(--blue); background: var(--blue); }
 .lg-switch { fill: var(--green); background: var(--green); }
 .lg-ap { fill: var(--violet); background: var(--violet); }
 .lg-nas { fill: var(--amber); background: var(--amber); }
 .lg-dns { fill: #0e9aa7; background: #0e9aa7; }
 .lg-proxy { fill: #c26793; background: #c26793; }
-.lg-client { fill: var(--muted); background: var(--muted); }
+.lg-client { fill: #ff7a45; background: #ff7a45; }
 .topo-icon-bg.type-router { fill: #e8f0ff; }
 .topo-icon-bg.type-switch { fill: #e6f7f0; }
 .topo-icon-bg.type-ap { fill: #efeaff; }
 .topo-icon-bg.type-nas { fill: #fff2dc; }
 .topo-icon-bg.type-dns { fill: #e3f6f6; }
 .topo-icon-bg.type-proxy { fill: #fbeaf2; }
-.topo-icon-bg.type-client { fill: #eef1f5; }
+.topo-icon-bg.type-client { fill: #fff0e8; }
 :root[data-scheme="dark"] .topo-icon-bg { fill: #303640; }
 .topo-icon-t { fill: var(--blue); font-size: 18px; font-weight: 700; }
 .topo-node.type-switch .topo-icon-t { fill: var(--green); }
@@ -860,7 +857,7 @@ body.topology-page .topo-legend { padding: 0; gap: 12px; font-size: 10.5px; marg
 .topo-node.type-nas .topo-icon-t { fill: var(--amber); }
 .topo-node.type-dns .topo-icon-t { fill: #0e9aa7; }
 .topo-node.type-proxy .topo-icon-t { fill: #c26793; }
-.topo-node.type-client .topo-icon-t { fill: var(--muted); }
+.topo-node.type-client .topo-icon-t { fill: #ff7a45; }
 .topo-node .topo-name { fill: var(--ink); font-size: 13px; font-weight: 650; }
 .topo-node .topo-sub { fill: var(--ink); font-size: 10.5px; font-variant-numeric: tabular-nums; opacity: .82; }
 .topo-node .topo-mac { fill: var(--muted); font-size: 9.5px; letter-spacing: .2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -887,7 +884,7 @@ tr.row-fail td { color: var(--red); }
 .lg-switch { background: var(--green); }
 .lg-ap { background: var(--violet); }
 .lg-nas { background: var(--amber); }
-.lg-client { background: var(--muted); }
+.lg-client { background: #ff7a45; }
 .topo-spacer { flex: 1; }
 .topo-actions { display: inline-flex; gap: 6px; }
 .topo-warn { color: var(--amber); cursor: help; }
@@ -1587,6 +1584,13 @@ th:hover > .rz-col { opacity: .55; }
 .qt-row .btn { flex: none; padding: 0 8px; color: var(--muted); font-size: 15px; }
 .backup-status { display: flex; flex-direction: column; gap: 3px; margin-top: 14px; padding: 10px 12px;
   border: 1px solid var(--panel-border); border-radius: 9px; background: var(--soft); }
+.backup-tools { display: flex; flex-direction: column; gap: 12px; }
+.bak-group { padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); }
+.bak-group-head { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.bak-group-head b { font-size: 12.5px; color: var(--ink); }
+.bak-group-head small { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
+.bak-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.bak-actions .btn { flex: 1 1 130px; }
 .backup-status b { font-size: 12px; }
 .backup-status span { font-size: 11.5px; color: var(--ink); }
 .backup-status small { font-size: 10px; color: var(--muted); }

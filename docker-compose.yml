@@ -1,43 +1,21 @@
 services:
   ros-center:
-    image: ${DOCKER_IMAGE:-backspacem/ros-center:latest}
+    image: backspacem/ros-center:latest
     build: .
     container_name: ros-center
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-10086}:${CONTAINER_PORT:-10086}"
+      - "10086:10086"
     volumes:
       - ./data:/app/data
-      # 可选：允许网页里「一键更新」自动重建容器。映射 docker.sock 等于把宿主机
-      # Docker 控制权交给容器（root 级权限），不需要应用内更新就不要打开这一行。
-      # 新版镜像启动时会自动把运行用户加入 socket 所属组；若仍用旧镜像，
-      # 还需在本服务下加 user: "0:0"（或 group_add: ["<宿主机 socket 的 GID>"]）。
-      # - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      PORT: ${CONTAINER_PORT:-10086}
+      PORT: 10086
       HOST: 0.0.0.0
-      ROS_HOST: ${ROS_HOST:-192.168.88.1}
-      ROS_PORT: ${ROS_PORT:-8728}
-      ROS_USER: ${ROS_USER:-monitor}
-      ROS_PASSWORD: ${ROS_PASSWORD:-}
-      ROS_TLS: ${ROS_TLS:-0}
-      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-1000}
-      CONN_POLL_INTERVAL_MS: ${CONN_POLL_INTERVAL_MS:-5000}
-      TRAFFIC_STREAM: ${TRAFFIC_STREAM:-1}
-      TRAFFIC_STREAM_RETRY_MS: ${TRAFFIC_STREAM_RETRY_MS:-10000}
-      HISTORY_POINTS: ${HISTORY_POINTS:-180}
-      DEMO_MODE: ${DEMO_MODE:-0}
-      ROS_CENTER_KEY: ${ROS_CENTER_KEY:-}
-      WEB_USER: ${WEB_USER:-}
-      WEB_PASSWORD: ${WEB_PASSWORD:-}
-      ROS_UPDATE_ENABLED: ${ROS_UPDATE_ENABLED:-}
-      ROS_UPDATE_SOURCE: ${ROS_UPDATE_SOURCE:-}
-      ROS_UPDATE_PROXY: ${ROS_UPDATE_PROXY:-}
-      ROS_UPDATE_ENDPOINT: ${ROS_UPDATE_ENDPOINT:-}
-      ROS_UPDATE_IMAGE: ${ROS_UPDATE_IMAGE:-}
-      ROS_UPDATE_INTERVAL: ${ROS_UPDATE_INTERVAL:-}
-      ROS_UPDATE_AUTO_APPLY: ${ROS_UPDATE_AUTO_APPLY:-}
-      ROS_DOCKER_SOCKET: ${ROS_DOCKER_SOCKET:-/var/run/docker.sock}
-      ROS_DOCKER_CONTAINER: ${ROS_DOCKER_CONTAINER:-}
-      ROS_CENTER_VERSION: ${ROS_CENTER_VERSION:-}
-      ROS_CENTER_DIGEST: ${ROS_CENTER_DIGEST:-}
+
+# 首次启动打开 http://<宿主机IP>:10086，在「系统管理 → 设备管理」里添加 RouterOS。
+# 连接参数、账号密码、主题、更新设置等都可在 WebUI 中修改，无需 .env 文件。
+# 改端口：把 ports 与 PORT 一起改成如 8080:8080 / PORT: 8080。
+# 想要网页内「一键更新并重建容器」：在 volumes 下加一行
+#   - /var/run/docker.sock:/var/run/docker.sock
+# 映射 docker.sock 等于把宿主机 Docker 控制权交给容器，非必要不要开启。
+# ./data 保存全部设置与统计，请整体持久化。
