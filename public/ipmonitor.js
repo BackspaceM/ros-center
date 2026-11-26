@@ -40,7 +40,7 @@
   function iconFor(r) { return iconById.get(r.id) || iconByIp.get(r.ip) || ''; }
 
   function rate(bps) {
-    const r = typeof fmtRate === 'function' ? fmtRate(bps || 0) : { v: '0', u: 'B/s' };
+    const r = typeof fmtBytesRate === 'function' ? fmtBytesRate(bps || 0) : { v: '0', u: 'B/s' };
     return { v: r.v, u: r.u };
   }
   function bytes(n) {

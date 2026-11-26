@@ -15,7 +15,7 @@
   const ANIM_ZH = { none: '无（只选中）', pulse: '节点脉冲', flow: '链路流动', ripple: '涟漪扩散' };
   const ANIM_EN = { none: 'None (select only)', pulse: 'Node pulse', flow: 'Link flow', ripple: 'Ripple' };
   /* 紧凑三段式：icon（最早 26px，等比略放大到 32px）| 名称/IP/MAC | 实时速率/空闲 */
-  const NODE_W = 190, NODE_H = 62, ICON_W = 40, ICON_SZ = 32, RATE_W = 46, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
+  const NODE_W = 208, NODE_H = 62, ICON_W = 40, ICON_SZ = 32, RATE_W = 64, PORT_W = 30, PORT_H = 24, GAP = 32, LEVEL_GAP = 156, MARGIN = 90;
   let data = null, loading = false, iconUrl = '', iconLib = [], iconLabel = '';
   let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
@@ -26,14 +26,8 @@
   const animLabel = (a) => L(ANIM_ZH[a] || ANIM_ZH.none, ANIM_EN[a] || ANIM_EN.none);
   const currentDeviceId = () => (($('deviceSelect') && $('deviceSelect').value) || state.deviceId || '');
   const isCustom = (id) => !!((data && data.custom) || []).find((n) => n.id === id);
-  const fmtRate = (b) => {
-    const v = Number(b) || 0;
-    if (v >= 1e9) return (v / 1e9).toFixed(1) + 'G';
-    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
-    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
-    /* 小于 1K 也要带单位，避免出现没有单位的裸数字 */
-    return Math.round(v) + 'bps';
-  };
+  /* 拓扑速率统一用字节单位（B/s、KB/s、MB/s、GB/s），与 BT 客户端口径一致 */
+  const fmtRate = (b) => { const r = fmtBytesRate(b); return r.v + r.u; };
 
   window.renderTopologyPage = function renderTopologyPage() {
     $('content').innerHTML = `    <div class="page-head">

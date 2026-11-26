@@ -368,7 +368,7 @@ function cellHtml(row, key, sec) {
     const r = leaseRateFor(row);
     if (!r) return '<span class="muted-cell">—</span>';
     const bps = key === 'rateUp' ? r.txBps : r.rxBps;
-    const f = typeof fmtRate === 'function' ? fmtRate(bps || 0) : { v: String(bps || 0), u: 'B/s' };
+    const f = typeof fmtBytesRate === 'function' ? fmtBytesRate(bps || 0) : { v: String(bps || 0), u: 'B/s' };
     const active = !!(bps && bps > 0);
     return `<span class="lease-rate ${active ? (key === 'rateUp' ? 'up' : 'down') : ''}">${esc(f.v)}<small>${esc(f.u)}</small></span>`;
   }

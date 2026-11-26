@@ -376,6 +376,14 @@ function fmtRate(bps) {
   return { v: v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2), u: u[i] };
 }
 const fmtRateStr = (b) => { const r = fmtRate(b); return r.v + ' ' + r.u; };
+/* 字节速率：拓扑 / IP 监控 / DHCP 租约统一用 B/s、KB/s、MB/s、GB/s（1024 进制），
+   与 qBittorrent / Transmission 等客户端口径一致，便于直接对比。入参是 bit/s。 */
+function fmtBytesRate(bps) {
+  let b = (Number(bps) || 0) / 8, i = 0; const u = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  if (b === 0) return { v: '0', u: u[i] };
+  return { v: b.toFixed(b >= 100 ? 0 : b >= 10 ? 1 : 2), u: u[i] };
+}
 function splitBytes(b) {
   b = Number(b) || 0; let i = 0; const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
