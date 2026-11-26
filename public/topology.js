@@ -663,26 +663,31 @@
     if (!nodes.length) { toast(L('请先加载拓扑', 'Load the topology first'), 'err'); return; }
     const eligible = (n) => (n.mac && String(n.mac).trim()) || (n.ip && /^[a-zA-Z0-9_.:-]+$/.test(String(n.ip).trim()));
     const body = `
-      <div class="picker-toolbar">
-        <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <div class="ui-intro">
+        <div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg></div>
+        <div><b>${esc(L('按 IP 实时测速', 'Live rate by IP'))}</b>
+          <p>${esc(L('勾选要为哪些设备按 IP 测速；填了 IP 或 MAC 的设备才能开启。仅读连接表，不改路由器配置。', 'Pick devices to monitor by IP; devices with an IP or MAC are eligible. Reads connection tables only, no router changes.'))}</p></div>
+      </div>
+      <div class="ui-toolbar">
+        <div class="ui-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <input type="text" id="rateSearch" placeholder="${esc(L('搜索设备名 / IP / MAC…', 'Search name / IP / MAC…'))}"></div>
-        <div class="picker-quick">
+        <div class="ui-quick">
           <button class="btn btn-sm" type="button" id="rateAll">${esc(L('全选', 'All'))}</button>
           <button class="btn btn-sm" type="button" id="rateNone">${esc(L('全不选', 'None'))}</button>
         </div>
       </div>
-      <div class="picker-list" id="rateList">
+      <div class="ui-list" id="rateList">
         ${nodes.map((n, i) => {
           const ok = eligible(n);
-          return `<label class="picker-row${ok ? '' : ' disabled'}" data-name="${esc((n.name || '') + ' ' + (n.ip || '') + ' ' + (n.mac || '')).toLowerCase()}">
-            <span class="picker-icon lg-${esc(n.type)}"></span>
-            <span class="picker-info"><b>${esc(n.name || n.ip || n.id)}</b><small>${esc(n.ip || n.mac || L('未填地址', 'no address'))}${n.mac && n.ip ? ' · ' + esc(String(n.mac).slice(0, 8)) : ''} · ${esc(typeLabel(n.type))}</small></span>
+          return `<label class="ui-row${ok ? '' : ' disabled'}" data-name="${esc((n.name || '') + ' ' + (n.ip || '') + ' ' + (n.mac || '')).toLowerCase()}">
+            ${n.icon ? `<img class="ui-row-ic" src="${esc(n.icon)}" alt="" loading="lazy">` : `<span class="ui-row-ic lg-${esc(n.type)}"></span>`}
+            <span class="ui-row-main"><b>${esc(n.name || n.ip || n.id)}</b><small>${esc(n.ip || n.mac || L('未填地址', 'no address'))}${n.mac && n.ip ? ' · ' + esc(String(n.mac).slice(0, 8)) : ''} · ${esc(typeLabel(n.type))}</small></span>
             <span class="picker-tag">${ok ? '' : esc(L('需填 IP/MAC', 'needs IP/MAC'))}</span>
             <span class="upd-switch"><input type="checkbox" data-rate-id="${esc(n.id)}"${n.ipRate && ok ? ' checked' : ''}${ok ? '' : ' disabled'}><i></i></span>
           </label>`;
         }).join('')}
       </div>`;
-    const foot = `<span class="picker-summary" id="rateSummary"></span>
+    const foot = `<span class="ui-summary" id="rateSummary"></span>
       <button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button>
       <button class="btn primary" id="rateSave" type="button">${esc(L('保存', 'Save'))}</button>`;
     openModal(L('批量设置按 IP 测速', 'Batch set per-IP monitoring'), body, foot, (m) => {
@@ -696,7 +701,7 @@
       const search = m.querySelector('#rateSearch');
       search.oninput = () => {
         const q = search.value.trim().toLowerCase();
-        m.querySelectorAll('.picker-row').forEach((row) => { row.style.display = !q || row.dataset.name.includes(q) ? '' : 'none'; });
+        m.querySelectorAll('.ui-row').forEach((row) => { row.style.display = !q || row.dataset.name.includes(q) ? '' : 'none'; });
       };
       m.querySelector('[data-close]').onclick = closeModal;
       m.querySelector('#rateSave').onclick = async () => {
@@ -725,42 +730,42 @@
       return;
     }
     if (!nodes.length) { toast(L('请先加载拓扑', 'Load the topology first'), 'err'); return; }
-    const rows = nodes.map((n, i) => `<div class="anim-card" data-name="${esc((n.name || '') + ' ' + (n.ip || '')).toLowerCase()}">
-      <div class="anim-card-main">
-        <span class="anim-card-icon lg-${esc(n.type)}"></span>
-        <span class="anim-card-info"><b>${esc(n.name)}</b><small>${esc(n.ip || '')} · ${esc(typeLabel(n.type))}</small></span>
+    const rows = nodes.map((n, i) => `<div class="ui-card" data-name="${esc((n.name || '') + ' ' + (n.ip || '')).toLowerCase()}">
+      <div class="ui-card-main">
+        ${n.icon ? `<img class="ui-row-ic" src="${esc(n.icon)}" alt="" loading="lazy">` : `<span class="ui-row-ic lg-${esc(n.type)}"></span>`}
+        <span class="ui-row-main"><b>${esc(n.name)}</b><small>${esc(n.ip || '')} · ${esc(typeLabel(n.type))}</small></span>
       </div>
-      <div class="anim-card-ctrl"><span class="anim-card-label">${esc(L('点击时播放', 'On click'))}</span>
+      <div class="ui-card-ctrl"><span class="anim-card-label">${esc(L('点击时播放', 'On click'))}</span>
         <div class="anim-select-wrap"><span class="anim-current" data-cur="${i}">✦ ${esc(animLabel(n.anim || 'none'))}</span>
           <select id="fx_${i}" data-id="${esc(n.id)}">${ANIMS.map((a) => `<option value="${a}"${(n.anim || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select></div>
       </div>
     </div>`).join('');
     const body = `
-      <div class="anim-intro">
-        <div class="anim-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.6L20 10l-5.6 2L15 18l-3-3-3 3 .6-6L4 10l6.1-1.4L12 3z"/></svg></div>
+      <div class="ui-intro">
+        <div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.6L20 10l-5.6 2L15 18l-3-3-3 3 .6-6L4 10l6.1-1.4L12 3z"/></svg></div>
         <div><b>${esc(L('为设备设置点击动画', 'Set click animations'))}</b>
           <p>${esc(L('点击设备时只触发它自己绑定的动画；设为「无」则只选中、不播放。', 'Clicking a device plays only its own animation; choose "None" to just select.'))}</p></div>
       </div>
-      <div class="picker-toolbar">
-        <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <div class="ui-toolbar">
+        <div class="ui-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <input type="text" id="fxSearch" placeholder="${esc(L('搜索设备…', 'Search devices…'))}"></div>
-        <div class="picker-quick">
+        <div class="ui-quick">
           <button class="btn btn-sm" type="button" id="fxNone">${esc(L('全部设为无', 'Set all None'))}</button>
         </div>
       </div>
-      <div class="anim-grid">${rows}</div>`;
-    const foot = `<span class="picker-summary">${esc(L('共 ', ''))}${nodes.length}${esc(L(' 台设备', ' devices'))}</span>
+      <div class="ui-grid">${rows}</div>`;
+    const foot = `<span class="ui-summary">${esc(L('共 ', ''))}${nodes.length}${esc(L(' 台设备', ' devices'))}</span>
       <button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="fxSave" type="button">${esc(L('保存', 'Save'))}</button>`;
     openModal(L('拓扑动画设置', 'Topology animation settings'), body, foot, (m) => {
       /* 选择框原生但透明覆盖，显示自定义的精致标签 */
-      m.querySelectorAll('.anim-card select').forEach((sel) => {
+      m.querySelectorAll('.ui-card select').forEach((sel) => {
         const cur = sel.parentElement.querySelector('.anim-current');
         const sync = () => { cur.textContent = '✦ ' + sel.options[sel.selectedIndex].text; };
         sel.onchange = sync; sync();
       });
       const s = m.querySelector('#fxSearch');
-      s.oninput = () => { const q = s.value.trim().toLowerCase(); m.querySelectorAll('.anim-card').forEach((c) => { c.style.display = !q || c.dataset.name.includes(q) ? '' : 'none'; }); };
-      m.querySelector('#fxNone').onclick = () => { m.querySelectorAll('.anim-card select').forEach((sel) => { sel.value = 'none'; sel.onchange(); }); };
+      s.oninput = () => { const q = s.value.trim().toLowerCase(); m.querySelectorAll('.ui-card').forEach((c) => { c.style.display = !q || c.dataset.name.includes(q) ? '' : 'none'; }); };
+      m.querySelector('#fxNone').onclick = () => { m.querySelectorAll('.ui-card select').forEach((sel) => { sel.value = 'none'; sel.onchange(); }); };
       $('fxSave').onclick = async () => {
         const custom = ((data && data.custom) || []).slice();
         nodes.forEach((n, i) => {
@@ -792,7 +797,9 @@
     const calcRows = calcList.map(({ node: d, depth }) => `<label class="calc-opt" style="padding-left:${Math.min(depth, 6) * 12}px"><input type="checkbox" class="calc-chk" value="${esc(d.id)}"${calcSelected.includes(d.id) ? ' checked' : ''}><span>${esc(d.name)}</span><small>${esc(d.iface || typeLabel(d.type))}</small></label>`).join('');
     const section = (num, title, sub, inner) => `<section class="te-sec"><div class="te-sec-head"><span class="te-sec-num">${num}</span><div><h4>${esc(title)}</h4><p>${esc(sub)}</p></div></div><div class="te-sec-body">${inner}</div></section>`;
     const field = (label, ctrl, hint) => `<div class="te-field"><label>${esc(label)}</label>${ctrl}${hint ? `<div class="te-hint">${esc(hint)}</div>` : ''}</div>`;
-    const body = `<div class="topo-editor">
+    const introHtml = `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
+      <div><b>${esc(isNew ? L('添加网络设备', 'Add network device') : L('编辑网络设备', 'Edit network device'))}</b><p>${esc(L('填写设备信息与层级关系；填 MAC + IPv4 时会联动 DHCP 租约。', 'Fill in device details and hierarchy; MAC + IPv4 syncs the DHCP lease.'))}</p></div></div>`;
+    const body = introHtml + `<div class="topo-editor">
       ${section('1', L('基本信息', 'Basic info'), L('名称、类型与地址', 'Name, type and address'), `
         ${field(L('名称', 'Name') + ' *', `<input id="tnName" type="text" maxlength="48" value="${esc(node ? node.name : '')}" placeholder="${esc(L('设备名称', 'Device name'))}">`)}
         <div class="te-grid-2">
@@ -840,7 +847,8 @@
         <input id="tnNote" type="text" maxlength="120" value="${esc(node ? node.note : '')}" placeholder="${esc(L('例如：放在客厅电视柜', 'e.g. living room TV cabinet'))}">
       `)}
     </div>`;
-    const foot = `<button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="tnSave" type="button">${esc(L('保存', 'Save'))}</button>`;
+    const foot = `<span class="ui-summary">${esc(L('共 ', ''))}5 ${esc(L('个分区', ' sections'))}</span>
+      <button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="tnSave" type="button">${esc(L('保存', 'Save'))}</button>`;
     openModal(isNew ? L('添加网络设备', 'Add network device') : L('编辑网络设备', 'Edit network device'), body, foot, () => {
       document.querySelectorAll('.calc-chk').forEach((ch) => {
         ch.onchange = () => {
@@ -916,7 +924,8 @@
     const node = selectedId && map.get(selectedId);
     if (!node) { toast(L('请先点选要删除的设备', 'Select a device to delete first'), 'err'); return; }
     const wasAuto = ((data && data.auto) || []).some((x) => x.id === node.id);
-    const body = `<div class="modal-note">${esc(L('确定删除设备', 'Delete this device?'))} <b>${esc(node.name)}</b> ? ${wasAuto ? esc(L('该设备由自动发现生成，将从视图中隐藏（重新发现不会再出现）；删除覆盖版本即可恢复。', 'This device is auto-discovered and will be hidden until you remove its override.')) : ''}</div>`;
+    const body = `<div class="ui-intro danger"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+      <div><b>${esc(L('删除网络设备', 'Delete network device'))}</b><div class="ui-intro-msg">${esc(L('确定删除设备', 'Delete this device?'))} <b>${esc(node.name)}</b>${wasAuto ? ' · ' + esc(L('自动发现的设备将从视图中隐藏，删除覆盖版本即可恢复。', 'Auto-discovered device will be hidden; remove its override to restore.')) : ''}</div></div></div>`;
     const foot = `<button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn danger" id="tnDel" type="button">${esc(L('删除', 'Delete'))}</button>`;
     openModal(L('删除网络设备', 'Delete network device'), body, foot, () => {
       $('tnDel').onclick = async () => {

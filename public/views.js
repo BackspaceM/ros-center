@@ -150,12 +150,15 @@ function openLinkSettings(d) {
   const rows = ifaces.map((i) => {
     const saved = prefs.find((p) => p.name === i.name);
     const cap = saved ? saved.capMbps : (num(i.linkBps) ? Math.round(num(i.linkBps) / 1e6) : 1000);
-    return `<label class="link-row"><input type="checkbox" data-link="${esc(i.name)}" ${saved ? 'checked' : ''}>
-      <span>${esc(i.name)} <small>${esc(i.comment || i.type)}</small></span>
+    return `<label class="ui-row"><input type="checkbox" data-link="${esc(i.name)}" ${saved ? 'checked' : ''}>
+      <span class="ui-row-main"><b>${esc(i.name)}</b><small>${esc(i.comment || i.type)}</small></span>
       <input type="number" min="1" max="100000" step="1" value="${cap}" data-cap="${esc(i.name)}" style="width:92px"> <small>${t('link_capacity')}</small></label>`;
   }).join('');
-  openModal(t('link_settings'), `<div class="dash-block-editor"><p class="dash-block-tip">${esc(L('勾选要显示的链路并填写带宽（最多 4 条），带宽默认取路由器协商速率。', 'Pick up to 4 links and set their capacity (defaults to the negotiated interface speed).'))}</p>${rows || `<div class="empty">${t('no_data')}</div>`}</div>`,
-    `<button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
+  openModal(t('link_settings'), `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M4 8h10M4 16h10"/></svg></div>
+      <div><b>${esc(L('链路利用率', 'Link utilization'))}</b><p>${esc(L('勾选要显示的链路并填写带宽（最多 4 条），带宽默认取路由器协商速率。', 'Pick up to 4 links and set their capacity (defaults to the negotiated interface speed).'))}</p></div></div>
+    <div class="ui-list">${rows || `<div class="empty">${t('no_data')}</div>`}</div>`,
+    `<span class="ui-summary">${esc(L('最多 ', 'Up to '))}4 ${esc(L('条', 'links'))}</span>
+     <button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
     (m) => {
       m.querySelector('[data-close]').onclick = closeModal;
       m.querySelector('[data-save]').onclick = () => {
@@ -197,10 +200,13 @@ function qtRow(host, label) {
 function openQualityTargets() {
   const rows = qualityTargets();
   openModal(t('quality_targets'),
-    `<div class="dash-block-editor"><p class="dash-block-tip">${esc(L('填写要探测的地址与显示名称，最多 5 个；留空则使用 Netwatch 目标。', 'Enter up to 5 probe targets and labels; leave empty to use Netwatch.'))}</p>
-      <div id="qtList">${rows.map((r) => qtRow(r.host, r.label)).join('') || qtRow('', '')}</div>
-      <button class="btn btn-sm" id="qtAdd" type="button">+ ${esc(t('add'))}</button></div>`,
-    `<button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
+    `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg></div>
+       <div><b>${esc(L('链路质量探测目标', 'Quality probe targets'))}</b><p>${esc(L('填写要探测的地址与显示名称，最多 5 个；留空则使用 Netwatch 目标。', 'Enter up to 5 probe targets and labels; leave empty to use Netwatch.'))}</p></div></div>
+     <div class="ui-toolbar"><span class="ui-summary">${esc(L('ICMP / Netwatch 探针', 'ICMP / Netwatch probes'))}</span>
+       <div class="ui-quick"><button class="btn btn-sm" id="qtAdd" type="button">+ ${esc(t('add'))}</button></div></div>
+     <div class="ui-list" id="qtList">${rows.map((r) => qtRow(r.host, r.label)).join('') || qtRow('', '')}</div>`,
+    `<span class="ui-summary">${esc(L('最多 ', 'Up to '))}5 ${esc(L('个目标', 'targets'))}</span>
+     <button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
     (m) => {
       const list = m.querySelector('#qtList');
       const bindDel = () => list.querySelectorAll('[data-qt-del]').forEach((b) => {
@@ -290,10 +296,13 @@ function applyDashboardLayout() {
 }
 function openDashboardBlocks() {
   const prefs = dashPrefs(), hidden = new Set(prefs.hidden);
-  const rows = DASH_BLOCKS.map(([id, label]) => `<label class="dash-block-row"><input type="checkbox" data-block-toggle="${id}" ${hidden.has(id) ? '' : 'checked'}><span>${esc(label())}</span><small>${esc(id)}</small></label>`).join('');
+  const rows = DASH_BLOCKS.map(([id, label]) => `<label class="ui-row"><input type="checkbox" data-block-toggle="${id}" ${hidden.has(id) ? '' : 'checked'}><span class="ui-row-main"><b>${esc(label())}</b><small>${esc(id)}</small></span></label>`).join('');
   openModal(L('仪表盘块', 'Dashboard blocks'),
-    `<div class="dash-block-editor"><p class="dash-block-tip">${esc(L('勾选要显示的块；拖动画面中的块可调整顺序。设置按设备保存。', 'Pick visible blocks; drag blocks on the dashboard to reorder. Saved per device.'))}</p>${rows}</div>`,
-    `<button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" data-save type="button">${esc(t('confirm'))}</button>`,
+    `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+       <div><b>${esc(L('选择要显示的块', 'Choose dashboard blocks'))}</b><p>${esc(L('勾选要显示的块；拖动画面中的块可调整顺序。设置按设备保存。', 'Pick visible blocks; drag blocks on the dashboard to reorder. Saved per device.'))}</p></div></div>
+     <div class="ui-list">${rows}</div>`,
+    `<span class="ui-summary">${esc(L('共 ', ''))}${DASH_BLOCKS.length}${esc(L(' 个块', ' blocks'))}</span>
+     <button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" data-save type="button">${esc(t('confirm'))}</button>`,
     (m) => {
       m.querySelector('[data-close]').onclick = closeModal;
       m.querySelector('[data-save]').onclick = () => {

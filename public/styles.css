@@ -744,6 +744,7 @@ tbody tr:last-child td { border-bottom: 0; }
   font-size: 12.5px; outline: 0; background: var(--input); transition: border-color .14s, box-shadow .14s;
 }
 .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 12%, transparent); }
+/* 全站下拉统一风格见文件末尾「胶囊式样」段：✦ + 淡底 + violet 字 + ▾ */
 .form-row textarea { min-height: 80px; height: auto; padding: 9px 11px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .form-check { display: flex; align-items: center; gap: 8px; height: 36px; }
 .form-check input { width: 15px; height: 15px; accent-color: var(--blue); }
@@ -1001,6 +1002,7 @@ tr.row-fail td { color: var(--red); }
 .picker-row.disabled { opacity:.5; cursor:not-allowed; }
 .picker-icon { width:28px; height:28px; border-radius:7px; flex:none; }
 .picker-icon::before { content:''; display:block; width:14px; height:14px; margin:7px auto; border-radius:50%; background:currentColor; opacity:.75; }
+.picker-icon-img, .anim-card-icon-img { object-fit:contain; background:var(--soft); padding:2px; }
 .picker-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
 .picker-info b { font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .picker-info small { font-size:10.5px; color:var(--muted); }
@@ -1030,6 +1032,7 @@ tr.row-fail td { color: var(--red); }
 .anim-card-main { display:flex; align-items:center; gap:9px; }
 .anim-card-icon { width:26px; height:26px; border-radius:7px; flex:none; }
 .anim-card-icon::before { content:''; display:block; width:12px; height:12px; margin:7px auto; border-radius:50%; background:currentColor; opacity:.75; }
+.anim-card-icon.anim-card-icon-img::before { content:none; }
 .anim-card-info { min-width:0; display:flex; flex-direction:column; gap:2px; }
 .anim-card-info b { font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .anim-card-info small { font-size:10.5px; color:var(--muted); }
@@ -1041,7 +1044,8 @@ tr.row-fail td { color: var(--red); }
   border-radius:7px; background:var(--soft); color:var(--violet); font-size:11.5px; font-weight:600;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .anim-select-wrap::after { content:'▾'; position:absolute; right:9px; top:5px; color:var(--muted); pointer-events:none; font-size:11px; }
-.anim-select-wrap select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+.anim-select-wrap select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer;
+  appearance:none; -webkit-appearance:none; background-image:none; padding-right:0; }
 @media (max-width:560px) { .anim-grid { grid-template-columns:1fr; } }
 
 /* DHCP 租约编辑 / 列设置：与拓扑动画设置同款的分区卡片弹窗 */
@@ -1744,3 +1748,97 @@ th:hover > .rz-col { opacity: .55; }
 .tool-feed-row time { flex: none; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .tool-feed-row .tag { flex: none; font-size: 10px; padding: 2px 7px; }
 .tool-feed-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ============================================================
+   全站弹窗统一设计系统（ui-*）
+   参照「按 IP 测速 / 动画设置」弹窗：顶部说明卡 + 搜索/工具条 +
+   卡片行列表 + 底部摘要。所有弹窗共用这套类，改此处即全站统一。
+   ============================================================ */
+.ui-intro { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-bottom:14px;
+  border:1px solid color-mix(in srgb,var(--blue) 25%,var(--line)); border-radius:10px;
+  background:color-mix(in srgb,var(--blue) 7%,var(--card)); }
+.ui-intro-icon { width:38px; height:38px; flex:none; display:grid; place-items:center; border-radius:9px;
+  color:var(--blue); background:color-mix(in srgb,var(--blue) 14%,var(--card)); }
+.ui-intro-icon svg { width:20px; height:20px; }
+.ui-intro b { font-size:12.5px; color:var(--ink); }
+.ui-intro p { margin:3px 0 0; font-size:11px; color:var(--muted); line-height:1.5; }
+.ui-toolbar { display:flex; align-items:center; gap:10px; margin:2px 0 12px; flex-wrap:wrap; }
+.ui-search { flex:1; min-width:160px; display:flex; align-items:center; gap:8px; height:34px; padding:0 11px;
+  border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--muted); }
+.ui-search:focus-within { border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent); }
+.ui-search svg { flex:none; }
+.ui-search input { flex:1; min-width:0; border:0; outline:0; background:transparent; color:var(--ink); font-size:12px; }
+.ui-search input::placeholder { color:var(--muted); }
+.ui-quick { display:flex; gap:6px; flex:none; }
+.ui-quick .btn { height:34px; padding:0 11px; }
+.ui-list { max-height:400px; overflow:auto; display:flex; flex-direction:column; gap:6px; padding:2px; }
+.ui-grid { max-height:400px; overflow:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; padding:2px; }
+.ui-row { display:flex; align-items:center; gap:11px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:9px; background:var(--card); transition:border-color .14s, background .14s; cursor:pointer; }
+.ui-row:hover { border-color:color-mix(in srgb,var(--blue) 35%,var(--line)); }
+.ui-row:has(input:checked) { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); background:color-mix(in srgb,var(--blue) 6%,var(--card)); }
+.ui-row.disabled { opacity:.5; cursor:not-allowed; }
+.ui-row-ic { width:28px; height:28px; border-radius:7px; flex:none; object-fit:contain; background:var(--soft); padding:2px; }
+.ui-row-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.ui-row-main b { font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ui-row-main small { font-size:10.5px; color:var(--muted); }
+.ui-summary { flex:1; font-size:11.5px; color:var(--muted); }
+.ui-summary b { color:var(--blue); font-weight:700; }
+.ui-sect { margin-bottom:13px; }
+.ui-sect-title { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; color:var(--ink); margin:0 0 8px; }
+.ui-sect-title i { width:7px; height:7px; border-radius:50%; background:var(--blue); flex:none; }
+.ui-sect-title small { font-weight:400; color:var(--muted); font-size:10.5px; }
+@media (max-width:560px) { .ui-grid { grid-template-columns:1fr; } }
+/* 卡片式列表项（动画设置等弹窗），与 ui-grid 配套 */
+.ui-card { display:flex; flex-direction:column; gap:9px; padding:11px 12px; border:1px solid var(--line);
+  border-radius:10px; background:var(--card); transition:border-color .14s, box-shadow .14s; }
+.ui-card:hover { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); box-shadow:0 2px 8px rgba(16,24,40,.05); }
+.ui-card-main { display:flex; align-items:center; gap:9px; }
+.ui-card-ctrl { display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding-top:8px; border-top:1px dashed var(--line); }
+/* 确认弹窗：危险操作的红色主题 */
+.ui-intro.danger { border-color:color-mix(in srgb,var(--red) 30%,var(--line)); background:color-mix(in srgb,var(--red) 6%,var(--card)); }
+.ui-intro.danger .ui-intro-icon { color:var(--red); background:color-mix(in srgb,var(--red) 14%,var(--card)); }
+.ui-intro-msg { margin-top:3px; font-size:11.5px; color:var(--muted); line-height:1.6; }
+.ui-intro-msg b { color:var(--ink); }
+
+/* ============================================================
+   全站下拉统一：胶囊式样（与动画设置弹窗 .anim-current 同款）
+   淡底 + ✦ 前缀 + violet 字 + ▾，改此处即全站统一。
+   ============================================================ */
+select:not([hidden]) {
+  appearance: none; -webkit-appearance: none;
+  height: 30px; padding: 0 26px 0 26px;
+  color: var(--violet); font-weight: 600; font-size: 11.5px;
+  background: var(--soft); border: 1px solid var(--line); border-radius: 7px;
+  cursor: pointer;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%2300a5c4'><path d='M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%238a919c' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat, no-repeat;
+  background-position: left 9px center, right 9px center;
+}
+:root[data-scheme="dark"] select:not([hidden]) {
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%235fd3ee'><path d='M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%239aa1ab' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+}
+/* 下拉展开后的选项：跟随主题 */
+select:not([hidden]) option { background: var(--card); color: var(--ink); font-weight: 400; }
+
+/* 例外：顶部主题/设备选择器保持透明轻量，不套胶囊 */
+.theme-pick select, .device-pick select {
+  height: auto; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: var(--ink); font-weight: 600;
+}
+/* 例外：动画/自定义弹窗的透明覆盖层 */
+.anim-select-wrap select {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; background: none; border: 0; padding: 0;
+}
+/* 深色下全局规则特异性更高，需按同特异性覆盖例外，避免顶部选择器也套上图标 */
+:root[data-scheme="dark"] .theme-pick select,
+:root[data-scheme="dark"] .device-pick select,
+:root[data-scheme="dark"] .anim-select-wrap select {
+  background: transparent; color: var(--ink); background-image: none;
+}

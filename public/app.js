@@ -445,7 +445,11 @@ $('modalMask').addEventListener('click', (e) => { if (e.target === $('modalMask'
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('modalMask').hidden) closeModal(); });
 
 function confirmModal(title, msg, danger, onConfirm) {
-  openModal(title, `<div class="modal-note">${msg}</div>`,
+  const icon = danger
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>`
+    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`;
+  openModal(title, `<div class="ui-intro${danger ? ' danger' : ''}"><div class="ui-intro-icon">${icon}</div>
+      <div><b>${esc(title)}</b><div class="ui-intro-msg">${msg}</div></div></div>`,
     `<button class="btn" data-close>${t('cancel')}</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${t('confirm')}</button>`,
     (m) => {
       m.querySelector('[data-close]').onclick = closeModal;
@@ -1049,7 +1053,8 @@ async function boot() {
     try {
       const d = await api('/api/status');
       const statusText = d.mode === 'demo' ? t('demo_only') : (d.mode === 'live' ? t('device_online') : t('device_offline'));
-      openModal(t('export_hint'), `<div class="modal-note"><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)}<br><b>${L('状态', 'Status')}:</b> ${esc(statusText)}<br><b>${t('system')}:</b> ${esc(d.user)}</div>
+      openModal(t('export_hint'), `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg></div>
+          <div><b>${esc(t('export_hint'))}</b><p><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)} · <b>${L('状态', 'Status')}:</b> ${esc(statusText)} · <b>${t('system')}:</b> ${esc(d.user)}</p></div></div>
         <pre class="code">${esc(JSON.stringify({ host: d.host, port: d.port, mode: d.mode, interval: d.interval, uptime: d.uptime }, null, 2))}</pre>`,
         `<button class="btn" data-close>${t('close')}</button>`, (m) => { m.querySelector('[data-close]').onclick = closeModal; });
     } catch (e) { toast(e.message, 'err'); }

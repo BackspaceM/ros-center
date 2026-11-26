@@ -102,16 +102,16 @@ function openColumnSettings(sec) {
   const order = [...cur, ...all.filter((k) => !cur.includes(k))];
   let checked = new Set(cur);
   const isLease = sec && sec.id === 'dhcpLeases';
-  const intro = `<div class="lease-intro">
-    <div class="lease-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg></div>
+  const intro = `<div class="lease-intro ui-intro">
+    <div class="lease-intro-icon ui-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg></div>
     <div><b>${esc(L('表头字段', 'Table columns'))}</b><p>${esc(L('勾选要显示的字段；要调整顺序，请直接在表格上拖动表头。设置按当前设备与分类保存。', 'Pick visible columns; drag the table headers directly to reorder. Saved per device and section.'))}</p></div>
   </div>`;
   const toolbar = `<div class="picker-toolbar"><div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
     <input type="text" id="colSearch" placeholder="${esc(L('搜索字段…', 'Search fields…'))}"></div>
     <div class="picker-quick"><button class="btn btn-sm" type="button" id="colAll">${esc(L('全选', 'Select all'))}</button><button class="btn btn-sm" type="button" id="colNone">${esc(L('全不选', 'None'))}</button></div></div>`;
   const listHtml = isLease
-    ? `<div class="col-gradio">${order.map((k) => `<label class="col-gcard${checked.has(k) ? ' checked' : ''}" data-name="${esc(fieldLabel(sec, k) + ' ' + k).toLowerCase()}"><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label>`).join('')}</div>`
-    : `<div class="col-editor-list">${order.map((k) => `<div class="col-editor-row" data-name="${esc(fieldLabel(sec, k) + ' ' + k).toLowerCase()}"><label><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label></div>`).join('')}</div>`;
+    ? `<div class="col-gradio">${order.map((k) => `<label class="col-gcard ui-row${checked.has(k) ? ' checked' : ''}" data-name="${esc(fieldLabel(sec, k) + ' ' + k).toLowerCase()}"><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label>`).join('')}</div>`
+    : `<div class="col-editor-list">${order.map((k) => `<div class="col-editor-row ui-row" data-name="${esc(fieldLabel(sec, k) + ' ' + k).toLowerCase()}"><label><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label></div>`).join('')}</div>`;
   const bodyHtml = isLease
     ? intro + toolbar + listHtml
     : `<div class="col-editor"><p class="col-editor-tip">${esc(L('勾选要显示的字段；要调整顺序，请直接在表格上拖动表头。设置按当前设备与分类保存。', 'Pick visible columns; drag the table headers directly to reorder. Saved per device and section.'))}</p>${toolbar}${listHtml}</div>`;
@@ -487,8 +487,8 @@ function openLeaseForm(sec, row) {
       <label>${label}${f.required ? ' <span class="req">*</span>' : ''} <small>${esc(f.key)}</small></label>${ctrl}</div>`;
   };
   const body = `
-    <div class="lease-intro">
-      <div class="lease-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2" fill="var(--card)"/><circle cx="15" cy="12" r="2" fill="var(--card)"/><circle cx="11" cy="17" r="2" fill="var(--card)"/></svg></div>
+    <div class="lease-intro ui-intro">
+      <div class="lease-intro-icon ui-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2" fill="var(--card)"/><circle cx="15" cy="12" r="2" fill="var(--card)"/><circle cx="11" cy="17" r="2" fill="var(--card)"/></svg></div>
       <div><b>${esc(isEdit ? L('编辑 DHCP 租约', 'Edit DHCP lease') : L('新增 DHCP 租约', 'Add DHCP lease'))} · ${esc(val('address') || L('新租约', 'New lease'))}</b>
         <p>${esc(L('字段与 RouterOS /DHCP Server/Leases 一致；修改后会自动同步到网络拓扑（以 MAC 为锚点）。', 'Fields match RouterOS /DHCP Server/Leases; changes sync back to the topology (anchored by MAC).'))}</p></div>
     </div>
@@ -563,8 +563,11 @@ function openForm(sec, row) {
     else input = `<input type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" id="f_${f.key}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" ${f.required ? 'data-required="1"' : ''}>`;
     return `<div class="form-row"><label>${label}</label><div>${input}${f.placeholder && f.type !== 'textarea' ? `<p class="form-hint">${esc(f.placeholder)}</p>` : ''}</div></div>`;
   }).join('');
-  openModal((isEdit ? t('edit_title') : t('add_title')) + ' · ' + tx(sec.title), body,
-    `<button class="btn" data-cancel>${t('cancel')}</button><button class="btn primary" data-save>${t('save')}</button>`,
+  const introHtml = `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 20h9M4 20h4M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
+    <div><b>${esc(isEdit ? t('edit_title') : t('add_title'))} · ${esc(tx(sec.title))}</b><p>${esc(L('字段与 RouterOS 配置一一对应，保存后直接写入当前路由器。', 'Fields map directly to RouterOS config; saving writes to the current router.'))}</p></div></div>`;
+  openModal((isEdit ? t('edit_title') : t('add_title')) + ' · ' + tx(sec.title), introHtml + body,
+    `<span class="ui-summary">${esc(L('共 ', ''))}${fields.length}${esc(L(' 个字段', ' fields'))}</span>
+     <button class="btn" data-cancel>${t('cancel')}</button><button class="btn primary" data-save>${t('save')}</button>`,
     (m) => {
       m.querySelector('[data-cancel]').onclick = closeModal;
       m.querySelectorAll('[data-keygen]').forEach((b) => b.onclick = () => {
@@ -912,13 +915,15 @@ async function openWireguardQr(row, sec) {
     ${field(t('wg_keepalive'), txt('wgKeepalive', '25'))}
     ${field(t('wg_responder'), `<div class="form-check"><input type="checkbox" id="wgResponder" ${defaults.wgResponder ? 'checked' : ''}></div>`)}`;
   openModal(t('wg_qr_title'),
-    `<div class="modal-note" style="margin-bottom:14px">${t('wg_qr_sub')}</div>
+    `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM19 19h2v2h-2z"/></svg></div>
+       <div><b>${esc(t('wg_qr_title'))}</b><p>${esc(t('wg_qr_sub'))}</p></div></div>
      <div class="wg-grid"><div class="wg-form">${form}</div>
        <div class="wg-qr-box"><canvas id="wgQrCanvas" width="220" height="220"></canvas>
          <div class="tag blue" style="margin-top:8px">WireGuard</div></div></div>
      <div class="modal-note" style="margin-top:8px;font-size:11px">${t('wg_qr_tip')}</div>
      <textarea id="wgConf" class="code" readonly style="width:100%;min-height:132px;margin-top:10px"></textarea>`,
-    `<button class="btn" data-close>${t('cancel')}</button><button class="btn" id="wgSave">${t('wg_save_peer')}</button><button class="btn" id="wgCopy">${t('wg_copy')}</button><button class="btn primary" id="wgDownload">${t('wg_download')}</button>`,
+    `<span class="ui-summary">${esc(L('扫码导入，或下载配置', 'Scan to import, or download'))}</span>
+     <button class="btn" data-close>${t('cancel')}</button><button class="btn" id="wgSave">${t('wg_save_peer')}</button><button class="btn" id="wgCopy">${t('wg_copy')}</button><button class="btn primary" id="wgDownload">${t('wg_download')}</button>`,
     (m) => {
       m.style.width = 'min(900px, 100%)';
       const qr = window.QRCode || window.ROSQR;
@@ -1074,8 +1079,11 @@ function renderConnectionSettings() {
       <div class="form-row"><label>${t('conn_tls')}</label><div class="form-check"><input type="checkbox" id="dvTls" ${dev && dev.tls ? 'checked' : ''}></div></div>
       <div class="form-row"><label>${t('conn_demo')}</label><div class="form-check"><input type="checkbox" id="dvDemo" ${dev && dev.demo ? 'checked' : ''}></div></div>
       <div id="dvResult" style="margin-top:10px"></div>`;
-    openModal(isNew ? t('device_add') : t('device_edit'), body,
-      `<button class="btn" data-close>${t('cancel')}</button><button class="btn" id="dvTest">${t('device_test')}</button><button class="btn primary" id="dvSave">${t('save')}</button>`,
+    const introHtml = `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
+      <div><b>${esc(isNew ? t('device_add') : t('device_edit'))}</b><p>${esc(L('填写 RouterOS 的连接信息；可先测试连接再保存。', 'Enter RouterOS connection details; test before saving.'))}</p></div></div>`;
+    openModal(isNew ? t('device_add') : t('device_edit'), introHtml + body,
+      `<span class="ui-summary">${esc(L('保存后即连接该设备', 'Connects on save'))}</span>
+       <button class="btn" data-close>${t('cancel')}</button><button class="btn" id="dvTest">${t('device_test')}</button><button class="btn primary" id="dvSave">${t('save')}</button>`,
       (m) => {
         m.querySelector('[data-close]').onclick = closeModal;
         const vals = () => ({ name: m.querySelector('#dvName').value.trim(), host: m.querySelector('#dvHost').value.trim(),
