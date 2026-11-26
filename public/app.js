@@ -263,7 +263,7 @@ const state = {
   security: null, securityAt: 0, securityLoading: false,
   quality: null, qualityAt: 0, qualityLoading: false,
   autoRefresh: autoRefreshPref, autoTimer: null,
-  collapsedGroups: new Set(), devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
+  collapsedGroups: new Set(), flyoutGroup: '', devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
   authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
 };
 try { JSON.parse(localStorage.getItem('ros-traffic-groups') || '[]').forEach((id) => state.collapsedGroups.add(id)); } catch (e) { /* ignore */ }
@@ -466,27 +466,30 @@ function buildNav(filter = '') {
     if (!items.length) return '';
     const activeHere = items.some((s) => s.id === state.section);
     const collapsed = !f && state.collapsedGroups.has(g.id);
-    return `<div class="nav-group ${collapsed ? 'collapsed' : ''} ${activeHere ? 'has-active' : ''}">
+    const fly = state.flyoutGroup === g.id ? ' flyout-open' : '';
+    return `<div class="nav-group ${collapsed ? 'collapsed' : ''} ${activeHere ? 'has-active' : ''}${fly}" data-group="${g.id}">
       <button class="nav-group-title" data-group="${g.id}" title="${esc(tx(g))}">
-        <span>${esc(tx(g))}</span><span class="group-chev">⌄</span><span class="group-count">${items.length}</span>
+        ${iconSvg(g.icon || 'grid')}<span>${esc(tx(g))}</span><span class="group-chev">⌄</span><span class="group-count">${items.length}</span>
       </button>
       <button class="nav-group-mini" data-group="${g.id}" title="${esc(tx(g))}">${iconSvg(g.icon || 'grid')}</button>
       <div class="nav-items">${items.map((s) =>
         `<button class="nav-item ${s.id === state.section ? 'active' : ''}" data-section="${s.id}" title="${esc(tx(s.title))}">
           ${iconSvg(sectionIconName(s))}<span class="nav-label">${esc(tx(s.title))}</span></button>`).join('')}</div></div>`;
   }).join('');
-  nav.querySelectorAll('.nav-item').forEach((b) => b.onclick = () => { navigate(b.dataset.section); });
+  nav.querySelectorAll('.nav-item').forEach((b) => b.onclick = () => {
+    state.flyoutGroup = ''; navigate(b.dataset.section);
+  });
   nav.querySelectorAll('.nav-group-title').forEach((b) => b.onclick = () => {
     const id = b.dataset.group;
     if (state.collapsedGroups.has(id)) state.collapsedGroups.delete(id); else state.collapsedGroups.add(id);
     saveCollapsedGroups(); buildNav($('navSearch').value);
   });
-  nav.querySelectorAll('.nav-group-mini').forEach((b) => b.onclick = () => {
-    /* 折叠态下点击组图标：展开侧栏并定位到该组 */
-    const sb = $('sidebar');
-    if (sb) { sb.classList.remove('collapsed'); try { localStorage.setItem('ros-traffic-collapsed', '0'); } catch (e) { /* ignore */ } }
-    state.collapsedGroups.delete(b.dataset.group); saveCollapsedGroups(); buildNav($('navSearch').value);
-    setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats(); }, 220);
+  nav.querySelectorAll('.nav-group-mini').forEach((b) => b.onclick = (e) => {
+    /* 收缩态：点击父组图标，向右弹出该组子菜单（不展开整个侧栏） */
+    e.stopPropagation();
+    const id = b.dataset.group;
+    state.flyoutGroup = state.flyoutGroup === id ? '' : id;
+    buildNav($('navSearch').value);
   });
   const fold = $('foldAllBtn');
   if (fold) fold.textContent = groups.every((g) => state.collapsedGroups.has(g.id)) ? '+' : '−';
@@ -519,7 +522,8 @@ const SECTION_ICONS = {
   routes: 'route', pools: 'database', neighbors: 'radar',
   firewallFilter: 'filter', firewallNat: 'nat', firewallMangle: 'tag', addressLists: 'addressBook', servicePorts: 'ports',
   firewall6Filter: 'filter', firewall6Mangle: 'tag', addressLists6: 'addressBook', servicePorts6: 'ports',
-  wifi: 'wifi', wirelessSec: 'lock',
+  wifi: 'wifi', wirelessSec: 'lock', capsmanCtl: 'router', wifiConfig: 'sliders',
+  wifiProv: 'code', wifiCap: 'plug', wifiRemote: 'monitor', wifiReg: 'users',
   pppSecrets: 'key', pppProfiles: 'sliders', pppActive: 'userCheck', wireguard: 'tunnel', wgPeers: 'nodes',
   simpleQueues: 'speed', queueTree: 'tree',
   connectionSettings: 'plug', identity: 'router', clock: 'clock', ntp: 'clockSync', users: 'user', userGroups: 'users',
@@ -1027,6 +1031,12 @@ async function boot() {
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   };
   $('navSearch').oninput = (e) => buildNav(e.target.value);
+  /* 点击侧栏外部时关闭收缩态的父组浮层 */
+  document.addEventListener('click', (e) => {
+    if (state.flyoutGroup && !e.target.closest('.nav-group.flyout-open')) {
+      state.flyoutGroup = ''; buildNav($('navSearch').value);
+    }
+  });
   $('navSearch').onkeydown = (e) => {
     if (e.key === 'Enter') {
       const first = $('sideNav').querySelector('.nav-item');

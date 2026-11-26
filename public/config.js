@@ -550,25 +550,47 @@ function openForm(sec, row) {
   const isEdit = !!row;
   const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
   const opts = fieldOptions(sec);
-  const body = fields.map((f) => {
-    const val = row && row[f.key] != null ? row[f.key] : '';
-    const label = esc(tx(f.label)) + (f.required ? ' <span class="req">*</span>' : '');
-    let input;
-    if (f.type === 'bool') input = `<div class="form-check"><input type="checkbox" id="f_${f.key}" ${boolOn(val) || (!isEdit && f.key === 'disabled' && false) ? 'checked' : ''}><label for="f_${f.key}" style="padding:0">${t('enabled')}</label></div>`;
-    else if (f.type === 'select') input = `<select id="f_${f.key}">${['<option value=""></option>', ...(f.options || []).map((o) => `<option value="${esc(o)}" ${String(val) === o ? 'selected' : ''}>${esc(o || '—')}</option>`)].join('')}</select>`;
-    else if (f.type === 'textarea') input = `<textarea id="f_${f.key}" placeholder="${esc(f.placeholder || '')}">${esc(val)}</textarea>`;
-    else if (f.type === 'readonly') input = `<input type="text" id="f_${f.key}" value="${esc(val || '—')}" disabled>`;
-    else if (f.type === 'interface') input = `<select id="f_${f.key}"><option value=""></option>${(opts.interfaces || []).map((n) => `<option value="${esc(n)}" ${val === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}${val && !(opts.interfaces || []).includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''}</select>`;
-    else if (f.key === 'private-key' || f.key === 'preshared-key') input = `<div style="display:flex;gap:6px"><input type="text" id="f_${f.key}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}"><button type="button" class="btn" data-keygen="${f.key}" style="width:auto;flex:0 0 auto;margin:0">${t('wg_auto')}</button></div>`;
-    else input = `<input type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" id="f_${f.key}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" ${f.required ? 'data-required="1"' : ''}>`;
-    return `<div class="form-row"><label>${label}</label><div>${input}${f.placeholder && f.type !== 'textarea' ? `<p class="form-hint">${esc(f.placeholder)}</p>` : ''}</div></div>`;
-  }).join('');
-  const introHtml = `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 20h9M4 20h4M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
-    <div><b>${esc(isEdit ? t('edit_title') : t('add_title'))} · ${esc(tx(sec.title))}</b><p>${esc(L('字段与 RouterOS 配置一一对应，保存后直接写入当前路由器。', 'Fields map directly to RouterOS config; saving writes to the current router.'))}</p></div></div>`;
-  openModal((isEdit ? t('edit_title') : t('add_title')) + ' · ' + tx(sec.title), introHtml + body,
+  /* 与 DHCP 租约同款：分区卡片 + 字段名标注 + 搜索。bool 用开关、textarea 跨整行。 */
+  const inputFor = (f) => {
+    const v = row && row[f.key] != null ? row[f.key] : '';
+    const id = 'f_' + f.key;
+    const label = esc(tx(f.label));
+    const nameAttr = `data-name="${esc(label + ' ' + f.key).toLowerCase()}"`;
+    const small = `<small>${esc(f.key)}</small>`;
+    if (f.type === 'bool') return `<div class="lease-card" ${nameAttr}>
+      <div class="lease-switch"><span>${label}</span><label class="upd-switch"><input type="checkbox" id="${id}" ${boolOn(v) ? 'checked' : ''}><i></i></label></div></div>`;
+    let ctrl;
+    if (f.type === 'select') ctrl = `<select id="${id}"><option value=""></option>${(f.options || []).map((o) => `<option value="${esc(o)}" ${String(v) === o ? 'selected' : ''}>${esc(o || '—')}</option>`).join('')}</select>`;
+    else if (f.type === 'interface') ctrl = `<select id="${id}"><option value=""></option>${(opts.interfaces || []).map((n) => `<option value="${esc(n)}" ${v === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}${v && !(opts.interfaces || []).includes(v) ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}</select>`;
+    else if (f.type === 'textarea') ctrl = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(v)}</textarea>`;
+    else if (f.type === 'readonly') ctrl = `<input type="text" id="${id}" value="${esc(v || '—')}" disabled>`;
+    else if (f.key === 'private-key' || f.key === 'preshared-key') ctrl = `<div style="display:flex;gap:6px"><input type="text" id="${id}" value="${esc(v)}" placeholder="${esc(f.placeholder || '')}"><button type="button" class="btn" data-keygen="${f.key}" style="width:auto;flex:0 0 auto;margin:0">${t('wg_auto')}</button></div>`;
+    else ctrl = `<input type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" id="${id}" value="${esc(v)}" placeholder="${esc(f.placeholder || '')}" ${f.required ? 'data-required="1"' : ''}>`;
+    const wide = f.type === 'textarea' || f.key === 'private-key' || f.key === 'preshared-key' || f.key === 'public-key' ? ' lease-card--wide' : '';
+    return `<div class="lease-card${wide}" ${nameAttr}><label>${label}${f.required ? ' <span class="req">*</span>' : ''} ${small}</label>${ctrl}${f.placeholder && f.type !== 'textarea' ? `<p class="form-hint">${esc(f.placeholder)}</p>` : ''}</div>`;
+  };
+  const body = `
+    <div class="lease-intro ui-intro">
+      <div class="lease-intro-icon ui-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 20h9M4 20h4M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
+      <div><b>${esc(isEdit ? t('edit_title') : t('add_title'))} · ${esc(tx(sec.title))}</b>
+        <p>${esc(L('字段与 RouterOS 配置一一对应，保存后直接写入当前路由器。', 'Fields map directly to RouterOS config; saving writes to the current router.'))}</p></div>
+    </div>
+    <div class="picker-toolbar">
+      <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="text" id="formSearch" placeholder="${esc(L('搜索字段…', 'Search fields…'))}"></div>
+    </div>
+    <div class="lease-form-wrap"><div class="lease-group"><div class="lease-group-title"><i style="background:var(--blue)"></i>${esc(L('配置字段', 'Configuration fields'))} <small>${esc(L('RouterOS 字段', 'RouterOS fields'))}</small></div>
+      <div class="lease-grid" id="formGrid">${fields.map(inputFor).join('')}</div></div></div>`;
+  const introHtml = body;
+  openModal((isEdit ? t('edit_title') : t('add_title')) + ' · ' + tx(sec.title), introHtml,
     `<span class="ui-summary">${esc(L('共 ', ''))}${fields.length}${esc(L(' 个字段', ' fields'))}</span>
      <button class="btn" data-cancel>${t('cancel')}</button><button class="btn primary" data-save>${t('save')}</button>`,
     (m) => {
+      const fs = m.querySelector('#formSearch');
+      if (fs) fs.oninput = () => {
+        const q = fs.value.trim().toLowerCase();
+        m.querySelectorAll('#formGrid .lease-card').forEach((c) => { c.style.display = !q || (c.dataset.name || '').includes(q) ? '' : 'none'; });
+      };
       m.querySelector('[data-cancel]').onclick = closeModal;
       m.querySelectorAll('[data-keygen]').forEach((b) => b.onclick = () => {
         if (!window.WGKey) { toast(L('密钥生成器未加载', 'Key generator unavailable'), 'err'); return; }

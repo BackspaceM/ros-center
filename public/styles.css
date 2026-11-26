@@ -288,14 +288,28 @@ button { cursor: pointer; }
 .sidebar.collapsed .brand-name, .sidebar.collapsed .side-search, .sidebar.collapsed .nav-label,
 .sidebar.collapsed .nav-group-title, .sidebar.collapsed .side-status span:last-child,
 .sidebar.collapsed .side-foot-actions, .sidebar.collapsed .nav-fold-bar { display: none; }
-.sidebar.collapsed .nav-group.collapsed .nav-items { display: block !important; }
+/* 收缩态：默认隐藏全部子项；点击父组图标才向右弹出浮层 */
+.sidebar.collapsed .nav-items { display: none !important; }
+.sidebar.collapsed .nav-group.flyout-open .nav-items {
+  display: block !important; position: absolute; left: calc(100% - 4px); top: 0; z-index: 60;
+  min-width: 190px; max-height: 70vh; overflow-y: auto;
+  padding: 8px; margin: 0; border-radius: 10px;
+  background: var(--side); border: 1px solid var(--side-line);
+  box-shadow: 0 12px 32px rgba(0,0,0,.24);
+}
+.sidebar.collapsed .nav-group.flyout-open .nav-item { justify-content: flex-start; padding: 0 11px; }
+.sidebar.collapsed .nav-group.flyout-open .nav-item .nav-label { display: block; }
+.sidebar.collapsed .nav-group.flyout-open .nav-icon { margin: 0; }
 .sidebar.collapsed .side-brand { justify-content: center; padding: 14px 0; }
+/* 收缩态侧栏不滚动，避免浮层被 overflow 裁剪 */
+.sidebar.collapsed .side-nav { overflow: visible; }
 .nav-group-mini { display: none; }
 .sidebar.collapsed .nav-group-mini {
   display: flex; align-items: center; justify-content: center; width: 38px; height: 26px;
   margin: 8px auto 2px; padding: 0 0 5px; border: 0; border-bottom: 1px solid var(--side-line);
   background: none; color: var(--side-muted); cursor: pointer;
 }
+.sidebar.collapsed .nav-group.flyout-open > .nav-group-mini { color: var(--blue); background: var(--side-hover); border-radius: 7px; }
 .sidebar.collapsed .nav-group:first-child .nav-group-mini { margin-top: 2px; }
 .sidebar.collapsed .nav-group-mini:hover { color: var(--blue); }
 .sidebar.collapsed .nav-item { justify-content: center; padding: 0; }
@@ -349,7 +363,10 @@ button { cursor: pointer; }
 .nav-fold-bar span { flex: 1; }
 .nav-fold-bar button { width: 22px; height: 22px; flex: none; border-radius: 5px; border: 1px solid var(--side-line); background: var(--side-2); color: var(--side-ink); font-size: 13px; line-height: 1; }
 .nav-fold-bar button:hover { color: var(--side-bright); border-color: var(--side-muted); }
-.nav-group { margin-bottom: 10px; }
+.nav-group { margin-bottom: 10px; position: relative; }
+/* 展开态：父组标题前置图标 */
+.nav-group-title > .nav-icon { width: 14px; height: 14px; flex: none; opacity: .85; color: var(--side-muted); }
+.nav-group.has-active .nav-group-title > .nav-icon { color: var(--blue); opacity: 1; }
 .nav-group-title {
   width: 100%; display: flex; align-items: center; gap: 7px; padding: 8px 10px 6px;
   font-size: 10.5px; font-weight: 600; letter-spacing: .5px; color: var(--side-muted);
@@ -1842,3 +1859,11 @@ select:not([hidden]) option { background: var(--card); color: var(--ink); font-w
 :root[data-scheme="dark"] .anim-select-wrap select {
   background: transparent; color: var(--ink); background-image: none;
 }
+
+/* 通用表单（参照 DHCP 租约弹窗）：跨整行字段 + textarea */
+.lease-card--wide { grid-column: 1 / -1; }
+.lease-card textarea { width:100%; min-height:74px; padding:8px 10px; border:1px solid var(--line);
+  border-radius:7px; background:var(--input); color:var(--ink); font-size:12px; resize:vertical;
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+.lease-card textarea:focus { border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent); }
+.lease-card .form-hint { margin:3px 0 0; font-size:10px; color:var(--muted); line-height:1.4; }
