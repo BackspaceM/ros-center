@@ -155,14 +155,12 @@
       <div class="page-head">
         <div><h1>${esc(L('IP 流量监控', 'IP traffic monitor'))}</h1>
           <p>${esc(L('实时显示网络拓扑中开启了 IP 测速的设备上下行速率，每秒刷新。', 'Live up/down rates for topology devices with IP monitoring enabled, refreshed every second.'))}</p></div>
-        <div class="page-actions"><span class="tag" id="ipmStatus">—</span>
-          <button class="btn" id="ipmTopo" type="button">${esc(L('在网络拓扑中设置', 'Configure in topology'))}</button></div>
       </div>
       <div class="ipm-note">${esc(L('只有在网络拓扑的设备编辑里勾选「按 IP 实时测速」并填写 IP 才会显示在这里；默认全部关闭，不增加路由器配置负担。', 'Only devices with "Live rate by IP" enabled and a valid IP in the topology editor appear here. Off by default; no router configuration changes.'))}</div>
+      <div class="scope-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>${esc(L('说明：此处速率仅统计经过路由器的外部流量；设备间二层内网直连（如本机 ↔ NAS）不经过路由器，因此不计入。', 'Note: the rates shown here cover only external traffic passing through the router. Layer-2 LAN transfers between devices (e.g. local ↔ NAS) bypass the router and are not counted.'))}</span></div>
       <div class="ipm-error" id="ipmError" hidden></div>
       <div class="ipm-grid" id="ipmGrid"></div>
       <div class="empty" id="ipmEmpty" hidden>${esc(L('暂无设备开启 IP 测速。请到网络拓扑中编辑设备，填写 IP 并勾选「按 IP 实时测速」。', 'No devices with IP monitoring yet. Edit a device in the topology, enter its IP and enable "Live rate by IP".'))}</div>`;
-    $('ipmTopo').onclick = () => navigate('topology');
     order = readOrder();
     loadIcons().then(refresh);
     timer = setInterval(refresh, 1000);

@@ -9,6 +9,17 @@ const nameKeyOf = (v) => String(v == null ? '' : v).toLowerCase().trim();
 let topoIconLookup = { device: '', at: 0, byMac: new Map(), byIp: new Map(), byName: new Map() };
 /* DHCP 租约复用拓扑设备的实时上下行：按 IP / 接口建速率索引，随配置表自动刷新 */
 let leaseRates = { device: '', at: 0, byIp: new Map(), byIface: new Map() };
+/* DHCP 服务端下拉选项：从当前连接路由的 /ip/dhcp-server 读取 name，短缓存 */
+let dhcpServerCache = { device: '', at: 0, names: [] };
+async function loadDhcpServers() {
+  const dev = state.deviceId || '';
+  if (dhcpServerCache.device === dev && Date.now() - dhcpServerCache.at < 30000) return dhcpServerCache.names;
+  try {
+    const d = await api('/api/config?section=dhcpServers');
+    dhcpServerCache = { device: dev, at: Date.now(), names: (d.rows || []).map((r) => String(r.name || '')).filter(Boolean) };
+  } catch (e) { dhcpServerCache = { device: dev, at: Date.now(), names: [] }; }
+  return dhcpServerCache.names;
+}
 
 async function loadTopoIcons(sec) {
   const need = (sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key));
@@ -74,8 +85,8 @@ const colsKey = (sec) => 'rosCenter.cols.' + (state.deviceId || '') + '.' + sec.
 function availableColumns(sec) {
   const keys = (sec.fields || []).map((f) => f.key).filter((k) => k !== '.id');
   if ((sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key)) && !keys.includes('topoName')) keys.push('topoName');
-  /* DHCP 租约：可复用拓扑设备的实时上下行 */
-  if (sec.id === 'dhcpLeases') for (const k of ['rateUp', 'rateDown']) if (!keys.includes(k)) keys.push(k);
+  /* DHCP 租约：可复用拓扑设备的实时上下行与设备类型（RouterOS 无此字段） */
+  if (sec.id === 'dhcpLeases') for (const k of ['topoType', 'rateUp', 'rateDown']) if (!keys.includes(k)) keys.push(k);
   return keys;
 }
 function visibleColumns(sec) {
@@ -90,14 +101,34 @@ function openColumnSettings(sec) {
   const all = availableColumns(sec), cur = visibleColumns(sec);
   const order = [...cur, ...all.filter((k) => !cur.includes(k))];
   let checked = new Set(cur);
-  openModal(L('表头字段', 'Table columns'),
-    `<div class="col-editor"><p class="col-editor-tip">${esc(L('勾选要显示的字段；要调整顺序，请直接在表格上拖动表头。设置按当前设备与分类保存。', 'Pick visible columns; drag the table headers directly to reorder. Saved per device and section.'))}</p>
-      <div class="col-editor-list">${order.map((k) => `<div class="col-editor-row"><label><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label></div>`).join('')}</div></div>`,
+  const isLease = sec && sec.id === 'dhcpLeases';
+  const intro = `<div class="lease-intro">
+    <div class="lease-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg></div>
+    <div><b>${esc(L('表头字段', 'Table columns'))}</b><p>${esc(L('勾选要显示的字段；要调整顺序，请直接在表格上拖动表头。设置按当前设备与分类保存。', 'Pick visible columns; drag the table headers directly to reorder. Saved per device and section.'))}</p></div>
+  </div>`;
+  const toolbar = `<div class="picker-toolbar"><div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input type="text" id="colSearch" placeholder="${esc(L('搜索字段…', 'Search fields…'))}"></div>
+    <div class="picker-quick"><button class="btn btn-sm" type="button" id="colAll">${esc(L('全选', 'Select all'))}</button><button class="btn btn-sm" type="button" id="colNone">${esc(L('全不选', 'None'))}</button></div></div>`;
+  const listHtml = isLease
+    ? `<div class="col-gradio">${order.map((k) => `<label class="col-gcard${checked.has(k) ? ' checked' : ''}" data-name="${esc(fieldLabel(sec, k) + ' ' + k).toLowerCase()}"><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label>`).join('')}</div>`
+    : `<div class="col-editor-list">${order.map((k) => `<div class="col-editor-row" data-name="${esc(fieldLabel(sec, k) + ' ' + k).toLowerCase()}"><label><input type="checkbox" class="col-chk" data-col="${esc(k)}" ${checked.has(k) ? 'checked' : ''}><span>${esc(fieldLabel(sec, k))}</span><small>${esc(k)}</small></label></div>`).join('')}</div>`;
+  const bodyHtml = isLease
+    ? intro + toolbar + listHtml
+    : `<div class="col-editor"><p class="col-editor-tip">${esc(L('勾选要显示的字段；要调整顺序，请直接在表格上拖动表头。设置按当前设备与分类保存。', 'Pick visible columns; drag the table headers directly to reorder. Saved per device and section.'))}</p>${toolbar}${listHtml}</div>`;
+  openModal(L('表头字段', 'Table columns'), bodyHtml,
     `<button class="btn" data-reset type="button">${esc(L('恢复默认', 'Reset'))}</button><button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" data-save type="button">${esc(t('confirm'))}</button>`,
     (m) => {
       m.querySelectorAll('[data-col]').forEach((c) => {
-        c.onchange = () => { c.checked ? checked.add(c.dataset.col) : checked.delete(c.dataset.col); };
+        c.onchange = () => { c.checked ? checked.add(c.dataset.col) : checked.delete(c.dataset.col); if (isLease) c.closest('.col-gcard').classList.toggle('checked', c.checked); };
       });
+      const cs = m.querySelector('#colSearch');
+      if (cs) cs.oninput = () => {
+        const q = cs.value.trim().toLowerCase();
+        m.querySelectorAll(isLease ? '.col-gcard' : '.col-editor-row').forEach((el) => { el.style.display = !q || el.dataset.name.includes(q) ? '' : 'none'; });
+      };
+      const ca = m.querySelector('#colAll'), cn = m.querySelector('#colNone');
+      if (ca) ca.onclick = () => { m.querySelectorAll('[data-col]').forEach((c) => { c.checked = true; c.onchange(); }); };
+      if (cn) cn.onclick = () => { m.querySelectorAll('[data-col]').forEach((c) => { c.checked = false; c.onchange(); }); };
       m.querySelector('[data-reset]').onclick = () => {
         localStorage.removeItem(colsKey(sec)); closeModal(); renderConfigPage(sec);
       };
@@ -193,6 +224,7 @@ function renderConfigPage(sec) {
       </div>
     </div>
     ${state.configDemo ? `<div class="card" style="margin-bottom:14px;padding:10px 14px;font-size:11.5px;color:var(--muted);background:var(--soft);border:1px solid var(--line)"><span class="tag amber" style="margin-right:8px">DEMO</span>${t('demo_mode_tip')}</div>` : ''}
+    ${sec.id === 'dhcpLeases' ? `<div class="scope-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>${esc(L('说明：此处速率仅统计经过路由器的外部流量；设备间二层内网直连（如本机 ↔ NAS）不经过路由器，因此不计入。', 'Note: the rates shown here cover only external traffic passing through the router. Layer-2 LAN transfers between devices (e.g. local ↔ NAS) bypass the router and are not counted.'))}</span></div>` : ''}
     <div class="panel">
       <div class="table-tools">
         <input type="search" id="rowSearch" placeholder="${t('search')}…" value="${esc(state.rowFilter)}">
@@ -278,6 +310,7 @@ function fieldLabel(sec, key) {
   if (key === 'running') return L('运行', 'Running');
   if (key === '.id') return 'ID';
   if (key === 'topoName') return L('设备名', 'Device name');
+  if (key === 'topoType') return L('设备类型', 'Device type');
   if (key === 'rateUp') return L('上行', 'Upload');
   if (key === 'rateDown') return L('下行', 'Download');
   const f = sec.fields.find((x) => x.key === key);
@@ -364,6 +397,15 @@ function cellHtml(row, key, sec) {
       ? `<span class="topo-name-cell" title="${esc(n.name)}">${esc(n.name)}</span>`
       : '<span class="muted-cell">—</span>';
   }
+  if (key === 'topoType') {
+    const n = topoNodeFor(row, row['mac-address']);
+    const map = { router: L('路由器', 'Router'), switch: L('交换机', 'Switch'), ap: L('无线 AP', 'Access point'),
+      nas: L('NAS / 存储', 'NAS / storage'), dns: L('DNS 服务器', 'DNS server'), proxy: L('代理服务器', 'Proxy server'),
+      client: L('终端', 'Client'), other: L('其它', 'Other') };
+    return n && n.type
+      ? `<span class="tag" title="${esc(n.type)}">${esc(map[n.type] || n.type)}</span>`
+      : '<span class="muted-cell">—</span>';
+  }
   if ((key === 'rateUp' || key === 'rateDown') && sec && sec.id === 'dhcpLeases') {
     const r = leaseRateFor(row);
     if (!r) return '<span class="muted-cell">—</span>';
@@ -389,6 +431,16 @@ function cellHtml(row, key, sec) {
     }
     return fmtBytes(v);
   }
+  if (key === 'comment' && sec && sec.id === 'dhcpLeases' && String(v || '').startsWith('ROS-TOPO-v1:')) {
+    /* 拓扑同步的租约：comment 里是编码元数据，显示紧凑徽标 + 用户原备注 */
+    let uc = '';
+    try {
+      let b = String(v).slice('ROS-TOPO-v1:'.length).replace(/-/g, '+').replace(/_/g, '/');
+      while (b.length % 4) b += '=';
+      const m = JSON.parse(decodeURIComponent(escape(atob(b)))); uc = m.uc || '';
+    } catch (e) { /* ignore */ }
+    return `<span class="tag blue" title="${esc(L('由网络拓扑同步生成', 'Synced from network topology'))}">${esc(L('拓扑同步', 'Topo sync'))}</span>${uc ? ' ' + esc(uc) : ''}`;
+  }
   if (key === 'password' || key === 'private-key' || /pre-?shared-key/.test(key)) return '<span class="tag">••••••••</span>';
   const f = sec.fields.find((x) => x.key === key);
   if (f && f.type === 'bool') return boolOn(v) ? `<span class="tag blue">✓</span>` : '';
@@ -397,8 +449,104 @@ function cellHtml(row, key, sec) {
   return esc(v == null || v === '' ? '—' : v);
 }
 
+/* ================= DHCP 租约专用编辑弹窗（分区卡片风格，与拓扑动画设置一致） ================= */
+function openLeaseForm(sec, row) {
+  const isEdit = !!row;
+  const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
+  const val = (k) => (row && row[k] != null ? row[k] : '');
+  /* 按 RouterOS 界面顺序分组，字段 key → 分组 */
+  const GROUPS = [
+    [L('基本信息', 'General'), 'blue', ['disabled', 'comment', 'address', 'mac-address', 'use-src-mac', 'client-id', 'agent-circuit-id', 'agent-remote-id']],
+    [L('服务端与租期', 'Server & lease'), 'green', ['server', 'lease-time', 'blocked', 'always-broadcast']],
+    [L('DHCP 选项', 'DHCP options'), 'violet', ['dhcp-option', 'dhcp-option-set', 'rate-limit', 'routes', 'address-list']],
+    [L('队列与其它', 'Queue & more'), 'amber', ['allow-dual-stack-queue', 'insert-queue-before', 'host-name', 'status']],
+  ];
+  const fieldById = new Map(fields.map((f) => [f.key, f]));
+  const inputFor = (f) => {
+    const v = val(f.key), id = 'f_' + f.key;
+    const label = esc(tx(f.label));
+    if (f.type === 'bool' || f.type === 'bool-invert') {
+      const on = f.type === 'bool-invert' ? !boolOn(v) : boolOn(v);
+      return `<div class="lease-card" data-name="${esc(label + ' ' + f.key).toLowerCase()}">
+        <div class="lease-switch"><span>${label}</span><label class="upd-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><i></i></label></div>
+      </div>`;
+    }
+    if (f.type === 'readonly') return `<div class="lease-card" data-name="${esc(label + ' ' + f.key).toLowerCase()}">
+      <label>${label} <small>${esc(f.key)}</small></label><input type="text" id="${id}" value="${esc(v || '—')}" disabled></div>`;
+    const opts = f.type === 'interface' ? (fieldOptions(sec).interfaces || []) : (f.options || []);
+    let ctrl;
+    if (f.key === 'server') {
+      /* 服务端：下拉，选项来自当前连接路由的 DHCP 服务端列表 */
+      ctrl = `<select id="${id}" data-dhcp-server-select><option value="${esc(v)}">${esc(v || L('加载中…', 'Loading…'))}</option></select>`;
+    } else if (f.type === 'select' || f.type === 'interface') {
+      ctrl = `<select id="${id}"><option value=""></option>${opts.map((o) => `<option value="${esc(o)}" ${String(v) === o ? 'selected' : ''}>${esc(o || '—')}</option>`).join('')}</select>`;
+    } else {
+      ctrl = `<input type="text" id="${id}" value="${esc(v)}" placeholder="${esc(f.placeholder || f.key)}" ${f.required ? 'data-required="1"' : ''}>`;
+    }
+    return `<div class="lease-card" data-name="${esc(label + ' ' + f.key).toLowerCase()}">
+      <label>${label}${f.required ? ' <span class="req">*</span>' : ''} <small>${esc(f.key)}</small></label>${ctrl}</div>`;
+  };
+  const body = `
+    <div class="lease-intro">
+      <div class="lease-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2" fill="var(--card)"/><circle cx="15" cy="12" r="2" fill="var(--card)"/><circle cx="11" cy="17" r="2" fill="var(--card)"/></svg></div>
+      <div><b>${esc(isEdit ? L('编辑 DHCP 租约', 'Edit DHCP lease') : L('新增 DHCP 租约', 'Add DHCP lease'))} · ${esc(val('address') || L('新租约', 'New lease'))}</b>
+        <p>${esc(L('字段与 RouterOS /DHCP Server/Leases 一致；修改后会自动同步到网络拓扑（以 MAC 为锚点）。', 'Fields match RouterOS /DHCP Server/Leases; changes sync back to the topology (anchored by MAC).'))}</p></div>
+    </div>
+    <div class="picker-toolbar">
+      <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="text" id="leaseSearch" placeholder="${esc(L('搜索字段…', 'Search fields…'))}"></div>
+    </div>
+    <div class="lease-form-wrap">
+      ${GROUPS.map(([title, color, keys]) => {
+        const cards = keys.map((k) => fieldById.get(k)).filter(Boolean).map(inputFor).join('');
+        if (!cards) return '';
+        return `<div class="lease-group" data-group-name="${esc(title).toLowerCase()}"><div class="lease-group-title"><i style="background:var(--${color})"></i>${esc(title)} <small>${esc(L('RouterOS 字段', 'RouterOS fields'))}</small></div><div class="lease-grid">${cards}</div></div>`;
+      }).join('')}
+    </div>`;
+  const foot = `<span class="picker-summary">${esc(L('共 ', ''))}${fields.length}${esc(L(' 个字段', ' fields'))}</span>
+    <button class="btn" data-close type="button">${esc(t('cancel'))}</button><button class="btn primary" id="leaseSave" type="button">${esc(t('save'))}</button>`;
+  openModal((isEdit ? t('edit_title') : t('add_title')) + ' · ' + tx(sec.title), body, foot, (m) => {
+    /* 服务端下拉：从当前路由读取 DHCP 服务端列表 */
+    loadDhcpServers().then((names) => {
+      const sel = m.querySelector('[data-dhcp-server-select]');
+      if (!sel || !m.isConnected) return;
+      const current = sel.value;
+      const opts = ['<option value=""></option>'];
+      for (const nm of names) opts.push(`<option value="${esc(nm)}" ${nm === current ? 'selected' : ''}>${esc(nm)}</option>`);
+      /* 若当前值不在列表里（历史租约指向已删除的服务端），保留它以免丢失 */
+      if (current && !names.includes(current)) opts.push(`<option value="${esc(current)}" selected>${esc(current)} (${esc(L('当前', 'current'))})</option>`);
+      sel.innerHTML = opts.join('');
+    });
+    const s = m.querySelector('#leaseSearch');
+    s.oninput = () => {
+      const q = s.value.trim().toLowerCase();
+      m.querySelectorAll('.lease-card').forEach((c) => { c.style.display = !q || c.dataset.name.includes(q) ? '' : 'none'; });
+    };
+    m.querySelector('#leaseSave').onclick = async () => {
+      const values = {};
+      for (const f of fields) {
+        if (f.type === 'readonly') continue;
+        const el = m.querySelector('#f_' + f.key); if (!el) continue;
+        if (f.required && !String(el.value).trim() && f.type !== 'bool' && f.type !== 'bool-invert') { toast(t('required'), 'err'); el.focus(); return; }
+        if (f.type === 'bool') values[f.key] = el.checked ? 'true' : 'false';
+        else if (f.type === 'bool-invert') values[f.key] = el.checked ? 'false' : 'true';
+        else if (String(el.value).trim()) values[f.key] = el.value.trim();
+        else if (isEdit) values[f.key] = '';
+      }
+      const payload = { section: sec.id, action: isEdit ? 'set' : 'add', values, syncTopology: true };
+      if (isEdit) payload.ids = [row['.id']];
+      try {
+        const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        closeModal(); toast(`${t('saved_ok')} (${r.changed || 1})`, 'ok');
+        await loadRows(sec); renderConfigPage(sec);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
 /* ================= 新增 / 编辑表单 ================= */
 function openForm(sec, row) {
+  if (sec && sec.id === 'dhcpLeases') return openLeaseForm(sec, row);
   const isEdit = !!row;
   const fields = sec.fields.filter((f) => f.key !== '.id' && f.type !== 'id');
   const opts = fieldOptions(sec);
@@ -551,20 +699,32 @@ function renderTools() {
         </div></div>
       <div class="panel"><div class="panel-head"><div><h2>${t('bak_tools_title')}</h2><p class="sub">${t('bak_tools_sub')}</p></div></div>
         <div class="panel-body backup-tools">
-          <div class="bak-group">
-            <div class="bak-group-head"><b>${t('bak_webui_title')}</b><small>${t('bak_webui_sub')}</small></div>
-            <div class="bak-actions">
-              <button class="btn primary" id="webuiBackupBtn" type="button">${t('bak_webui_export')}</button>
-              <button class="btn" id="webuiImportBtn" type="button">${t('bak_webui_import')}</button>
+          <article class="bak-card bak-app">
+            <div class="bak-card-main">
+              <span class="bak-badge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></span>
+              <div class="bak-copy">
+                <div class="bak-title-row"><b>${t('bak_webui_title')}</b><span class="bak-kind">${esc(L('WebUI 数据', 'WebUI data'))}</span></div>
+                <p class="bak-desc">${t('bak_webui_sub')}</p>
+              </div>
             </div>
-          </div>
-          <div class="bak-group">
-            <div class="bak-group-head"><b>${t('bak_ros_title')}</b><small>${t('bak_ros_sub')}</small></div>
             <div class="bak-actions">
-              <button class="btn" id="rosBackupBtn" type="button">${t('bak_ros_export')}</button>
-              <button class="btn ghost-danger" id="rosImportBtn" type="button">${t('bak_ros_import')}</button>
+              <button class="btn primary" id="webuiBackupBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>${t('bak_webui_export')}</button>
+              <button class="btn" id="webuiImportBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 19h16"/></svg>${t('bak_webui_import')}</button>
             </div>
-          </div>
+          </article>
+          <article class="bak-card bak-router">
+            <div class="bak-card-main">
+              <span class="bak-badge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 17h4M14 17h4"/><path d="M12 13V9M9 6a5 5 0 0 1 6 0"/></svg></span>
+              <div class="bak-copy">
+                <div class="bak-title-row"><b>${t('bak_ros_title')}</b><span class="bak-kind">${esc(L('路由器配置', 'Router config'))}</span></div>
+                <p class="bak-desc">${t('bak_ros_sub')}</p>
+              </div>
+            </div>
+            <div class="bak-actions">
+              <button class="btn bak-export" id="rosBackupBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>${t('bak_ros_export')}</button>
+              <button class="btn ghost-danger" id="rosImportBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 19h16"/></svg>${t('bak_ros_import')}</button>
+            </div>
+          </article>
           <input type="file" id="bakFileInput" accept=".json,.rsc,.txt" hidden>
           <div class="backup-status" id="backupStatus"></div>
         </div></div>

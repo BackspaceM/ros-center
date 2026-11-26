@@ -30,22 +30,62 @@ function blend(px, size, x, y, color, alpha) {
   px[i + 3] = Math.max(px[i + 3], Math.round(alpha * 255));
 }
 
-/* 返回 RGBA 像素（size*size*4） */
+/* 返回 RGBA 像素（size*size*4）
+   与 public/favicon.svg 同源：中心节点 + 三向连线的网络拓扑造型。
+   4x 超采样后降采样，保证小尺寸(16/32px)也清晰；桌面版 icns/ico 复用本函数。 */
 function renderRaw(size) {
-  const px = Buffer.alloc(size * size * 4);
-  const s = size / 64;
-  const bars = [
-    [17, 36, 5, 12, 0.60], [25, 28, 5, 20, 0.78],
-    [33, 32, 5, 16, 0.90], [41, 20, 5, 28, 1.00],
-  ];
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const vx = x / s, vy = y / s;
-      if (insideRound(vx, vy, 0, 0, 64, 64, 14)) blend(px, size, x, y, [0, 111, 255], 1);
-      for (const [bx, by, bw, bh, a] of bars) {
-        if (insideRound(vx, vy, bx, by, bw, bh, 2.5)) blend(px, size, x, y, [255, 255, 255], a);
+  const S = size * 4, sc = S / 64;
+  const buf = new Float64Array(S * S * 4);
+  const set = (x, y, c, a) => {
+    if (x < 0 || y < 0 || x >= S || y >= S || a <= 0) return;
+    const i = (y * S + x) * 4;
+    for (let k = 0; k < 3; k++) buf[i + k] = buf[i + k] * (1 - a) + c[k] * a;
+    buf[i + 3] = Math.min(1, buf[i + 3] + a);
+  };
+  const lerp = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+  const inRoundRect = (x, y, r) => {
+    const cx = Math.max(r, Math.min(S - r, x)), cy = Math.max(r, Math.min(S - r, y));
+    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r || (x >= r && x <= S - r && y >= r && y <= S - r);
+  };
+  const C0 = [10, 132, 255], C1 = [0, 86, 210], WHITE = [255, 255, 255], BLUE = [4, 102, 232];
+  /* 圆角矩形 + 对角渐变背景 */
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (!inRoundRect(x + .5, y + .5, 16 * sc)) continue;
+    set(x, y, lerp(C0, C1, (x / S + y / S) / 2), 1);
+  }
+  const line = (x1, y1, x2, y2, w) => {
+    const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) * 2);
+    for (let t = 0; t <= n; t++) {
+      const px = x1 + (x2 - x1) * t / n, py = y1 + (y2 - y1) * t / n;
+      for (let dy = -w * sc; dy <= w * sc; dy += sc) for (let dx = -w * sc; dx <= w * sc; dx += sc) {
+        if (dx * dx + dy * dy <= (w * sc) ** 2) set(Math.round(px + dx), Math.round(py + dy), WHITE, .82);
       }
     }
+  };
+  const circle = (cx, cy, r, col) => {
+    for (let y = Math.floor((cy - r) * sc); y <= Math.ceil((cy + r) * sc); y++)
+      for (let x = Math.floor((cx - r) * sc); x <= Math.ceil((cx + r) * sc); x++) {
+        const d = Math.hypot(x + .5 - cx * sc, y + .5 - cy * sc);
+        if (d <= r * sc) set(x, y, col, Math.min(1, (r * sc - d) + .5));
+      }
+  };
+  /* 三向连线 + 中心/卫星节点（坐标与 favicon.svg 一致） */
+  line(32 * sc, 32 * sc, 32 * sc, 15 * sc, 1.3);
+  line(32 * sc, 32 * sc, 15 * sc, 43 * sc, 1.3);
+  line(32 * sc, 32 * sc, 49 * sc, 43 * sc, 1.3);
+  circle(32, 14, 5, WHITE); circle(14, 44, 5, WHITE); circle(50, 44, 5, WHITE);
+  circle(32, 32, 9, WHITE); circle(32, 32, 4, BLUE);
+  /* 4x 降采样到目标尺寸 */
+  const px = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
+      const si = ((y * 4 + j) * S + (x * 4 + i)) * 4, alpha = buf[si + 3];
+      r += buf[si] * alpha; g += buf[si + 1] * alpha; b += buf[si + 2] * alpha; a += alpha;
+    }
+    const di = (y * size + x) * 4;
+    if (a > 0) { px[di] = Math.round(r / a); px[di + 1] = Math.round(g / a); px[di + 2] = Math.round(b / a); }
+    px[di + 3] = Math.round(a / 16 * 255);
   }
   return px;
 }

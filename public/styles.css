@@ -468,6 +468,12 @@ button { cursor: pointer; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .page-head h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.5px; line-height: 1.3; }
 .page-head p { margin: 5px 0 0; font-size: 12.5px; color: var(--muted); }
+/* 流量统计口径提示：拓扑 / IP 监控 / DHCP 租约三页共用，低调单行不抢主视觉 */
+.scope-note { display: flex; align-items: flex-start; gap: 7px; flex: none;
+  font-size: 11px; line-height: 1.6; color: var(--muted);
+  background: var(--soft); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 11px; margin-bottom: 12px; }
+.scope-note svg { flex: none; width: 13px; height: 13px; margin-top: 2px; opacity: .7; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 .btn {
@@ -934,6 +940,25 @@ tr.row-fail td { color: var(--red); }
 }
 .te-field input:focus, .te-field select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 12%, transparent); }
 .te-hint { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
+/* 拓扑编辑器：按 IP 测速滑动开关（复用 .upd-switch 轨道，主题自适应） */
+.te-switch-row { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:8px 11px; border:1px solid var(--line); border-radius:9px; background:var(--soft); cursor:pointer;
+  transition:border-color .15s, background .15s; }
+.te-switch-row:hover { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); }
+.te-switch-row:has(input:checked) { background:color-mix(in srgb,var(--blue) 7%,var(--soft)); border-color:color-mix(in srgb,var(--blue) 35%,var(--line)); }
+.te-switch-text { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.te-switch-text b { font-size:11.5px; font-weight:600; color:var(--ink); }
+.te-switch-text small { font-size:10.5px; color:var(--muted); line-height:1.4; }
+/* 拓扑顶栏：全部按 IP 测速滑动开关 + 图标按钮对齐（主题自适应） */
+.topo-ipall-switch { display:inline-flex; align-items:center; gap:9px; height:30px; padding:0 8px 0 11px;
+  border:1px solid var(--line); border-radius:7px; background:var(--input); cursor:pointer;
+  font-size:11.5px; color:var(--ink); transition:border-color .15s, background .15s; }
+.topo-ipall-switch:hover { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); }
+.topo-ipall-switch:has(input:checked) { border-color:color-mix(in srgb,var(--blue) 40%,var(--line)); background:color-mix(in srgb,var(--blue) 6%,var(--input)); }
+.topo-ipall-label { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.topo-ipall-label svg { color:var(--blue); flex:none; }
+.page-actions .btn svg { flex:none; vertical-align:-2px; margin-right:4px; }
+.page-actions .btn#topoAnimBtn svg { color:var(--violet); }
 .te-sec .topo-icon-picker, .te-sec .calc-list { margin-top: 0; }
 @media (max-width:640px) { .te-grid-2 { grid-template-columns: 1fr; } }
 
@@ -955,15 +980,109 @@ tr.row-fail td { color: var(--red); }
 @keyframes fxPulse { 0%,100% { stroke-width: 1.6; } 50% { stroke-width: 3.6; } }
 @keyframes fxRipple { from { opacity: .85; transform: scale(.5); } to { opacity: 0; transform: scale(2.1); } }
 
-/* 动画设置面板 */
-.anim-list { max-height: 380px; overflow: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; }
-.anim-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
-.anim-row:last-child { border-bottom: none; }
-.anim-row-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink); }
-.anim-row-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.anim-row-name small { color: var(--muted); font-size: 11px; flex: none; }
-.anim-row-name i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.anim-row select { width: 168px; flex: none; }
+/* ===== 批量设置面板（按IP测速 / 动画设置）：统一精致风格 ===== */
+.picker-toolbar { display:flex; align-items:center; gap:10px; margin:2px 0 12px; }
+.picker-search { flex:1; display:flex; align-items:center; gap:8px; height:34px; padding:0 11px;
+  border:1px solid var(--line); border-radius:8px; background:var(--input); color:var(--muted); }
+.picker-search:focus-within { border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent); }
+.picker-search svg { flex:none; }
+.picker-search input { flex:1; min-width:0; border:0; outline:0; background:transparent; color:var(--ink); font-size:12px; }
+.picker-search input::placeholder { color:var(--muted); }
+.picker-quick { display:flex; gap:6px; flex:none; }
+.picker-quick .btn { height:34px; padding:0 11px; }
+
+/* 按 IP 测速：可点选设备列表 */
+.picker-list { max-height:400px; overflow:auto; display:flex; flex-direction:column; gap:6px;
+  padding:3px; border:1px solid var(--line); border-radius:10px; background:var(--soft); }
+.picker-row { display:flex; align-items:center; gap:11px; padding:9px 12px; border:1px solid transparent;
+  border-radius:8px; background:var(--card); cursor:pointer; transition:border-color .14s, background .14s; }
+.picker-row:hover { border-color:color-mix(in srgb,var(--blue) 35%,var(--line)); }
+.picker-row:has(input:checked) { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); background:color-mix(in srgb,var(--blue) 6%,var(--card)); }
+.picker-row.disabled { opacity:.5; cursor:not-allowed; }
+.picker-icon { width:28px; height:28px; border-radius:7px; flex:none; }
+.picker-icon::before { content:''; display:block; width:14px; height:14px; margin:7px auto; border-radius:50%; background:currentColor; opacity:.75; }
+.picker-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.picker-info b { font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.picker-info small { font-size:10.5px; color:var(--muted); }
+.picker-tag { font-size:10px; color:var(--amber); flex:none; }
+.picker-summary { flex:1; font-size:11.5px; color:var(--muted); }
+.picker-summary b { color:var(--blue); font-weight:700; }
+.topo-ipall-btn { display:inline-flex; align-items:center; gap:5px; }
+.topo-ipall-btn svg { color:var(--blue); flex:none; }
+.topo-ipall-count { min-width:17px; height:17px; padding:0 5px; border-radius:999px; display:inline-grid; place-items:center;
+  font-size:10px; font-weight:700; color:#fff; background:var(--blue); }
+.topo-ipall-count.zero { background:var(--muted); }
+
+/* 动画设置：卡片网格 */
+.anim-intro { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-bottom:14px;
+  border:1px solid color-mix(in srgb,var(--violet) 25%,var(--line)); border-radius:10px;
+  background:color-mix(in srgb,var(--violet) 7%,var(--card)); }
+.anim-intro-icon { width:38px; height:38px; flex:none; display:grid; place-items:center; border-radius:9px;
+  color:var(--violet); background:color-mix(in srgb,var(--violet) 14%,var(--card)); }
+.anim-intro b { font-size:12.5px; color:var(--ink); }
+.anim-intro p { margin:3px 0 0; font-size:11px; color:var(--muted); line-height:1.5; }
+.anim-grid { max-height:390px; overflow:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px;
+  padding:3px; }
+.anim-card { display:flex; flex-direction:column; gap:9px; padding:11px 12px;
+  border:1px solid var(--line); border-radius:10px; background:var(--card);
+  transition:border-color .14s, box-shadow .14s; }
+.anim-card:hover { border-color:color-mix(in srgb,var(--violet) 45%,var(--line)); box-shadow:0 2px 8px rgba(16,24,40,.05); }
+.anim-card-main { display:flex; align-items:center; gap:9px; }
+.anim-card-icon { width:26px; height:26px; border-radius:7px; flex:none; }
+.anim-card-icon::before { content:''; display:block; width:12px; height:12px; margin:7px auto; border-radius:50%; background:currentColor; opacity:.75; }
+.anim-card-info { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.anim-card-info b { font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.anim-card-info small { font-size:10.5px; color:var(--muted); }
+.anim-card-ctrl { display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding-top:8px; border-top:1px dashed var(--line); }
+.anim-card-label { font-size:10.5px; color:var(--muted); flex:none; }
+.anim-select-wrap { position:relative; min-width:118px; }
+.anim-current { display:block; height:28px; line-height:28px; padding:0 26px 0 9px; border:1px solid var(--line);
+  border-radius:7px; background:var(--soft); color:var(--violet); font-size:11.5px; font-weight:600;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.anim-select-wrap::after { content:'▾'; position:absolute; right:9px; top:5px; color:var(--muted); pointer-events:none; font-size:11px; }
+.anim-select-wrap select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+@media (max-width:560px) { .anim-grid { grid-template-columns:1fr; } }
+
+/* DHCP 租约编辑 / 列设置：与拓扑动画设置同款的分区卡片弹窗 */
+.lease-intro { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-bottom:14px;
+  border:1px solid color-mix(in srgb,var(--blue) 25%,var(--line)); border-radius:10px;
+  background:color-mix(in srgb,var(--blue) 7%,var(--card)); }
+.lease-intro-icon { width:38px; height:38px; flex:none; display:grid; place-items:center; border-radius:9px;
+  color:var(--blue); background:color-mix(in srgb,var(--blue) 14%,var(--card)); }
+.lease-intro b { font-size:12.5px; color:var(--ink); }
+.lease-intro p { margin:3px 0 0; font-size:11px; color:var(--muted); line-height:1.5; }
+.lease-group { margin-bottom:13px; }
+.lease-group-title { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; color:var(--ink); margin:0 0 8px; }
+.lease-group-title i { width:7px; height:7px; border-radius:50%; background:var(--blue); flex:none; }
+.lease-group-title small { font-weight:400; color:var(--muted); font-size:10.5px; }
+.lease-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.lease-card { display:flex; flex-direction:column; gap:5px; padding:9px 11px; border:1px solid var(--line);
+  border-radius:9px; background:var(--card); transition:border-color .14s, box-shadow .14s; }
+.lease-card:hover { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); box-shadow:0 2px 8px rgba(16,24,40,.05); }
+.lease-card.full { grid-column:1 / -1; }
+.lease-card label { font-size:10.5px; color:var(--muted); display:flex; align-items:center; gap:5px; }
+.lease-card label small { color:var(--muted); opacity:.65; font-size:9.5px; }
+.lease-card input[type=text], .lease-card input[type=number], .lease-card select { width:100%; height:31px;
+  padding:0 10px; border:1px solid var(--line); border-radius:7px; background:var(--soft); color:var(--ink); font-size:12px; outline:0; }
+.lease-card input:focus, .lease-card select:focus { border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent); }
+.lease-card input[disabled] { color:var(--muted); background:var(--soft); }
+.lease-card .lease-switch { display:flex; align-items:center; justify-content:space-between; gap:8px; height:31px; }
+.lease-card .lease-switch > span { font-size:11.5px; color:var(--ink); }
+.lease-card .form-check { display:flex; align-items:center; gap:7px; }
+.lease-form-wrap { max-height:min(60vh,560px); overflow:auto; padding:2px; }
+@media (max-width:560px) { .lease-grid { grid-template-columns:1fr; } }
+
+/* 列设置卡片化（DHCP 租约页与动画设置同风格；其它分类沿用原列表） */
+.col-gradio { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-height:340px; overflow:auto; padding:2px; }
+.col-gcard { display:flex; align-items:center; gap:9px; padding:9px 11px; border:1px solid var(--line);
+  border-radius:9px; background:var(--card); cursor:pointer; transition:border-color .14s, background .14s; }
+.col-gcard:hover { border-color:color-mix(in srgb,var(--blue) 45%,var(--line)); }
+.col-gcard.checked { border-color:color-mix(in srgb,var(--blue) 55%,var(--line)); background:color-mix(in srgb,var(--blue) 6%,var(--card)); }
+.col-gcard input { accent-color:var(--blue); flex:none; }
+.col-gcard span { font-size:11.5px; color:var(--ink); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.col-gcard small { font-size:9.5px; color:var(--muted); flex:none; }
+@media (max-width:560px) { .col-gradio { grid-template-columns:1fr; } }
 .topo-fx-name { color: var(--blue); }
 .btn:active { transform: scale(.97); }
 .modal { animation: modalIn .22s cubic-bezier(.2,.8,.2,1); }
@@ -1584,13 +1703,38 @@ th:hover > .rz-col { opacity: .55; }
 .qt-row .btn { flex: none; padding: 0 8px; color: var(--muted); font-size: 15px; }
 .backup-status { display: flex; flex-direction: column; gap: 3px; margin-top: 14px; padding: 10px 12px;
   border: 1px solid var(--panel-border); border-radius: 9px; background: var(--soft); }
-.backup-tools { display: flex; flex-direction: column; gap: 12px; }
-.bak-group { padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); }
-.bak-group-head { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
-.bak-group-head b { font-size: 12.5px; color: var(--ink); }
-.bak-group-head small { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
-.bak-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.bak-actions .btn { flex: 1 1 130px; }
+/* 运维工具 · 备份与导入：双主题卡片，ROS Center（蓝）/ RouterOS（绿）风格区分 */
+.backup-tools { display: flex; flex-direction: column; gap: 10px; }
+.bak-card { --bak-accent: var(--blue); --bak-soft: var(--blue-soft);
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 11px; background: var(--card);
+  position: relative; overflow: hidden; transition: border-color .16s, box-shadow .16s; }
+.bak-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--bak-accent); }
+.bak-card:hover { border-color: color-mix(in srgb, var(--bak-accent) 40%, var(--line));
+  box-shadow: 0 3px 12px rgba(16, 24, 40, .05); }
+.bak-router { --bak-accent: var(--green); --bak-soft: var(--green-soft); }
+.bak-card-main { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
+.bak-badge { width: 36px; height: 36px; flex: none; display: grid; place-items: center;
+  border-radius: 9px; background: var(--bak-soft); color: var(--bak-accent); }
+.bak-badge svg { width: 18px; height: 18px; }
+.bak-copy { min-width: 0; }
+.bak-title-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.bak-title-row b { font-size: 12.5px; color: var(--ink); }
+.bak-kind { font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
+  background: var(--bak-soft); color: var(--bak-accent); }
+.bak-desc { margin: 3px 0 0; font-size: 10.5px; line-height: 1.5; color: var(--muted); }
+.bak-actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.bak-actions .btn { min-width: 112px; height: 30px; padding: 0 9px; font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.bak-actions .btn svg { width: 13px; height: 13px; flex: none; }
+.bak-router .bak-export { background: var(--green); border-color: var(--green); color: var(--on-accent); }
+.bak-router .bak-export:hover { background: color-mix(in srgb, var(--green) 88%, #000);
+  border-color: color-mix(in srgb, var(--green) 88%, #000); }
+@media (max-width: 1180px) {
+  .bak-card { flex-direction: column; align-items: stretch; }
+  .bak-actions { flex-direction: row; }
+  .bak-actions .btn { flex: 1; }
+}
 .backup-status b { font-size: 12px; }
 .backup-status span { font-size: 11.5px; color: var(--ink); }
 .backup-status small { font-size: 10px; color: var(--muted); }

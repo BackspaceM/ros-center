@@ -213,6 +213,57 @@ class RouterOSAPI {
   }
 }
 
+/* ================= 极简 FTP 客户端（零依赖，仅用于读取 RouterOS 导出的 .rsc） =================
+   RouterOS v7 的 /export 经 API 只回空 !done，内容不进 !re；/file/print 对 >4KB 文件
+   也不返回 contents。标准做法是 /export file=xxx 写文件，再用 FTP RETR 读回。
+   RouterOS FTP 服务与 API 共用同一套用户凭据。这里只实现登录 + PASV + RETR + DELE。 */
+function ftpRetrieve(cfg, remoteName, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const port = Number(cfg.ftpPort || 21);
+    const ctrl = net.connect({ host: cfg.host, port }, () => { /* 等 220 */ });
+    let done = false, step = 0, pendingData = '';
+    const timer = setTimeout(() => finish(new Error('FTP 读取超时 / FTP timeout')), timeoutMs);
+    const finish = (err, text) => {
+      if (done) return; done = true; clearTimeout(timer);
+      try { ctrl.destroy(); } catch (e) { /* ignore */ }
+      if (err) reject(err); else resolve(text);
+    };
+    const send = (cmd) => { try { ctrl.write(cmd + '\r\n'); } catch (e) { finish(e); } };
+    ctrl.on('error', (e) => finish(e));
+    ctrl.on('data', (chunk) => {
+      pendingData += chunk.toString('utf8');
+      const lines = pendingData.split('\r\n');
+      while (lines.length && lines[lines.length - 1] === '') lines.pop();
+      const last = lines[lines.length - 1];
+      if (!last || !/^\d{3}( |$)/.test(last)) return;   // 还没收到完整响应行
+      pendingData = '';
+      const code = parseInt(last.slice(0, 3), 10);
+      if (code >= 400 && step !== 5) return finish(new Error('FTP ' + code + ': ' + last.slice(4)));
+      if (step === 0) { step = 1; send('USER ' + String(cfg.user || '')); }
+      else if (step === 1) { step = 2; send('PASS ' + String(cfg.password || '')); }
+      else if (step === 2) { step = 3; send('TYPE I'); }
+      else if (step === 3) { step = 4; send('PASV'); }
+      else if (step === 4) {
+        const m = last.match(/(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)/);
+        if (!m) return finish(new Error('FTP PASV 响应无法解析'));
+        const host = m[1] + '.' + m[2] + '.' + m[3] + '.' + m[4];
+        const dport = (parseInt(m[5], 10) << 8) | parseInt(m[6], 10);
+        step = 5;
+        const dataSock = net.connect({ host, port: dport }, () => { step = 6; send('RETR ' + remoteName); });
+        let buffers = [];
+        dataSock.on('data', (b) => buffers.push(b));
+        dataSock.on('error', (e) => finish(e));
+        dataSock.on('end', () => {
+          const text = Buffer.concat(buffers).toString('utf8');
+          /* 读完后删除路由器上的临时文件，避免堆积；删除失败不影响结果 */
+          step = 7; send('DELE ' + remoteName);
+          finish(null, text);
+        });
+      }
+    });
+  });
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -337,7 +388,9 @@ function customTopology(dev) {
 /* ================= 拓扑按 IP 实时测速 =================
    仅在拓扑节点显式开启 ipRate 且填了 IP 时采集：读连接表 orig-bytes / repl-bytes，
    按 IP 聚合后与上一秒快照求差得到上下行 bps。默认全部关闭，零路由器改动。 */
-const IP_RATE_INTERVAL = Math.max(1000, envNum('IP_RATE_INTERVAL_MS', 1000));
+/* 采样间隔 600ms（下限 400ms）：更快捕捉速率变化，降低显示延迟。
+   逐连接差分 + 短窗口平滑仍保留，抖动可控。 */
+const IP_RATE_INTERVAL = Math.max(400, envNum('IP_RATE_INTERVAL_MS', 600));
 let ipRateTimer = null;
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 function ipOf(addr) {
@@ -573,13 +626,13 @@ async function pollIpRates() {
         const d = delta.get(ip) || zero;
         upBytes += d.up; downBytes += d.down; conns += hitCount.get(ip) || 0;
       }
-      /* 3 秒滑动窗口：把最近 N 次的每秒字节增量累加再除以覆盖秒数，
-         摊平 BT 连接生灭造成的瞬时抖动，口径接近 TR 客户端的滑动窗口速率。
-         hist 存 { t, up, down }（每秒增量），窗口内求和而非相减。 */
+      /* 1.8 秒滑动窗口（约 3 个采样点）：摊平 BT 连接生灭抖动的同时把延迟压到最低。
+         之前 3 秒窗口会带来 1.5~3 秒的滞后感；600ms 采样 + 1.8s 窗口只需 ~1 秒收敛。
+         hist 存 { t, up, down }（每次采样的字节增量），窗口内求和而非相减。 */
       const hist = dev.ipRateHist || (dev.ipRateHist = new Map());
       const h = hist.get(tg.id) || [];
       h.push({ t: now, up: upBytes, down: downBytes });
-      const cutoff = now - 3000;
+      const cutoff = now - 1800;
       while (h.length > 1 && h[0].t < cutoff) h.shift();
       hist.set(tg.id, h);
       let sumUp = 0, sumDown = 0, span = 0;
@@ -589,7 +642,7 @@ async function pollIpRates() {
         sumUp += h[i].up; sumDown += h[i].down;
         if (i > 0) span += (h[i].t - h[i - 1].t) / 1000;
       }
-      if (span < 0.8) { sumUp = upBytes; sumDown = downBytes; span = dt; }
+      if (span < 0.4) { sumUp = upBytes; sumDown = downBytes; span = dt; }
       /* 字节差分算出的是 Byte/s，但 API 契约（拓扑/IP监控/仪表盘）统一用 bit/s，
          前端 fmtBytesRate 会再 ÷8 显示字节单位。这里 ×8 转回 bit/s。 */
       const upBps = Math.max(0, sumUp / span * 8), downBps = Math.max(0, sumDown / span * 8);
@@ -1133,11 +1186,13 @@ function demoRemove(dev, sectionId, ids) {
 }
 
 function wordsFromValues(fields, values) {
-  const allowed = new Set(fields.map((f) => f.key)); const out = [];
+  const allowed = new Map(fields.map((f) => [f.key, f.type])); const out = [];
   for (const [k, v] of Object.entries(values || {})) {
     if (!allowed.has(k) || k === '.id') continue;
     if (v === null || v === undefined || v === '') continue;
-    out.push(typeof v === 'boolean' ? `=${k}=${rosBool(v)}` : `=${k}=${v}`);
+    /* bool-invert：表单页显示「启用」，RouterOS 实际字段是 disabled，写入时取反 */
+    if (allowed.get(k) === 'bool-invert') out.push(`=${k}=${rosBool(!bool(v))}`);
+    else out.push(typeof v === 'boolean' ? `=${k}=${rosBool(v)}` : `=${k}=${v}`);
   }
   return out;
 }
@@ -1209,6 +1264,120 @@ async function rosWrite(dev, section, action, payload) {
   for (const cmd of cmds) { const r = await dev.api.exec(cmd); if (r.status.type === 'trap') throw new Error(r.status.message || '操作失败'); changed++; }
   return { changed };
 }
+
+/* ================= 拓扑 ↔ DHCP 租约联动 =================
+   RouterOS 静态租约只有 address / mac-address / host-name / comment 等有限字段，
+   拓扑特有的 type / icon / parent / ports 等编码进 comment（前缀 ROS-TOPO-v1:），
+   「重新发现」读租约时解析回来，保证类型、图标、层级不丢。
+   编码用 base64url，只含安全字符，不会破坏 RouterOS comment。 */
+const TOPO_COMMENT_PREFIX = 'ROS-TOPO-v1:';
+const TOPO_META_KEYS = ['id', 'name', 'type', 'icon', 'parent', 'parentPort', 'iface', 'ports', 'anim', 'note', 'order', 'calcFrom', 'ipRate'];
+function encodeTopoComment(node, keepComment) {
+  const meta = {};
+  for (const k of TOPO_META_KEYS) {
+    const v = node && node[k];
+    if (v === undefined || v === null || v === '' || v === false) continue;
+    if (Array.isArray(v) && !v.length) continue;
+    meta[k] = v;
+  }
+  /* 补全已有租约时保留用户原本手写的备注，避免覆盖 */
+  if (keepComment && !decodeTopoComment(keepComment)) meta.uc = String(keepComment).slice(0, 120);
+  try { return TOPO_COMMENT_PREFIX + Buffer.from(JSON.stringify(meta), 'utf8').toString('base64url'); }
+  catch (e) { return TOPO_COMMENT_PREFIX; }
+}
+function decodeTopoComment(comment) {
+  const s = String(comment || '').trim();
+  if (!s.startsWith(TOPO_COMMENT_PREFIX)) return null;
+  try {
+    const o = JSON.parse(Buffer.from(s.slice(TOPO_COMMENT_PREFIX.length), 'base64url').toString('utf8'));
+    return o && typeof o === 'object' ? o : null;
+  } catch (e) { return null; }
+}
+/* 双向联动：拓扑 ↔ DHCP 租约，以 MAC 地址为唯一锚点。
+   拓扑 name 是设备名、RouterOS comment 是备注，两者相互独立、互不覆盖；仅 IP 双向同步。 */
+
+/* 方向①：拓扑 → DHCP 租约。仅同步「填了 MAC + IPv4」的自定义节点——
+   DHCP 依赖 MAC，没 MAC 的节点不建租约（避免产生无 MAC 的垃圾租约）。 */
+async function syncTopologyLeases(dev) {
+  const result = { added: 0, updated: 0, skipped: 0, noMac: 0, error: '' };
+  if (!dev) { result.error = '没有可用设备'; return result; }
+  const nodes = customTopology(dev).filter((n) => n && !n.deleted && n.mac && n.ip);
+  if (!nodes.length) return result;
+  let leases = [];
+  try { leases = await rosPrint(dev, SECTION_MAP.dhcpLeases) || []; }
+  catch (e) { result.error = e.message; return result; }
+  const byMac = new Map(), byIp = new Map();
+  for (const r of leases) {
+    const mk = macKey(r['mac-address']); if (mk) byMac.set(mk, r);
+    const ip = String(r.address || '').trim(); if (ip) byIp.set(ip, r);
+  }
+  for (const n of nodes) {
+    const mk = macKey(n.mac), ip = String(n.ip || '').trim();
+    if (!mk) { result.noMac++; continue; }
+    if (!IPV4_RE.test(ip)) { result.noMac++; continue; }  // 静态租约是 /ip（IPv4）路径
+    const existing = byMac.get(mk) || byIp.get(ip);
+    const comment = encodeTopoComment(n);
+    if (existing) {
+      /* 已存在：仅在缺失标记时补写 comment（保留用户原备注）；设备名与备注独立，不回写 host-name */
+      if (!decodeTopoComment(existing.comment)) {
+        const enriched = encodeTopoComment(n, existing.comment);
+        try { await rosWrite(dev, SECTION_MAP.dhcpLeases, 'set', { ids: [existing['.id']], values: { comment: enriched } }); result.updated++; }
+        catch (e) { result.skipped++; }
+      } else result.skipped++;
+      continue;
+    }
+    const values = { address: ip, 'mac-address': String(n.mac).trim().slice(0, 32), comment };
+    /* 新建租约时 host-name 填拓扑设备名作为初始值（RouterOS 的 host-name 字段）；
+       拓扑设备名与 RouterOS comment 备注互不覆盖，各自独立 */
+    if (n.name) values['host-name'] = String(n.name).slice(0, 64);
+    try {
+      await rosWrite(dev, SECTION_MAP.dhcpLeases, 'add', { values });
+      result.added++; byMac.set(mk, { address: ip, comment });
+    } catch (e) { result.skipped++; }
+  }
+  return result;
+}
+
+/* 方向②：DHCP 租约 → 拓扑。按 MAC 找到拓扑节点，仅同步 IP 地址。
+   注意：拓扑的 name 是「设备名」、RouterOS 的 comment 是「备注」，两者各自独立，
+   互不覆盖——所以这里不再用 host-name/comment 改拓扑节点名。 */
+async function syncLeaseToTopology(dev, leaseRows) {
+  const result = { updated: 0, added: 0, skipped: 0, error: '' };
+  if (!dev) { result.error = '没有可用设备'; return result; }
+  let rows = leaseRows;
+  if (!Array.isArray(rows)) {
+    try { rows = await rosPrint(dev, SECTION_MAP.dhcpLeases) || []; }
+    catch (e) { result.error = e.message; return result; }
+  }
+  const custom = customTopology(dev).slice();
+  const byMac = new Map();
+  for (let i = 0; i < custom.length; i++) {
+    const mk = macKey(custom[i] && custom[i].mac);
+    if (mk) byMac.set(mk, i);
+  }
+  let changed = false;
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    const mk = macKey(r['mac-address']); if (!mk) continue;
+    const ip = String(r.address || '').trim();
+    const idx = byMac.get(mk);
+    if (idx == null) continue;  // 拓扑里没有该 MAC 的节点，跳过（不自动新增，避免动态租约污染拓扑）
+    const n = custom[idx];
+    const patch = {};
+    /* 仅同步 IP；设备名（拓扑 name）与备注（RouterOS comment）保持各自独立 */
+    if (ip && IPV4_RE.test(ip) && n.ip !== ip) patch.ip = ip;
+    if (!Object.keys(patch).length) { result.skipped++; continue; }
+    custom[idx] = { ...n, ...patch };
+    changed = true;
+    result.updated++;
+  }
+  if (changed) {
+    topoStore.devices[dev.id] = { nodes: custom, updatedAt: Date.now() };
+    saveTopology();
+  }
+  return result;
+}
+
 const SPECIAL = {
   reboot: async (dev) => {
     if (dev.forceDemo) return { ok: true, demo: true, simulated: true };
@@ -1727,15 +1896,26 @@ async function autoTopology(dev) {
     if (status && !/^(bound|waiting)$/i.test(status)) continue;
     const mac = macKey(r['mac-address']);
     if (mac && byMac.has(mac)) continue;
-    const name = String(r['host-name'] || r.address || mac.slice(0, 8) || '终端');
-    const type = /dns|unbound|adguard|pihole/i.test(name) ? 'dns'
+    /* 拓扑同步过来的静态租约：还原 comment 里的类型/图标/层级等字段，
+       并用原始节点 id，避免「重新发现」时生成一个重复节点。 */
+    const meta = decodeTopoComment(r.comment);
+    /* 拓扑 name 是设备名、RouterOS comment 是备注，各自独立：
+       优先用拓扑元数据里的设备名，没有才回退到 host-name / 地址。 */
+    const name = (meta && meta.name) || String(r['host-name'] || r.address || mac.slice(0, 8) || '终端');
+    const type = (meta && meta.type) || (/dns|unbound|adguard|pihole/i.test(name) ? 'dns'
       : /proxy|squid|clash/i.test(name) ? 'proxy'
-      : /ap|wifi|wlan/i.test(name) ? 'ap' : /nas|server|storage/i.test(name) ? 'nas' : 'client';
-    nodes.push({ id: 'auto_l_' + (mac || encodeURIComponent(name)), name, type,
+      : /ap|wifi|wlan/i.test(name) ? 'ap' : /nas|server|storage/i.test(name) ? 'nas' : 'client');
+    const node = { id: (meta && meta.id) || ('auto_l_' + (mac || encodeURIComponent(name))), name, type,
       ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
-      parent: (mac && byMac.get(mac)) || 'root', parentPort: '',
-      iface: String(r.interface || serverIface.get(String(r.server || '')) || ''),
-      ports: [], auto: true, note: status === 'waiting' ? '等待中' : '' });
+      parent: (meta && meta.parent) || (mac && byMac.get(mac)) || 'root',
+      parentPort: (meta && meta.parentPort) || '',
+      iface: (meta && meta.iface) || String(r.interface || serverIface.get(String(r.server || '')) || ''),
+      ports: (meta && Array.isArray(meta.ports)) ? meta.ports : [],
+      auto: true, note: (meta && (meta.note || meta.uc)) || (status === 'waiting' ? '等待中' : ''),
+      icon: (meta && meta.icon) || '', anim: (meta && meta.anim) || 'none',
+      order: (meta && Number.isFinite(Number(meta.order))) ? Number(meta.order) : 0 };
+    nodes.push(node);
+    if (mac) byMac.set(mac, node.id);
   }
   return { nodes, ok: neighbors.length > 0 || leases.length > 0, notes,
     counts: { neighbors: neighbors.length, leases: leases.length } };
@@ -2438,8 +2618,16 @@ const server = http.createServer(async (req, res) => {
         }
         topoStore.devices[target.id] = { nodes, updatedAt: Date.now() };
         if (!saveTopology()) throw new Error('写入 data/topology.json 失败');
-        console.log(`[topology] ${target.name} custom nodes=${nodes.length} by=${req.socket.remoteAddress}`);
-        return json(res, 200, { ok: true, nodes, updatedAt: topoStore.devices[target.id].updatedAt });
+        /* 联动：仅在编辑器保存设备时（syncLeases=true）把填了 IP 的节点同步为
+           RouterOS 静态租约。拖动/动画/测速开关等高频保存不读租约表，避免增加路由器负担。
+           best-effort——失败只回传提示，不影响拓扑本身的保存。 */
+        let leaseSync = null;
+        if (body.syncLeases === true) {
+          try { leaseSync = await syncTopologyLeases(target); }
+          catch (e) { leaseSync = { added: 0, updated: 0, skipped: 0, noMac: 0, error: e.message }; }
+        }
+        console.log(`[topology] ${target.name} custom nodes=${nodes.length} leaseSync=${JSON.stringify(leaseSync)} by=${req.socket.remoteAddress}`);
+        return json(res, 200, { ok: true, nodes, updatedAt: topoStore.devices[target.id].updatedAt, leaseSync });
       } catch (e) { return json(res, 400, { error: e.message }); }
     }
     return json(res, 405, { error: '不支持的请求方法' });
@@ -2588,7 +2776,18 @@ const server = http.createServer(async (req, res) => {
       const dev = reqDevice(req, url, body);
       const result = await rosWrite(dev, section, body.action, { ids, values: body.values || {} });
       console.log(`[write] ${dev.name} ${body.action} ${section.path} by=${req.socket.remoteAddress}`);
-      return json(res, 200, { ok: true, ...result });
+      /* DHCP 租约 → 拓扑：保存后按 MAC 反向同步 IP（设备名与备注各自独立）。
+         仅对 add/set 且前端显式请求时执行；失败不影响配置保存结果。 */
+      let topoSync = null;
+      if (body.syncTopology === true && section.id === 'dhcpLeases' && ['add', 'set'].includes(body.action)) {
+        try {
+          let rows = [];
+          if (result && result.row) rows = [result.row];
+          else if (ids.length) { const all = await rosPrint(dev, section) || []; rows = all.filter((r) => ids.includes(r['.id'])); }
+          topoSync = await syncLeaseToTopology(dev, rows);
+        } catch (e) { topoSync = { updated: 0, added: 0, skipped: 0, error: e.message }; }
+      }
+      return json(res, 200, { ok: true, ...result, topoSync });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/ping/stream' && req.method === 'GET') {
@@ -2645,12 +2844,16 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { name, demo: true, text: `# ROS Center DEMO export\n# device: ${dev.name}\n# 演示模式：以下为示例文本，不是真实配置\n/interface print\n/system resource print\n` });
       }
       if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法导出配置 / Router offline');
-      const r = await dev.api.exec(['/export', '=hide-sensitive=yes']);
+      /* RouterOS v7：/export 经 API 只回空 !done，需写文件再经 FTP 读回（见 ftpRetrieve） */
+      const fileName = 'ros-center-export-' + Date.now().toString(36);
+      const r = await dev.api.exec(['/export', `=file=${fileName}`]);
       if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '导出失败');
-      const lines = ((r && r.re) || []).map((x) => x && (x.output !== undefined ? x.output : x.ret !== undefined ? x.ret : x.line)).filter((v) => v !== undefined && v !== null).map(String);
-      const text = (lines.length ? lines.join('\n') : '') + '\n';
+      let text;
+      try { text = await ftpRetrieve(dev.cfg, fileName + '.rsc'); }
+      catch (e) { throw new Error('读取导出文件失败：' + e.message + '（需在 RouterOS 开启 FTP 服务）'); }
+      const out = (text || '').trim() ? (text.endsWith('\n') ? text : text + '\n') : '\n';
       writeBackupStatus(dev, name, false, '浏览器下载 / Browser download · ' + name + '.rsc');
-      return json(res, 200, { name, text });
+      return json(res, 200, { name, text: out });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
 
@@ -2720,13 +2923,21 @@ const server = http.createServer(async (req, res) => {
     try {
       if (dev.forceDemo) return json(res, 200, { name, demo: true, text: '# ROS Center DEMO - RouterOS full export\n/interface print\n' });
       if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接 / Router offline');
-      /* hide-sensitive=no：带上账号密码等敏感配置，才能完美还原 */
-      const r = await dev.api.exec(['/export', '=hide-sensitive=no']);
-      if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '导出失败');
-      const lines = ((r && r.re) || []).map((x) => x && (x.output !== undefined ? x.output : x.ret !== undefined ? x.ret : x.line)).filter((v) => v !== undefined && v !== null).map(String);
-      if (!lines.length) throw new Error('路由器未返回配置内容（检查 read 权限）');
+      /* RouterOS v7 的 /export 经 API 只回空 !done，配置内容不进 !re（v6 才进）。
+         改用标准做法：/export file=xxx 写入路由器文件，再用 FTP RETR 读回完整内容。
+         带敏感项：v7 用 show-sensitive=yes，v6 用 hide-sensitive=no。 */
+      const fileName = 'ros-center-export-' + Date.now().toString(36);
+      const sensArg = ['/export', `=file=${fileName}`, '=show-sensitive=yes'];
+      const r = await dev.api.exec(sensArg);
+      if (r && r.status && r.status.type === 'trap') {
+        /* 老版本 RouterOS 没有 show-sensitive 参数，回退到 hide-sensitive=no */
+        const r2 = await dev.api.exec(['/export', `=file=${fileName}`, '=hide-sensitive=no']);
+        if (r2 && r2.status && r2.status.type === 'trap') throw new Error(r2.status.message || '导出失败');
+      }
+      const text = await ftpRetrieve(dev.cfg, fileName + '.rsc');
+      if (!text || !text.trim()) throw new Error('路由器未返回配置内容（检查 read 权限及 FTP 服务是否开启）');
       writeBackupStatus(dev, name, false, '完整导出 / Full export · ' + name + '.rsc');
-      return json(res, 200, { name, text: lines.join('\n') + '\n', sensitive: true });
+      return json(res, 200, { name, text: text.endsWith('\n') ? text : text + '\n', sensitive: true });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
   if (p === '/api/routeros/import' && req.method === 'POST') {

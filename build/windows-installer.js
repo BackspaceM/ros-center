@@ -40,10 +40,9 @@ const START_BAT = [
 ].join('\r\n');
 
 function ensureIcon() {
-  if (!fs.existsSync(ICON)) {
-    console.log('generating icons...');
-    execFileSync(process.execPath, [path.join(__dirname, 'make-icons.js')], { stdio: 'inherit' });
-  }
+  /* 每次构建都重新生成，确保桌面图标跟随 make-favicon.js 的最新设计 */
+  console.log('generating icons...');
+  execFileSync(process.execPath, [path.join(__dirname, 'make-icons.js')], { stdio: 'inherit' });
 }
 
 function findMakensis() {

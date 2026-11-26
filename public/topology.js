@@ -20,6 +20,7 @@
   let direction = 'tb';
   let zoom = 1, panX = 0, panY = 0, baseW = 1000, baseH = 600;
   let selectedId = null, drag = null, panDrag = null, rates = new Map(), ipRates = new Map(), rateTimer = null;
+  let syncIpAllSwitch = () => {};  // 由 renderTopologyPage 注入，数据变更后同步「全部按 IP 测速」开关
   let activeFx = null;
 
   const typeLabel = (tp) => L(TYPE_ZH[tp] || TYPE_ZH.other, TYPE_EN[tp] || TYPE_EN.other);
@@ -35,13 +36,16 @@
         <div class="topo-meta" id="topoMeta"></div>
       </div>
       <div class="page-actions">
-        <button class="btn btn-sm" type="button" id="topoIpAll" title="${esc(L('把当前所有填写了 IP 的设备一次性开启按 IP 实时测速', 'Enable live per-IP rates for every device that has an IP'))}">◎ ${esc(L('全部按 IP 测速', 'Monitor all by IP'))}</button>
-        <button class="btn btn-sm" type="button" id="topoAnimBtn">✦ ${esc(L('动画设置', 'Animations'))}</button>
+        <button class="btn btn-sm topo-ipall-btn" type="button" id="topoIpAll" title="${esc(L('点选要为哪些设备开启实时测速', 'Pick which devices to monitor'))}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg>${esc(L('按 IP 测速', 'Monitor by IP'))}<span class="topo-ipall-count" id="topoIpAllCount">0</span>
+        </button>
+        <button class="btn btn-sm" type="button" id="topoAnimBtn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.6L20 10l-5.6 2L15 18l-3-3-3 3 .6-6L4 10l6.1-1.4L12 3z"/></svg>${esc(L('动画设置', 'Animations'))}</button>
         <button class="btn btn-sm" type="button" id="topoRefresh">${esc(L('重新发现', 'Rediscover'))}</button>
         <button class="btn btn-sm primary" type="button" id="topoAdd">+ ${esc(L('添加设备', 'Add device'))}</button>
         <button class="btn btn-sm ghost-danger" type="button" id="topoDelete">− ${esc(L('删除设备', 'Delete device'))}</button>
       </div>
     </div>
+    <div class="scope-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>${esc(L('说明：此处速率仅统计经过路由器的外部流量；设备间二层内网直连（如本机 ↔ NAS）不经过路由器，因此不计入。', 'Note: the rates shown here cover only external traffic passing through the router. Layer-2 LAN transfers between devices (e.g. local ↔ NAS) bypass the router and are not counted.'))}</span></div>
     <div class="topo-panel">
       <div class="topo-canvas-wrap">
       <div class="topo-controls">
@@ -69,26 +73,15 @@
     $('topoAdd').onclick = () => openEditor(null);
     $('topoDelete').onclick = () => deleteSelected();
     $('topoAnimBtn').onclick = () => openAnimSettings();
-    $('topoIpAll').onclick = () => {
-      const targets = (data ? allNodes() : []).filter((n) =>
-        (n.mac && String(n.mac).trim()) || (n.ip && /^[a-zA-Z0-9_.:-]+$/.test(String(n.ip).trim())));
-      if (!targets.length) { toast(L('没有填写 IP 或 MAC 的设备', 'No devices with an IP or MAC'), 'err'); return; }
-      const already = targets.filter((n) => n.ipRate).length;
-      confirmModal(L('批量开启按 IP 测速', 'Enable per-IP monitoring'),
-        L('将对 ', 'Enable for ') + targets.length + L(' 台已填 IP 的设备开启连接表聚合测速（默认关闭，只读取、不改路由器配置）。', ' devices with an IP. Connection-table aggregation is read-only and does not change router config.')
-        + (already ? '<br>' + L('其中部分设备已开启，重复设置不会改变速率。', 'Some are already enabled; no rate change for them.') : ''),
-        false, async () => {
-          const list = ((data && data.custom) || []).slice();
-          for (const n of targets) {
-            const idx = list.findIndex((x) => x.id === n.id);
-            const item = idx >= 0 ? { ...list[idx] } : overrideOf(n);
-            item.ipRate = true;
-            if (idx >= 0) list[idx] = item; else list.push(item);
-          }
-          const ok = await saveCustom(list);
-          if (ok) toast(L('已开启 ', 'Enabled for ') + targets.length + L(' 台设备', ' devices'), 'ok');
-        });
+    $('topoIpAll').onclick = () => openRatePicker();
+    /* 按钮角标显示已开启测速的设备数 */
+    syncIpAllSwitch = function () {
+      const el = $('topoIpAllCount'); if (!el || !data) return;
+      const on = allNodes().filter((n) => n.ipRate && !n.deleted).length;
+      el.textContent = String(on);
+      el.classList.toggle('zero', on === 0);
     };
+    syncIpAllSwitch();
     window.openTopologyAnimSettings = openAnimSettings;
     /* 供「IP 流量监控」页跳转过来直接编辑指定节点 */
     window.openTopologyEditorById = (id) => { const n = map.get(String(id || '')); if (n) openEditor(n); };
@@ -105,7 +98,7 @@
     try {
       data = await api('/api/topology');
       stage.dataset.loaded = '1';
-      buildLayout(); fitView(); draw(); startRates();
+      buildLayout(); fitView(); draw(); startRates(); syncIpAllSwitch();
     } catch (e) {
       stage.innerHTML = '<div class="topo-empty">' + esc(L('拓扑加载失败：', 'Topology load failed: ') + e.message) + '</div>';
     } finally { loading = false; }
@@ -484,8 +477,8 @@
         paintRates();
       } catch (e) { /* ignore */ }
     };
-    /* 后端 1s 采样，前端同频 1s 拉取，避免设备跑 1~2 秒才显示 */
-    tick(); rateTimer = setInterval(tick, 1000);
+    /* 后端 600ms 采样，前端同频拉取，最快捕捉速率变化、降低显示延迟 */
+    tick(); rateTimer = setInterval(tick, 600);
   }
   function paintRates() {
     const stage = $('topoStage'); if (!stage) return;
@@ -509,12 +502,22 @@
     });
   }
 
-  async function saveCustom(list) {
+  async function saveCustom(list, syncLeases) {
     const nodes2 = list || (data && data.custom) || [];
     try {
-      const d = await api('/api/topology', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes: nodes2 }) });
+      const d = await api('/api/topology', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes: nodes2, syncLeases: !!syncLeases }) });
       if (data) { data.custom = d.nodes || nodes2; data.updatedAt = d.updatedAt; }
-      buildLayout(); draw();
+      buildLayout(); draw(); syncIpAllSwitch();
+      /* 租约同步结果提示：把新增/更新的静态租约数告诉用户 */
+      const ls = d && d.leaseSync;
+      if (ls && (ls.added || ls.updated || ls.noMac || ls.error)) {
+        const parts = [];
+        if (ls.added) parts.push(L(`已新增 ${ls.added} 条 DHCP 租约`, `${ls.added} DHCP lease(s) added`));
+        if (ls.updated) parts.push(L(`补全 ${ls.updated} 条`, `${ls.updated} completed`));
+        if (ls.noMac) parts.push(L(`${ls.noMac} 台未填 MAC 已跳过`, `${ls.noMac} without MAC skipped`));
+        if (ls.error) parts.push(L('租约同步失败', 'Lease sync failed') + ': ' + String(ls.error).slice(0, 60));
+        toast(parts.join(' · '), ls.error ? 'err' : 'ok');
+      }
       return true;
     } catch (e) { toast(e.message, 'err'); return false; }
   }
@@ -653,6 +656,68 @@
       deleted: false, x: n.x || 0, y: n.y || 0 };
   }
 
+  /* 批量测速点选面板：一屏勾选要为哪些设备开启按 IP 实时测速 */
+  function openRatePicker() {
+    if (!data) { load(false).then(() => { if (data) openRatePicker(); }); return; }
+    const nodes = allNodes().filter((n) => !n.deleted);
+    if (!nodes.length) { toast(L('请先加载拓扑', 'Load the topology first'), 'err'); return; }
+    const eligible = (n) => (n.mac && String(n.mac).trim()) || (n.ip && /^[a-zA-Z0-9_.:-]+$/.test(String(n.ip).trim()));
+    const body = `
+      <div class="picker-toolbar">
+        <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="text" id="rateSearch" placeholder="${esc(L('搜索设备名 / IP / MAC…', 'Search name / IP / MAC…'))}"></div>
+        <div class="picker-quick">
+          <button class="btn btn-sm" type="button" id="rateAll">${esc(L('全选', 'All'))}</button>
+          <button class="btn btn-sm" type="button" id="rateNone">${esc(L('全不选', 'None'))}</button>
+        </div>
+      </div>
+      <div class="picker-list" id="rateList">
+        ${nodes.map((n, i) => {
+          const ok = eligible(n);
+          return `<label class="picker-row${ok ? '' : ' disabled'}" data-name="${esc((n.name || '') + ' ' + (n.ip || '') + ' ' + (n.mac || '')).toLowerCase()}">
+            <span class="picker-icon lg-${esc(n.type)}"></span>
+            <span class="picker-info"><b>${esc(n.name || n.ip || n.id)}</b><small>${esc(n.ip || n.mac || L('未填地址', 'no address'))}${n.mac && n.ip ? ' · ' + esc(String(n.mac).slice(0, 8)) : ''} · ${esc(typeLabel(n.type))}</small></span>
+            <span class="picker-tag">${ok ? '' : esc(L('需填 IP/MAC', 'needs IP/MAC'))}</span>
+            <span class="upd-switch"><input type="checkbox" data-rate-id="${esc(n.id)}"${n.ipRate && ok ? ' checked' : ''}${ok ? '' : ' disabled'}><i></i></span>
+          </label>`;
+        }).join('')}
+      </div>`;
+    const foot = `<span class="picker-summary" id="rateSummary"></span>
+      <button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button>
+      <button class="btn primary" id="rateSave" type="button">${esc(L('保存', 'Save'))}</button>`;
+    openModal(L('批量设置按 IP 测速', 'Batch set per-IP monitoring'), body, foot, (m) => {
+      const boxes = [...m.querySelectorAll('[data-rate-id]')];
+      const summary = m.querySelector('#rateSummary');
+      const updateSummary = () => { summary.innerHTML = L('已选 <b>', 'Selected <b>') + boxes.filter((b) => b.checked).length + L('</b> 台设备', '</b> devices'); };
+      updateSummary();
+      boxes.forEach((b) => b.onchange = updateSummary);
+      m.querySelector('#rateAll').onclick = () => { boxes.forEach((b) => { if (!b.disabled) b.checked = true; }); updateSummary(); };
+      m.querySelector('#rateNone').onclick = () => { boxes.forEach((b) => b.checked = false); updateSummary(); };
+      const search = m.querySelector('#rateSearch');
+      search.oninput = () => {
+        const q = search.value.trim().toLowerCase();
+        m.querySelectorAll('.picker-row').forEach((row) => { row.style.display = !q || row.dataset.name.includes(q) ? '' : 'none'; });
+      };
+      m.querySelector('[data-close]').onclick = closeModal;
+      m.querySelector('#rateSave').onclick = async () => {
+        const chosen = new Set(boxes.filter((b) => b.checked).map((b) => b.dataset.rateId));
+        const list = ((data && data.custom) || []).slice();
+        const all = allNodes();
+        for (const n of all) {
+          if (!eligible(n) && chosen.has(n.id)) continue;
+          const want = chosen.has(n.id);
+          if (!!n.ipRate === want) continue;
+          const idx = list.findIndex((x) => x.id === n.id);
+          const item = idx >= 0 ? { ...list[idx] } : overrideOf(n);
+          item.ipRate = want;
+          if (idx >= 0) list[idx] = item; else list.push(item);
+        }
+        if (await saveCustom(list)) { closeModal(); toast(L('测速设备已更新', 'Monitoring devices updated'), 'ok'); syncIpAllSwitch(); }
+      };
+      setTimeout(() => search.focus(), 50);
+    });
+  }
+
   /* 动画设置：为每个设备单独指定「点击时播放什么」，未指定则只选中、不弹端口 */
   function openAnimSettings() {
     if (!data) {
@@ -660,14 +725,42 @@
       return;
     }
     if (!nodes.length) { toast(L('请先加载拓扑', 'Load the topology first'), 'err'); return; }
-    const rows = nodes.map((n, i) => `<div class="anim-row">
-      <div class="anim-row-name"><i class="lg-${esc(n.type)}"></i><span>${esc(n.name)}</span><small>${esc(typeLabel(n.type))}</small></div>
-      <select id="fx_${i}" data-id="${esc(n.id)}">${ANIMS.map((a) => `<option value="${a}"${(n.anim || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select>
+    const rows = nodes.map((n, i) => `<div class="anim-card" data-name="${esc((n.name || '') + ' ' + (n.ip || '')).toLowerCase()}">
+      <div class="anim-card-main">
+        <span class="anim-card-icon lg-${esc(n.type)}"></span>
+        <span class="anim-card-info"><b>${esc(n.name)}</b><small>${esc(n.ip || '')} · ${esc(typeLabel(n.type))}</small></span>
+      </div>
+      <div class="anim-card-ctrl"><span class="anim-card-label">${esc(L('点击时播放', 'On click'))}</span>
+        <div class="anim-select-wrap"><span class="anim-current" data-cur="${i}">✦ ${esc(animLabel(n.anim || 'none'))}</span>
+          <select id="fx_${i}" data-id="${esc(n.id)}">${ANIMS.map((a) => `<option value="${a}"${(n.anim || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select></div>
+      </div>
     </div>`).join('');
-    const body = `<div class="note-card">${esc(L('点击设备时只触发它自己绑定的动画。总开关为顶栏 ✦（关闭后所有动画停用）。', 'Clicking a device plays only its own effect. The ✦ button in the top bar is the global master switch.'))}</div>
-      <div class="anim-list">${rows}</div>`;
-    const foot = `<button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="fxSave" type="button">${esc(L('保存', 'Save'))}</button>`;
-    openModal(L('拓扑动画设置', 'Topology animation settings'), body, foot, () => {
+    const body = `
+      <div class="anim-intro">
+        <div class="anim-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.6L20 10l-5.6 2L15 18l-3-3-3 3 .6-6L4 10l6.1-1.4L12 3z"/></svg></div>
+        <div><b>${esc(L('为设备设置点击动画', 'Set click animations'))}</b>
+          <p>${esc(L('点击设备时只触发它自己绑定的动画；设为「无」则只选中、不播放。', 'Clicking a device plays only its own animation; choose "None" to just select.'))}</p></div>
+      </div>
+      <div class="picker-toolbar">
+        <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="text" id="fxSearch" placeholder="${esc(L('搜索设备…', 'Search devices…'))}"></div>
+        <div class="picker-quick">
+          <button class="btn btn-sm" type="button" id="fxNone">${esc(L('全部设为无', 'Set all None'))}</button>
+        </div>
+      </div>
+      <div class="anim-grid">${rows}</div>`;
+    const foot = `<span class="picker-summary">${esc(L('共 ', ''))}${nodes.length}${esc(L(' 台设备', ' devices'))}</span>
+      <button class="btn" data-close type="button">${esc(L('取消', 'Cancel'))}</button><button class="btn primary" id="fxSave" type="button">${esc(L('保存', 'Save'))}</button>`;
+    openModal(L('拓扑动画设置', 'Topology animation settings'), body, foot, (m) => {
+      /* 选择框原生但透明覆盖，显示自定义的精致标签 */
+      m.querySelectorAll('.anim-card select').forEach((sel) => {
+        const cur = sel.parentElement.querySelector('.anim-current');
+        const sync = () => { cur.textContent = '✦ ' + sel.options[sel.selectedIndex].text; };
+        sel.onchange = sync; sync();
+      });
+      const s = m.querySelector('#fxSearch');
+      s.oninput = () => { const q = s.value.trim().toLowerCase(); m.querySelectorAll('.anim-card').forEach((c) => { c.style.display = !q || c.dataset.name.includes(q) ? '' : 'none'; }); };
+      m.querySelector('#fxNone').onclick = () => { m.querySelectorAll('.anim-card select').forEach((sel) => { sel.value = 'none'; sel.onchange(); }); };
       $('fxSave').onclick = async () => {
         const custom = ((data && data.custom) || []).slice();
         nodes.forEach((n, i) => {
@@ -704,9 +797,9 @@
         ${field(L('名称', 'Name') + ' *', `<input id="tnName" type="text" maxlength="48" value="${esc(node ? node.name : '')}" placeholder="${esc(L('设备名称', 'Device name'))}">`)}
         <div class="te-grid-2">
           ${field(L('类型', 'Type'), `<select id="tnType">${TYPES.map((tp) => `<option value="${tp}"${node && node.type === tp ? ' selected' : ''}>${esc(typeLabel(tp))}</option>`).join('')}</select>`)}
-          ${field(L('IP / 地址', 'IP / address'), `<input id="tnIp" type="text" maxlength="64" value="${esc(node ? node.ip : '')}" placeholder="192.168.1.1">`)}
+          ${field(L('IP / 地址', 'IP / address'), `<input id="tnIp" type="text" maxlength="64" value="${esc(node ? node.ip : '')}" placeholder="192.168.1.1">`, L('IPv4 地址，与下方 MAC 一起用于联动 DHCP 租约；这里的名称是设备名，与 RouterOS 租约备注相互独立', 'IPv4 address; used with MAC below to sync the DHCP lease. This name is the device name, independent of the RouterOS lease comment'))}
         </div>
-        ${field(L('MAC 地址（可选）', 'MAC address (optional)'), `<input id="tnMac" type="text" maxlength="32" value="${esc(node ? node.mac || '' : '')}" placeholder="AA:BB:CC:DD:EE:FF">`, L('用于在接口、租约、邻居等表格中复用本设备上传的图标；自动发现的设备会自动带出', 'Used to reuse this device icon in interface/lease/neighbour tables; auto-discovered devices fill this in'))}`)}
+        ${field(L('MAC 地址', 'MAC address'), `<input id="tnMac" type="text" maxlength="32" value="${esc(node ? node.mac || '' : '')}" placeholder="AA:BB:CC:DD:EE:FF">`, L('DHCP 租约以 MAC 为锚点：填写 MAC + IPv4 才会同步生成静态租约，租约修改后也会据此同步回本设备。同时用于表格图标复用；自动发现的设备会自动带出', 'DHCP leases are anchored by MAC: only with MAC + IPv4 is a static lease created, and lease edits sync back here. Also reuses table icons; auto-discovered devices fill this in'))}`)}
       ${section('2', L('层级与连接', 'Hierarchy & links'), L('决定设备在拓扑中的位置与连线', 'Where the device sits and how it connects'), `
         ${field(L('层级关系', 'Hierarchy'), `<select id="tnRelation">
           <option value="child"${relationDefault === 'child' ? ' selected' : ''}>${esc(L('作为目标设备的下级', 'Child of selected device'))}</option>
@@ -722,7 +815,7 @@
           ${field(L('本层排序', 'Order in level'), `<input id="tnOrder" type="number" min="1" max="999" value="${node && Number(node.order) > 0 ? Number(node.order) : ''}" placeholder="1">`, L('同层左右顺序，留空排最后', 'Left-to-right order; blank sorts last'))}
         </div>`)}
       ${section('3', L('流量与动画', 'Traffic & animation'), L('无法直采时可用下级速率求和', 'Sum downstream rates when direct measurement is unavailable'), `
-        ${field(L('实时测速（双栈聚合）', 'Live rate (dual-stack)'), `<label class="qs-check"><input type="checkbox" id="tnIpRate"${node && node.ipRate ? ' checked' : ''}><span>${esc(L('按此设备的 IP/MAC 聚合上下行（自动含 IPv4 + IPv6，默认关闭）', 'Aggregate up/down by this device IP/MAC (auto IPv4 + IPv6, off by default)'))}</span></label>`, L('填 MAC 即可从 DHCP 租约与 IPv6 邻居表自动发现该设备所有地址（含会变的 SLAAC IPv6），IPv4/IPv6 速率相加；没填 MAC 则用上方 IP。仅每秒读取连接表，不改路由器配置', 'With a MAC, all device addresses are auto-discovered from DHCP leases and IPv6 neighbours (including changing SLAAC IPv6), and IPv4/IPv6 rates are summed; otherwise the IP above is used. Reads the connection table once per second without changing router config'))}
+        ${field(L('实时测速（双栈聚合）', 'Live rate (dual-stack)'), `<label class="te-switch-row"><span class="te-switch-text"><b>${esc(L('按 IP 测速', 'Monitor by IP'))}</b><small>${esc(L('开启后按此设备 IP/MAC 聚合上下行，自动含 IPv4 + IPv6', 'Aggregate up/down by this device IP/MAC, auto IPv4 + IPv6'))}</small></span><span class="upd-switch"><input type="checkbox" id="tnIpRate"${node && node.ipRate ? ' checked' : ''}><i></i></span></label>`, L('填 MAC 即可从 DHCP 租约与 IPv6 邻居表自动发现该设备所有地址（含会变的 SLAAC IPv6），IPv4/IPv6 速率相加；没填 MAC 则用上方 IP。仅每秒读取连接表，不改路由器配置', 'With a MAC, all device addresses are auto-discovered from DHCP leases and IPv6 neighbours (including changing SLAAC IPv6), and IPv4/IPv6 rates are summed; otherwise the IP above is used. Reads the connection table once per second without changing router config'))}
         ${field(L('流量计算模式', 'Traffic calculation'), `<div class="calc-list">${calcRows || `<div class="form-hint">${esc(L('该设备暂无下级设备', 'No downstream devices yet'))}</div>`}</div>`, L('多选下级设备按其速率之和显示；有包含关系的勾选会自动互斥', 'Select downstream devices to sum their rates; overlapping picks are mutually exclusive'))}
         ${field(L('点击动画', 'Click animation'), `<select id="tnAnim">${ANIMS.map((a) => `<option value="${a}"${(node && (node.anim || 'none') || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select>`, L('点击此设备时触发；「无」表示只选中', 'Played on click; None selects only'))}`)}
       ${section('4', L('设备图标', 'Device icon'), L('可从图标库复用，或直接上传', 'Reuse from library or upload a new one'), `
@@ -813,7 +906,7 @@
             if (ti >= 0) custom[ti] = { ...custom[ti], parent: item.id }; else custom.push(override);
           }
         }
-        if (await saveCustom(custom)) { closeModal(); selectedId = item.id; toast(L('已保存', 'Saved'), 'ok'); }
+        if (await saveCustom(custom, true)) { closeModal(); selectedId = item.id; toast(L('已保存', 'Saved'), 'ok'); }
       };
       setTimeout(() => { const el = $('tnName'); if (el) el.focus(); }, 40);
     });
