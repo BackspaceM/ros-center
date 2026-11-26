@@ -76,8 +76,9 @@
     $('topoDelete').onclick = () => deleteSelected();
     $('topoAnimBtn').onclick = () => openAnimSettings();
     $('topoIpAll').onclick = () => {
-      const targets = (data ? allNodes() : []).filter((n) => n.ip && IPV4_TEST.test(String(n.ip).trim()));
-      if (!targets.length) { toast(L('没有填写有效 IPv4 地址的设备', 'No devices with a valid IPv4 address'), 'err'); return; }
+      const targets = (data ? allNodes() : []).filter((n) =>
+        (n.mac && String(n.mac).trim()) || (n.ip && /^[a-zA-Z0-9_.:-]+$/.test(String(n.ip).trim())));
+      if (!targets.length) { toast(L('没有填写 IP 或 MAC 的设备', 'No devices with an IP or MAC'), 'err'); return; }
       const already = targets.filter((n) => n.ipRate).length;
       confirmModal(L('批量开启按 IP 测速', 'Enable per-IP monitoring'),
         L('将对 ', 'Enable for ') + targets.length + L(' 台已填 IP 的设备开启连接表聚合测速（默认关闭，只读取、不改路由器配置）。', ' devices with an IP. Connection-table aggregation is read-only and does not change router config.')
@@ -281,10 +282,11 @@
 
   /* 速率来源优先级：① 节点开启的按 IP 测速（连接表聚合）② 关联接口 ③ 上级端口 */
   function directRate(n) {
-    if (n && n.ipRate && n.ip) {
+    if (n && n.ipRate) {
       /* 已开启按 IP 测速就只用连接表数据。采集失败时显示 0，
-         绝不回退到接口总速率 —— 否则所有设备都会显示同一串数字，掩盖问题。 */
-      return ipRates.get(String(n.ip).trim()) || zeroRate;
+         绝不回退到接口总速率 —— 否则所有设备都会显示同一串数字，掩盖问题。
+         双栈节点按 MAC 聚合了多个 IP，服务端把汇总写在主地址并以 id 标识，优先按 id 取。 */
+      return ipRates.get('id:' + n.id) || ipRates.get(String(n.ip || '').trim()) || zeroRate;
     }
     for (const key of [n.iface, n.parentPort]) {
       const k = String(key || '').trim(); if (!k) continue;
@@ -477,7 +479,12 @@
           api('/api/ip-rates').catch(() => ({ rows: [] })),
         ]);
         rates = new Map((snap.ifaces || []).map((i) => [i.name, { rxBps: i.rxBps || 0, txBps: i.txBps || 0 }]));
-        ipRates = new Map((ipd.rows || []).map((r) => [r.ip, { rxBps: r.rxBps || 0, txBps: r.txBps || 0 }]));
+        ipRates = new Map();
+        for (const r of (ipd.rows || [])) {
+          const rate = { rxBps: r.rxBps || 0, txBps: r.txBps || 0 };
+          if (r.id) ipRates.set('id:' + r.id, rate);
+          if (r.ip) ipRates.set(String(r.ip), rate);
+        }
         paintRates();
       } catch (e) { /* ignore */ }
     };
@@ -719,7 +726,7 @@
           ${field(L('本层排序', 'Order in level'), `<input id="tnOrder" type="number" min="1" max="999" value="${node && Number(node.order) > 0 ? Number(node.order) : ''}" placeholder="1">`, L('同层左右顺序，留空排最后', 'Left-to-right order; blank sorts last'))}
         </div>`)}
       ${section('3', L('流量与动画', 'Traffic & animation'), L('无法直采时可用下级速率求和', 'Sum downstream rates when direct measurement is unavailable'), `
-        ${field(L('按 IP 实时测速', 'Live rate by IP'), `<label class="qs-check"><input type="checkbox" id="tnIpRate"${node && node.ipRate ? ' checked' : ''}><span>${esc(L('从连接表按此设备的 IP 聚合上下行速率（默认关闭）', 'Aggregate up/down rate by this device IP from the connection table (off by default)'))}</span></label>`, L('需在上方填写有效 IP；开启后优先于接口与下级求和，仅每秒读取连接表，不改路由器配置', 'Requires a valid IP above; takes priority over interface/child sums; reads connection table once per second without changing router config'))}
+        ${field(L('实时测速（双栈聚合）', 'Live rate (dual-stack)'), `<label class="qs-check"><input type="checkbox" id="tnIpRate"${node && node.ipRate ? ' checked' : ''}><span>${esc(L('按此设备的 IP/MAC 聚合上下行（自动含 IPv4 + IPv6，默认关闭）', 'Aggregate up/down by this device IP/MAC (auto IPv4 + IPv6, off by default)'))}</span></label>`, L('填 MAC 即可从 DHCP 租约与 IPv6 邻居表自动发现该设备所有地址（含会变的 SLAAC IPv6），IPv4/IPv6 速率相加；没填 MAC 则用上方 IP。仅每秒读取连接表，不改路由器配置', 'With a MAC, all device addresses are auto-discovered from DHCP leases and IPv6 neighbours (including changing SLAAC IPv6), and IPv4/IPv6 rates are summed; otherwise the IP above is used. Reads the connection table once per second without changing router config'))}
         ${field(L('流量计算模式', 'Traffic calculation'), `<div class="calc-list">${calcRows || `<div class="form-hint">${esc(L('该设备暂无下级设备', 'No downstream devices yet'))}</div>`}</div>`, L('多选下级设备按其速率之和显示；有包含关系的勾选会自动互斥', 'Select downstream devices to sum their rates; overlapping picks are mutually exclusive'))}
         ${field(L('点击动画', 'Click animation'), `<select id="tnAnim">${ANIMS.map((a) => `<option value="${a}"${(node && (node.anim || 'none') || 'none') === a ? ' selected' : ''}>${esc(animLabel(a))}</option>`).join('')}</select>`, L('点击此设备时触发；「无」表示只选中', 'Played on click; None selects only'))}`)}
       ${section('4', L('设备图标', 'Device icon'), L('可从图标库复用，或直接上传', 'Reuse from library or upload a new one'), `

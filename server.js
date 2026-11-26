@@ -346,12 +346,54 @@ function ipOf(addr) {
   if (s.startsWith('[')) return s.slice(1, s.indexOf(']') > 0 ? s.indexOf(']') : undefined);
   return s.split(':')[0];
 }
-function ipRateTargets(dev) {
+/* IPv6：允许完整地址，去掉 %zone；连接表里的地址形如 [2001:db8::1]:443 */
+const IPV6_RE = /^[0-9a-fA-F:]+$/;
+const macKey = (v) => String(v == null ? '' : v).trim().toLowerCase().replace(/[^0-9a-f]/g, '');
+function validIp(v) {
+  const s = String(v || '').trim().replace(/^\[|\]$/g, '').split('%')[0];
+  return IPV4_RE.test(s) ? s : (IPV6_RE.test(s) && s.includes(':') && s.length >= 3 ? s.toLowerCase() : '');
+}
+/* 建立 MAC -> [IPv4, IPv6...] 映射：DHCP 租约给 v4，IPv6 邻居表(ND)给 v6。
+   SLAAC 的 IPv6 地址会变，按 MAC 动态发现才能持续跟上；读失败就只用节点自填地址。 */
+async function macIpMap(dev) {
+  const map = new Map();
+  const add = (mac, ip) => {
+    const k = macKey(mac), v = validIp(ip);
+    if (!k || !v) return;
+    if (!map.has(k)) map.set(k, new Set());
+    map.get(k).add(v);
+  };
+  try {
+    const leases = await rosPrint(dev, SECTION_MAP.dhcpLeases);
+    for (const r of leases || []) if (r && r['mac-address']) add(r['mac-address'], r.address);
+  } catch (e) { /* DHCP 租约不可用不影响 IPv6 采集 */ }
+  try {
+    const r = await dev.api.exec(['/ipv6/neighbor/print']);
+    if (!r || !r.status || r.status.type !== 'trap') {
+      for (const row of r.re || []) {
+        if (!row || !row['mac-address']) continue;
+        add(row['mac-address'], row.address);
+        if (row.ip) add(row['mac-address'], row.ip);
+      }
+    }
+  } catch (e) { /* IPv6 邻居表不可用（部分 v6 无此路径）时忽略 */ }
+  return map;
+}
+/* 测速目标：每个节点带 id/name/ips[]/mac。有 MAC 时展开该 MAC 在 DHCP + IPv6
+   邻居表登记的所有地址，实现双栈聚合；同时保留节点自填 ip（手填 IPv6 也能用）。 */
+async function ipRateTargets(dev) {
   const out = [];
-  for (const n of customTopology(dev)) {
-    if (!n || n.ipRate !== true || n.deleted) continue;
-    const ip = String(n.ip || '').trim();
-    if (IPV4_RE.test(ip)) out.push({ ip, id: n.id, name: String(n.name || ip) });
+  const nodes = customTopology(dev).filter((n) => n && n.ipRate === true && !n.deleted);
+  if (!nodes.length) return out;
+  const byMac = dev.api && dev.api.connected ? await macIpMap(dev) : new Map();
+  for (const n of nodes) {
+    const ips = new Set();
+    const own = validIp(n.ip);
+    if (own) ips.add(own);
+    const mk = macKey(n.mac);
+    if (mk && byMac.has(mk)) for (const ip of byMac.get(mk)) ips.add(ip);
+    if (!ips.size) continue;
+    out.push({ id: n.id, name: String(n.name || n.ip || n.mac || n.id), mac: String(n.mac || ''), ips: [...ips] });
   }
   return out;
 }
@@ -386,14 +428,15 @@ function numRate(v) {
 async function pollIpRates() {
   const now = Date.now();
   for (const dev of devices.values()) {
-    const targets = ipRateTargets(dev);
+    const targets = await ipRateTargets(dev);
     if (!targets.length) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
     if (dev.forceDemo) {
       /* 演示模式：按 IP 生成「量级不同 + 相位不同」的速率，避免多台设备看起来一个样。
          用 IP 的稳定哈希决定基准量级（0.3x~2.4x），末段再决定波动相位。 */
       const t = now / 1000;
       for (const tg of targets) {
-        const parts = tg.ip.split('.').map(Number);
+        const demoIp = tg.ips[0] || '10.0.0.1';
+        const parts = demoIp.split('.').map(Number);
         const last = parts[parts.length - 1] || 1;
         /* 稳定哈希：同一 IP 每次启动得到相同基准，不同 IP 量级明显不同 */
         const h = parts.reduce((a, x, i) => (a * 31 + x * (i + 7)) >>> 0, 17);
@@ -402,15 +445,15 @@ async function pollIpRates() {
         /* 基准速率占主导（量级差异），波动只 ±18%，保证不同 IP 一眼可区分 */
         const rx = Math.max(0, Math.round((3.2e6 * scale) * (1 + Math.sin(t / 5 + phase) * 0.18) + (Math.random() - .5) * 1e5));
         const tx = Math.max(0, Math.round((9e5 * scale) * (1 + Math.sin(t / 7 + phase * .6) * 0.18) + (Math.random() - .5) * 4e4));
-        dev.ipRates.set(tg.ip, { rxBps: rx, txBps: tx, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id });
+        dev.ipRates.set(demoIp, { rxBps: rx, txBps: tx, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id });
       }
       continue;
     }
     if (!(dev.api && dev.api.connected)) { dev.ipRates.clear(); dev.ipRatePrev.clear(); continue; }
-    const want = new Set(targets.map((t) => t.ip));
-    /* 只拉目标 IP 实际用到的地址族：纯 IPv4 时不查 IPv6 表，进一步降低路由器负载 */
-    const need4 = targets.some((t) => !t.ip.includes(':'));
-    const need6 = targets.some((t) => t.ip.includes(':'));
+    /* 展开所有目标地址（双栈节点会同时含 IPv4 与 IPv6），两张连接表都查 */
+    const want = new Set(targets.flatMap((t) => t.ips));
+    const need4 = [...want].some((ip) => !ip.includes(':'));
+    const need6 = [...want].some((ip) => ip.includes(':'));
     /* 关键：v7 连接表没有 bytes 字段，把它写进 proplist 会让 print trap。
        api.exec 对 trap 仍是 resolve，旧代码直接读空 re，于是所有 IP 速率为 0，
        前端回退到同一个接口的总速率 —— 表现为「所有设备速率一模一样」。
@@ -448,7 +491,7 @@ async function pollIpRates() {
     } catch (e) { err = e.message || String(e); }
     dev.ipRateError = err;
     if (err) {
-      for (const tg of targets) dev.ipRates.set(tg.ip,
+      for (const tg of targets) for (const ip of tg.ips) dev.ipRates.set(ip,
         { rxBps: 0, txBps: 0, rxBytes: 0, txBytes: 0, ts: now, name: tg.name, id: tg.id, connections: 0 });
       continue;
     }
@@ -479,19 +522,32 @@ async function pollIpRates() {
     }
     const dt = Math.max(0.5, (now - (dev.ipRateAt || now - 1000)) / 1000);
     dev.ipRateAt = now;
+    const zero = { up: 0, down: 0, upRate: 0, downRate: 0 };
     for (const tg of targets) {
-      const t = totals.get(tg.ip) || { up: 0, down: 0, upRate: 0, downRate: 0 };
-      const prev = dev.ipRatePrev.get(tg.ip) || { up: t.up, down: t.down };
-      dev.ipRatePrev.set(tg.ip, t);
-      /* 连接生灭会让总数回退，差值为负时按 0 处理，避免假速率 */
-      const upDiff = Math.max(0, t.up - prev.up) / dt, downDiff = Math.max(0, t.down - prev.down) / dt;
+      /* 双栈：把该 MAC 的所有 IPv4/IPv6 地址速率相加，得到设备总上下行 */
+      const agg = { up: 0, down: 0, upRate: 0, downRate: 0 };
+      let conns = 0, upDiff = 0, downDiff = 0;
+      for (const ip of tg.ips) {
+        const t = totals.get(ip) || zero;
+        agg.up += t.up; agg.down += t.down; agg.upRate += t.upRate; agg.downRate += t.downRate;
+        conns += hits.get(ip) || 0;
+        /* 逐地址差分再相加：某个地址的连接消失不会把其它地址的增量抵消掉 */
+        const prev = dev.ipRatePrev.get(ip) || { up: t.up, down: t.down };
+        dev.ipRatePrev.set(ip, t);
+        upDiff += Math.max(0, t.up - prev.up);
+        downDiff += Math.max(0, t.down - prev.down);
+      }
+      upDiff /= dt; downDiff /= dt;
       /* 优先用 RouterOS 原生实时速率（含 FastTrack、响应快），字段缺失时回退字节差分 */
-      let upBps = hasRateField ? t.upRate : upDiff;
-      let downBps = hasRateField ? t.downRate : downDiff;
+      let upBps = hasRateField ? agg.upRate : upDiff;
+      let downBps = hasRateField ? agg.downRate : downDiff;
       if (upBps <= 0 && upDiff > 0) upBps = upDiff;
       if (downBps <= 0 && downDiff > 0) downBps = downDiff;
-      dev.ipRates.set(tg.ip, { rxBps: Math.round(downBps), txBps: Math.round(upBps),
-        rxBytes: t.down, txBytes: t.up, ts: now, name: tg.name, id: tg.id, connections: hits.get(tg.ip) || 0 });
+      const rec = { rxBps: Math.round(downBps), txBps: Math.round(upBps),
+        rxBytes: agg.down, txBytes: agg.up, ts: now, name: tg.name, id: tg.id, connections: conns };
+      /* 写入主地址（前端与 /api/ip-rates 都按主地址取），同时给每个地址写一份供差分 prev 使用 */
+      for (const ip of tg.ips) if (ip !== tg.ips[0]) dev.ipRates.set(ip, rec);
+      dev.ipRates.set(tg.ips[0], rec);
     }
     for (const k of [...dev.ipRatePrev.keys()]) if (!want.has(k)) dev.ipRatePrev.delete(k);
   }
@@ -2244,10 +2300,11 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/ip-rates' && req.method === 'GET') {
     const dev = reqDevice(req, url);
     if (!dev) return json(res, 200, { ok: true, deviceId: '', rows: [] });
-    const targets = ipRateTargets(dev);
+    const targets = await ipRateTargets(dev);
     const rows = targets.map((t) => {
-      const r = dev.ipRates.get(t.ip) || {};
-      return { id: t.id, name: t.name, ip: t.ip,
+      /* 双栈节点已把各地址速率汇总写入主地址，这里直接读取即可 */
+      const r = dev.ipRates.get(t.ips[0]) || {};
+      return { id: t.id, name: t.name, ip: t.ips[0], ips: t.ips, mac: t.mac,
         rxBps: Number(r.rxBps) || 0, txBps: Number(r.txBps) || 0,
         rxBytes: Number(r.rxBytes) || 0, txBytes: Number(r.txBytes) || 0,
         connections: Number(r.connections) || 0, ts: Number(r.ts) || 0 };

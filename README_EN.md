@@ -21,7 +21,7 @@ More screenshots: [docs/screenshots](docs/screenshots).
 - **Multi-device**: switch from the top bar; add / edit / test / remove devices; each device has its own connection, history and config cache
 - **Dashboard**: native `monitor-traffic` streaming; total up/down, trend chart, interface type breakdown, connection ranking, device health; drag-to-reorder and show/hide blocks
 - **Traffic statistics**: reads real interface counters, sampled every second and accumulated per interface per day; survives PPPoE re-dials; today/week/month/all-time trends
-- **Network topology**: auto-discovery via neighbours + DHCP leases; draggable layered layout, zoom/pan, per-node icon and live up/down rates; type-coloured flashlight beams that brighten with traffic; per-IP live measurement and calculated-flow nodes
+- **Network topology**: auto-discovery via neighbours + DHCP leases; draggable layered layout, zoom/pan, per-node icon and live up/down rates; type-coloured flashlight beams that brighten with traffic; per-IP/MAC live measurement (a MAC auto-discovers both IPv4 and IPv6 addresses, including changing SLAAC ones, and sums them) and calculated-flow nodes
 - **Categorized config**: interfaces, IP, DHCP, DNS, routes, firewall, WiFi, AC, PPP, WireGuard, queues, users, scripts and more; full CRUD, search, sort, adjustable columns and block sizes; DHCP leases reuse topology device live rates
 - **Backup & restore**: one-click backup/restore of all WebUI settings, plus full RouterOS config export (including sensitive entries) with an automatic rollback backup before import
 - **Maintenance tools**: reboot, ICMP diagnosis with live results, real-time event stream, recent config changes; update checker with in-app self-update; one-click network setup
