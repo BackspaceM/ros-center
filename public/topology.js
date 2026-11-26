@@ -350,7 +350,9 @@
       const upText = hasRate ? '↑' + fmtRate(rate.txBps) : '';
       const downText = hasRate ? '↓' + fmtRate(rate.rxBps) : '';
       /* 空闲标签始终渲染，由 paintRates() 按实时速率切换显隐（避免首次渲染后不再更新） */
-      const idleLabel = `<g class="topo-idle" style="display:${hasRate ? 'none' : ''}"><rect x="${NODE_W / 2 - RATE_W + 6}" y="-8" width="28" height="16" rx="8"/><text x="${NODE_W / 2 - RATE_W + 20}" y="3" text-anchor="middle">${esc(L('空闲', 'Idle'))}</text></g>`;
+      /* 速率段范围 x∈[NODE_W/2-RATE_W-2, NODE_W/2]，段中心 = NODE_W/2-RATE_W/2-1 */
+      const rateMid = NODE_W / 2 - RATE_W / 2 - 1;
+      const idleLabel = `<g class="topo-idle" style="display:${hasRate ? 'none' : ''}"><rect x="${rateMid - 14}" y="-8" width="28" height="16" rx="8"/><text x="${rateMid}" y="3" text-anchor="middle">${esc(L('空闲', 'Idle'))}</text></g>`;
       const cx = (-NODE_W / 2 + ICON_W) + (NODE_W - ICON_W - RATE_W) / 2;
       /* 类型色灯光：手电筒式——顶点在卡片顶部内侧、icon 水平中心，向下扩散到 icon 上方、
          底边宽度与 icon 一致；强度按实时速率在 paintRates() 里更新。 */

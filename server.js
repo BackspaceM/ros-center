@@ -385,7 +385,12 @@ async function ipRateTargets(dev) {
   const out = [];
   const nodes = customTopology(dev).filter((n) => n && n.ipRate === true && !n.deleted);
   if (!nodes.length) return out;
-  const byMac = dev.api && dev.api.connected ? await macIpMap(dev) : new Map();
+  /* MAC→IP 映射缓存 10 秒：SLAAC 地址变化不会秒级发生，没必要每秒多读两张表（增加延迟与路由负载） */
+  let byMac = dev.ipRateMacMap;
+  if (!byMac || Date.now() - (dev.ipRateMacAt || 0) > 10000) {
+    byMac = dev.api && dev.api.connected ? await macIpMap(dev) : new Map();
+    dev.ipRateMacMap = byMac; dev.ipRateMacAt = Date.now();
+  }
   for (const n of nodes) {
     const ips = new Set();
     const own = validIp(n.ip);
@@ -459,6 +464,8 @@ async function pollIpRates() {
        前端回退到同一个接口的总速率 —— 表现为「所有设备速率一模一样」。
        orig-rate/repl-rate 是 RouterOS 原生实时速率（bps），比字节差分更及时、更准；
        FastTrack 流量不计入 orig-bytes，而是单独记在 *-fasttrack-bytes，必须一起取。 */
+    /* 必须显式 proplist 请求 rate 字段：RouterOS 默认 print 不返回 orig-rate/repl-rate，
+       全字段读取时 rate 为空（实测上行从 268KB/s 掉到 50KB/s）。 */
     const props = '=.proplist=src-address,dst-address,orig-bytes,repl-bytes,orig-rate,repl-rate,orig-fasttrack-bytes,repl-fasttrack-bytes';
     async function connectionRows(path) {
       const run = async (words) => {
@@ -467,12 +474,11 @@ async function pollIpRates() {
         return { trap: '', rows: r.re || [] };
       };
       const a = await run([path, props]);
-      /* 不支持 proplist / 返回空表：退回全字段（老版本 RouterOS） */
       if (a.trap || !a.rows.length) {
         const b = await run([path]);
         if (!b.trap) return b.rows;
       }
-      /* v6 只有 bytes：proplist 请求不到计数时再取一次全字段 */
+      /* v6 只有 bytes：proplist 拿不到计数时再取全字段 */
       if (a.rows.length && !a.rows.some((r) => r['orig-bytes'] !== undefined || r['repl-bytes'] !== undefined)) {
         const b = await run([path]);
         if (!b.trap && b.rows.length) return b.rows;
@@ -538,11 +544,14 @@ async function pollIpRates() {
         downDiff += Math.max(0, t.down - prev.down);
       }
       upDiff /= dt; downDiff /= dt;
-      /* 优先用 RouterOS 原生实时速率（含 FastTrack、响应快），字段缺失时回退字节差分 */
+      /* RouterOS 连接级 rate 求和为主：BT 连接高频生灭，任何基于快照的差分都会丢增量，
+         而 rate 字段是路由器内部滑动窗口速率，口径接近 TR 客户端。差分仅作兜底。 */
       let upBps = hasRateField ? agg.upRate : upDiff;
       let downBps = hasRateField ? agg.downRate : downDiff;
       if (upBps <= 0 && upDiff > 0) upBps = upDiff;
       if (downBps <= 0 && downDiff > 0) downBps = downDiff;
+      /* 不做服务端平滑：RouterOS rate 字段本身是滑动窗口值，额外平滑会引入可感知延迟。
+         前端已有 0.35s CSS 过渡消抖，保证速率即时响应。 */
       const rec = { rxBps: Math.round(downBps), txBps: Math.round(upBps),
         rxBytes: agg.down, txBytes: agg.up, ts: now, name: tg.name, id: tg.id, connections: conns };
       /* 写入主地址（前端与 /api/ip-rates 都按主地址取），同时给每个地址写一份供差分 prev 使用 */
