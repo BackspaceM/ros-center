@@ -53,7 +53,7 @@ jobs:
           # Docker Hub overview uses the concise Chinese README only (no English overview).
           raw = open("README.md", encoding="utf-8").read()
           print(json.dumps({
-            "description": "RouterOS 多设备管理中心：实时流量、流量统计、分类配置、网络拓扑、中英双语、14 套主题",
+            "description": "RouterOS 多设备管理中心：实时流量、拓扑、配置、备份，双语多主题",
             "full_description": raw
           }))
           PY
