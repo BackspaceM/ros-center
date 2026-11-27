@@ -1,6 +1,12 @@
 'use strict';
 
 /* ================= 配置表格页 ================= */
+/* Tauri 桌面壳：通过底层 IPC 调用 Rust 命令（零 npm 依赖） */
+function isTauriDesktop() { return !!(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke); }
+function tauriInvoke(cmd, args) {
+  if (!isTauriDesktop()) return Promise.reject(new Error('非桌面版环境'));
+  return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+}
 /* MAC 列不再做 OUI 厂商猜测：直接复用网络拓扑里给该设备上传的图标。
    按 MAC → IP → 名称 依次匹配，自动发现节点带出 MAC，手工节点可填 MAC。 */
 const macKeyOf = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-F]/g, '');
@@ -363,8 +369,8 @@ function renderRows(sec) {
     return `<tr data-id="${esc(r['.id'])}" title="RouterOS .id: ${esc(r['.id'])}" class="${state.selectedIds.has(r['.id']) ? 'selected' : ''}">
     ${writable ? `<td><input type="checkbox" class="check rowcheck" data-id="${esc(r['.id'])}" ${state.selectedIds.has(r['.id']) ? 'checked' : ''}></td>` : ''}
     <td class="num rownum">${rowno}</td>
-    ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''}>${cellHtml(r, c, sec)}</td>`).join('')}
-    ${writable ? `<td><div class="row-actions">
+    ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''} data-label="${esc(fieldLabel(sec, c))}">${cellHtml(r, c, sec)}</td>`).join('')}
+    ${writable ? `<td class="row-actions-cell"><div class="row-actions">
       ${sec.runAction ? `<button class="icon-btn run" data-act="run" title="${esc(t('run_script_row'))}">▶</button>` : ''}
       ${!sec.runAction && sec.toggle !== false ? `<button class="icon-btn" data-act="toggle" title="${boolOn(r.disabled) ? t('enable') : t('disable')}">${boolOn(r.disabled) ? '○' : '●'}</button>` : ''}
       ${sec.id === 'wireguard' || sec.id === 'wgPeers' ? `<button class="icon-btn qr" data-act="qr" title="${t('wg_qr')}">▣</button>` : ''}
@@ -431,15 +437,21 @@ function cellHtml(row, key, sec) {
     }
     return fmtBytes(v);
   }
-  if (key === 'comment' && sec && sec.id === 'dhcpLeases' && String(v || '').startsWith('ROS-TOPO-v1:')) {
-    /* 拓扑同步的租约：comment 里是编码元数据，显示紧凑徽标 + 用户原备注 */
-    let uc = '';
-    try {
-      let b = String(v).slice('ROS-TOPO-v1:'.length).replace(/-/g, '+').replace(/_/g, '/');
-      while (b.length % 4) b += '=';
-      const m = JSON.parse(decodeURIComponent(escape(atob(b)))); uc = m.uc || '';
-    } catch (e) { /* ignore */ }
-    return `<span class="tag blue" title="${esc(L('由网络拓扑同步生成', 'Synced from network topology'))}">${esc(L('拓扑同步', 'Topo sync'))}</span>${uc ? ' ' + esc(uc) : ''}`;
+  if (key === 'comment' && sec && sec.id === 'dhcpLeases') {
+    /* 拓扑同步识别改为按 MAC/IP 关联拓扑节点（comment 现在只是可空备注） */
+    const n = topoNodeFor(row, row['mac-address']);
+    const isTopo = !!(n && n.id);
+    /* 历史 base64 元数据：解析出原备注继续展示，平滑过渡 */
+    let legacy = '';
+    if (String(v || '').startsWith('ROS-TOPO-v1:')) {
+      try {
+        let b = String(v).slice('ROS-TOPO-v1:'.length).replace(/-/g, '+').replace(/_/g, '/');
+        while (b.length % 4) b += '=';
+        const m = JSON.parse(decodeURIComponent(escape(atob(b)))); legacy = m.uc || '';
+      } catch (e) { /* ignore */ }
+    }
+    const shown = legacy || String(v || '');
+    return `${isTopo ? `<span class="tag blue" title="${esc(L('由网络拓扑同步生成', 'Synced from network topology'))}">${esc(L('拓扑同步', 'Topo sync'))}</span> ` : ''}${shown ? esc(shown) : '<span class="muted-cell">—</span>'}`;
   }
   if (key === 'password' || key === 'private-key' || /pre-?shared-key/.test(key)) return '<span class="tag">••••••••</span>';
   const f = sec.fields.find((x) => x.key === key);
@@ -1025,36 +1037,74 @@ function renderConnectionSettings() {
         <span class="tag" id="devPortTag">${t('conn_web_port')}: ${esc(state.webPort || 10086)}</span>
         <button class="btn primary" id="devAdd">+ ${t('device_add')}</button>
       </div></div>
-    <div class="note-card">${t('device_hint')} · ${t('device_count')}: <b id="devCount">${state.devices.length}</b></div>
-    <div class="panel" style="margin-top:14px"><div class="table-scroll"><table>
-      <thead><tr><th>${t('device_name')}</th><th>${t('conn_host')}</th><th>${t('conn_port')}</th><th>${t('conn_user')}</th>
-        <th>${t('device_status')}</th><th>${t('conn_demo')}</th><th style="width:270px"></th></tr></thead>
-      <tbody id="devBody"></tbody></table></div></div>
-    <div class="grid-2" style="margin-top:14px">
-      <div class="panel"><div class="panel-head"><div><h2>${t('conn_web_port')}</h2><p class="sub">${t('conn_web_port_hint')}</p></div></div>
-        <div class="panel-body"><div class="form-row"><label>${t('conn_web_port')}</label>
-          <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 10086)}">
-          <p class="form-hint">${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 10086)}</p></div></div>
-          <button class="btn primary" id="devSavePort">${t('save')}</button></div></div>
-      <div class="panel"><div class="panel-head"><div><h2>${t('conn_security')}</h2><p class="sub">${esc(t('note'))}</p></div></div>
-        <div class="panel-body"><div class="note-card warn">${t('conn_security_tip')}</div>
-          <div class="modal-note"><b>RouterOS CLI:</b><pre class="code">/user group add name=webui policy=read,api
+
+    <section class="dev-section">
+      <div class="dev-section-head">
+        <div class="dev-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M6 20h12M12 17v3"/><circle cx="6.5" cy="10.5" r="1" fill="currentColor"/><path d="M11 10.5h6"/></svg></div>
+        <div><b>${esc(L('已连接设备', 'Connected devices'))}</b><p>${esc(t('device_hint'))}</p></div>
+        <span class="dev-count"><b id="devCount">${state.devices.length}</b> ${esc(t('device_count'))}</span>
+      </div>
+      <div class="dev-grid" id="devBody"></div>
+    </section>
+
+    <div class="dev-settings-grid">
+      <section class="dev-set-card">
+        <div class="dev-set-head"><div class="dev-set-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg></div>
+          <div><b>${t('conn_web_port')}</b><small>${t('conn_web_port_hint')}</small></div></div>
+        <div class="dev-set-body">
+          <div class="form-row"><label>${t('conn_web_port')}</label>
+            <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 10086)}">
+              <p class="form-hint">${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 10086)}</p></div></div>
+          <button class="btn primary" id="devSavePort">${t('save')}</button>
+        </div>
+      </section>
+
+      <section class="dev-set-card">
+        <div class="dev-set-head"><div class="dev-set-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v5c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <div><b>${t('conn_security')}</b><small>${esc(t('note'))}</small></div></div>
+        <div class="dev-set-body">
+          <div class="dev-warn">${t('conn_security_tip')}</div>
+          <details class="dev-cli"><summary>RouterOS CLI · ${esc(L('只读账号配置', 'read-only account'))}</summary>
+<pre class="code">/user group add name=webui policy=read,api
 /user add name=webui group=webui password=${L('强密码', 'strong-password')}
-/ip service set api address=10.0.0.0/24</pre></div>
-          <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
-            <div style="font-weight:600;margin-bottom:6px">${t('login_title')}</div>
-            <div class="modal-note" style="font-size:11.5px;margin-bottom:10px">${t('login_hint')}</div>
-            ${state.authEnabled ? `<div class="modal-note" style="margin-bottom:8px">${t('login_current')}: <b>${esc(state.authUser)}</b></div>` : ''}
-            <div class="form-row"><label>${t('login_user')}</label><div><input id="authUser" value="${esc(state.authUser || 'admin')}" autocomplete="off"><p class="form-hint">${t('login_user_hint')}</p></div></div>
-            <div class="form-row"><label>${t('login_pass')}</label><div><input type="password" id="authPass" autocomplete="new-password" placeholder="••••••"><p class="form-hint">${t('login_pass_hint')}</p></div></div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn primary" id="authSave">${t('login_enable')}</button>
-              ${state.authEnabled ? `<button class="btn ghost-danger" id="authDisable">${t('login_disable')}</button>` : ''}
-            </div>
-            <div id="authResult" style="margin-top:10px"></div>
+/ip service set api address=10.0.0.0/24</pre></details>
+          <div class="dev-subhead">${t('login_title')}</div>
+          <div class="dev-hint">${t('login_hint')}</div>
+          ${state.authEnabled ? `<div class="dev-warn">${t('login_current')}: <b>${esc(state.authUser)}</b></div>` : ''}
+          <div class="form-row"><label>${t('login_user')}</label><div><input id="authUser" value="${esc(state.authUser || 'admin')}" autocomplete="off"><p class="form-hint">${t('login_user_hint')}</p></div></div>
+          <div class="form-row"><label>${t('login_pass')}</label><div><input type="password" id="authPass" autocomplete="new-password" placeholder="••••••"><p class="form-hint">${t('login_pass_hint')}</p></div></div>
+          <div class="dev-set-actions">
+            <button class="btn primary" id="authSave">${t('login_enable')}</button>
+            ${state.authEnabled ? `<button class="btn ghost-danger" id="authDisable">${t('login_disable')}</button>` : ''}
           </div>
-        </div></div>
+          <div id="authResult"></div>
+        </div>
+      </section>
+
+      ${isTauriDesktop() ? `<section class="dev-set-card">
+        <div class="dev-set-head"><div class="dev-set-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/><path d="M12 7v5l3 2"/></svg></div>
+          <div><b>${esc(L('桌面版设置', 'Desktop settings'))}</b><small>${esc(L('仅桌面版可见', 'Desktop app only'))}</small></div></div>
+        <div class="dev-set-body">
+          <div class="form-row"><label>${esc(L('关闭窗口', 'Close window'))}</label>
+            <div><select id="deskCloseMode"><option value="tray">${esc(L('最小化到托盘（后台继续运行）', 'Minimize to tray (keep running)'))}</option><option value="quit">${esc(L('完全退出程序', 'Quit application'))}</option></select>
+              <p class="form-hint">${esc(L('托盘图标右键可退出程序', 'Right-click the tray icon to quit'))}</p></div></div>
+          <div id="deskUpdateNote" class="form-hint" style="margin-bottom:10px"></div>
+          <button class="btn primary" id="deskSave">${esc(t('save'))}</button>
+        </div></section>` : ''}
     </div>`;
+  if (isTauriDesktop()) {
+    tauriInvoke('get_close_to_tray').then((v) => {
+      const s = $('deskCloseMode'); if (s) s.value = v ? 'tray' : 'quit';
+    }).catch(() => {});
+    const save = $('deskSave');
+    if (save) save.onclick = async () => {
+      const s = $('deskCloseMode'); if (!s) return;
+      try { await tauriInvoke('set_close_to_tray', { value: s.value === 'tray' }); toast(t('saved_ok'), 'ok'); }
+      catch (e) { toast(e.message || String(e), 'err'); }
+    };
+    const dn = $('deskUpdateNote');
+    if (dn) tauriInvoke('get_server_port').then((p) => { dn.textContent = `${L('本地服务端口', 'Local service port')}: ${p || '10086'}`; }).catch(() => {});
+  }
   const renderRows = (force) => {
     const tb = $('devBody'); if (!tb) return;
     /* 状态签名去重：WS 每秒帧只在真正变化时重画，避免打断点击 */
@@ -1063,18 +1113,25 @@ function renderConnectionSettings() {
     if (!force && tb.dataset.sig === sig) return;
     tb.dataset.sig = sig;
     $('devCount').textContent = state.devices.length;
-    tb.innerHTML = state.devices.map((d) => `<tr data-dev="${esc(d.id)}">
-      <td><b>${esc(d.name)}</b>${d.id === state.devicePrimary ? ' <span class="tag blue">' + esc(t('device_current')) + '</span>' : ''}</td>
-      <td>${esc(d.host)}</td><td>${esc(d.port)}</td><td>${esc(d.user)}</td>
-      <td>${deviceStatusTag(d)}</td><td>${d.demo ? t('yes') : t('no')}</td>
-      <td><div class="row-actions">
-        ${d.id === state.deviceId ? '<span class="tag blue">' + esc(t('device_active')) + '</span>' : `<button class="icon-btn" data-act="use" title="${t('device_primary')}">✓</button>`}
-        <button class="icon-btn" data-act="edit" title="${t('device_edit')}">✎</button>
-        <button class="icon-btn" data-act="reconn" title="${t('device_reconnect')}">↻</button>
-        <button class="icon-btn del" data-act="del" title="${t('device_del')}">✕</button>
-      </div></td></tr>`).join('') || `<tr><td colspan="7" class="empty">${t('no_data')}</td></tr>`;
+    tb.innerHTML = state.devices.map((d) => {
+      const primary = d.id === state.devicePrimary;
+      const active = d.id === state.deviceId;
+      return `<div class="dev-card${primary ? ' primary' : ''}${active ? ' active' : ''}" data-dev="${esc(d.id)}">
+        <div class="dev-card-top">
+          <div class="dev-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="6" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><path d="M13 12h4M6 3v3M18 3v3"/></svg></div>
+          <div class="dev-card-id"><b>${esc(d.name)}</b><span>${esc(d.host)}:${esc(d.port)} · ${esc(d.user)}</span></div>
+          <div class="dev-card-badges">${deviceStatusTag(d)}${primary ? `<span class="tag blue">${esc(t('device_current'))}</span>` : ''}${active ? `<span class="tag green">${esc(t('device_active'))}</span>` : ''}${d.demo ? `<span class="tag">${esc(t('conn_demo'))}</span>` : ''}</div>
+        </div>
+        <div class="dev-card-actions">
+          ${active ? '' : `<button class="icon-btn" data-act="use" title="${t('device_primary')}">✓</button>`}
+          <button class="icon-btn" data-act="edit" title="${t('device_edit')}">✎</button>
+          <button class="icon-btn" data-act="reconn" title="${t('device_reconnect')}">↻</button>
+          <button class="icon-btn del" data-act="del" title="${t('device_del')}">✕</button>
+        </div>
+      </div>`;
+    }).join('') || `<div class="empty">${t('no_data')}</div>`;
     tb.querySelectorAll('[data-act]').forEach((b) => b.onclick = () => {
-      const id = b.closest('tr').dataset.dev;
+      const id = b.closest('.dev-card').dataset.dev;
       const dev = state.devices.find((x) => x.id === id);
       const act = b.dataset.act;
       if (act === 'use') setPrimary(id);
@@ -1092,21 +1149,43 @@ function renderConnectionSettings() {
   }
   function openDeviceForm(dev) {
     const isNew = !dev;
+    const card = (label, key, ctrl, wide) => `<div class="lease-card${wide ? ' lease-card--wide' : ''}" data-name="${esc((label + ' ' + key).toLowerCase())}"><label>${label} <small>${esc(key)}</small></label>${ctrl}</div>`;
+    const sw = (label, key, id, on) => `<div class="lease-card" data-name="${esc((label + ' ' + key).toLowerCase())}"><div class="lease-switch"><span>${label}</span><label class="upd-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><i></i></label></div></div>`;
     const body = `
-      <div class="form-row"><label>${t('device_name')} <span class="req">*</span></label><div><input id="dvName" value="${esc(dev ? dev.name : '')}"></div></div>
-      <div class="form-row"><label>${t('conn_host')} <span class="req">*</span></label><div><input id="dvHost" value="${esc(dev ? dev.host : '')}" placeholder="10.0.0.1"></div></div>
-      <div class="form-row"><label>${t('conn_port')} <span class="req">*</span></label><div><input type="number" id="dvPort" min="1" max="65535" value="${esc(dev ? dev.port : 8728)}"></div></div>
-      <div class="form-row"><label>${t('conn_user')} <span class="req">*</span></label><div><input id="dvUser" value="${esc(dev ? dev.user : '')}" autocomplete="off"></div></div>
-      <div class="form-row"><label>${t('conn_password')}</label><div><input type="password" id="dvPass" autocomplete="new-password" placeholder="${esc(t('device_no_password'))}"></div></div>
-      <div class="form-row"><label>${t('conn_tls')}</label><div class="form-check"><input type="checkbox" id="dvTls" ${dev && dev.tls ? 'checked' : ''}></div></div>
-      <div class="form-row"><label>${t('conn_demo')}</label><div class="form-check"><input type="checkbox" id="dvDemo" ${dev && dev.demo ? 'checked' : ''}></div></div>
-      <div id="dvResult" style="margin-top:10px"></div>`;
-    const introHtml = `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
-      <div><b>${esc(isNew ? t('device_add') : t('device_edit'))}</b><p>${esc(L('填写 RouterOS 的连接信息；可先测试连接再保存。', 'Enter RouterOS connection details; test before saving.'))}</p></div></div>`;
-    openModal(isNew ? t('device_add') : t('device_edit'), introHtml + body,
+      <div class="lease-intro ui-intro">
+        <div class="lease-intro-icon ui-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M6 20h12M12 17v3"/><circle cx="6.5" cy="10.5" r="1" fill="currentColor"/><path d="M11 10.5h6"/></svg></div>
+        <div><b>${esc(isNew ? t('device_add') : t('device_edit'))}${dev ? ' · ' + esc(dev.name) : ''}</b>
+          <p>${esc(L('填写 RouterOS 的连接信息，可先测试连接再保存；保存后自动连接该设备。', 'Enter RouterOS connection details; test before saving. Connects automatically on save.'))}</p></div>
+      </div>
+      <div class="picker-toolbar">
+        <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="text" id="dvSearch" placeholder="${esc(L('搜索字段…', 'Search fields…'))}"></div>
+      </div>
+      <div class="lease-form-wrap">
+        <div class="lease-group"><div class="lease-group-title"><i style="background:var(--blue)"></i>${esc(L('连接信息', 'Connection'))} <small>${esc(L('RouterOS 设备', 'RouterOS device'))}</small></div>
+          <div class="lease-grid" id="dvGrid">
+            ${card(L('设备名称', 'name', `<input id="dvName" value="${esc(dev ? dev.name : '')}" placeholder="主路由">`))}
+            ${card(L('主机地址', 'host', `<input id="dvHost" value="${esc(dev ? dev.host : '')}" placeholder="10.0.0.1">`))}
+            ${card(L('API 端口', 'port', `<input type="number" id="dvPort" min="1" max="65535" value="${esc(dev ? dev.port : 8728)}">`))}
+            ${card(L('用户名', 'user', `<input id="dvUser" value="${esc(dev ? dev.user : '')}" autocomplete="off">`))}
+            ${card(L('密码', 'password', `<input type="password" id="dvPass" autocomplete="new-password" placeholder="${esc(t('device_no_password'))}">`, true))}
+          </div></div>
+        <div class="lease-group"><div class="lease-group-title"><i style="background:var(--green)"></i>${esc(L('连接选项', 'Options'))}</div>
+          <div class="lease-grid">
+            ${sw(L('使用 TLS 加密', 'tls', 'dvTls', !!(dev && dev.tls)))}
+            ${sw(L('演示数据', 'demo', 'dvDemo', !!(dev && dev.demo)))}
+          </div></div>
+      </div>
+      <div id="dvResult"></div>`;
+    openModal(isNew ? t('device_add') : t('device_edit'), body,
       `<span class="ui-summary">${esc(L('保存后即连接该设备', 'Connects on save'))}</span>
        <button class="btn" data-close>${t('cancel')}</button><button class="btn" id="dvTest">${t('device_test')}</button><button class="btn primary" id="dvSave">${t('save')}</button>`,
       (m) => {
+        const ds = m.querySelector('#dvSearch');
+        if (ds) ds.oninput = () => {
+          const q = ds.value.trim().toLowerCase();
+          m.querySelectorAll('.lease-form-wrap .lease-card').forEach((c) => { c.style.display = !q || (c.dataset.name || '').includes(q) ? '' : 'none'; });
+        };
         m.querySelector('[data-close]').onclick = closeModal;
         const vals = () => ({ name: m.querySelector('#dvName').value.trim(), host: m.querySelector('#dvHost').value.trim(),
           port: Number(m.querySelector('#dvPort').value), user: m.querySelector('#dvUser').value.trim(),

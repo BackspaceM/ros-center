@@ -18,6 +18,73 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tauri-macos:
+    name: Tauri GUI (macOS arm64 + x64)
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - uses: actions/cache@v4
+        with:
+          path: dist/base
+          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
+      - run: cargo install tauri-cli --version '^2' --locked
+      - run: node build/tauri-assets.js --arch=arm64
+      - run: cargo tauri build --target aarch64-apple-darwin
+        working-directory: src-tauri
+      - run: node build/tauri-assets.js --arch=x64
+      - run: cargo tauri build --target x86_64-apple-darwin
+        working-directory: src-tauri
+      - name: Collect Tauri macOS bundles
+        run: |
+          mkdir -p dist/tauri-out
+          find src-tauri/target/aarch64-apple-darwin/release/bundle -type f \( -name '*.dmg' -o -name '*.app.tar.gz' \) -exec cp {} dist/tauri-out/ \; 2>/dev/null || true
+          find src-tauri/target/x86_64-apple-darwin/release/bundle -type f \( -name '*.dmg' -o -name '*.app.tar.gz' \) -exec cp {} dist/tauri-out/ \; 2>/dev/null || true
+          for f in dist/tauri-out/*; do [ -e "$f" ] && shasum -a 256 "$f" > "$f.sha256"; done || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-macos
+          if-no-files-found: warn
+          path: dist/tauri-out/*
+
+  tauri-windows:
+    name: Tauri GUI (Windows x64, WebView2 bootstrap)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - uses: actions/cache@v4
+        with:
+          path: dist/base
+          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
+      - run: cargo install tauri-cli --version '^2' --locked
+      - run: node build/tauri-assets.js --arch=win
+      - run: cargo tauri build --target x86_64-pc-windows-msvc
+        working-directory: src-tauri
+      - name: Collect Tauri Windows bundles
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/tauri-out | Out-Null
+          Get-ChildItem -Path src-tauri/target/x86_64-pc-windows-msvc/release/bundle -Recurse -File -Include *.msi,*.exe | Copy-Item -Destination dist/tauri-out
+          Get-ChildItem dist/tauri-out/* | ForEach-Object { $h=(Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" | Set-Content "$($_.FullName).sha256" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-windows
+          if-no-files-found: warn
+          path: dist/tauri-out/*
+
   portable:
     name: Portable ZIP (macOS / Windows)
     runs-on: ubuntu-latest
@@ -99,7 +166,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [portable, macos, windows]
+    needs: [portable, macos, windows, tauri-macos, tauri-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +181,14 @@ jobs:
           cat > /tmp/release-notes.md <<'EOF'
           ## ROS Center 桌面版
 
+          ### 新版：Tauri 原生桌面界面（推荐）
+          双击 App 直接打开**原生应用窗口**（内嵌 WebView），不再弹系统浏览器、Windows 不再有黑色 CMD 窗口。
+          托盘常驻：关闭窗口默认最小化到托盘（后台继续运行），可在「系统管理 → 设备管理 → 桌面版设置」改为完全退出；
+          托盘图标左键打开窗口、右键菜单退出。Windows 若缺少 WebView2 Runtime，安装器会自动引导安装。
+          产物前缀 `tauri-`：macOS 为 `.dmg` / `.app.tar.gz`，Windows 为 `.msi` / `.exe`。
+          资源里内置 Node.js 运行时与应用源码，首次启动同步到用户数据目录，后续应用内更新照常可用。
+
+          ### 兼容版：启动器 + 系统浏览器
           开箱即用：内置 Node.js 运行时，目标机器无需安装 Node.js 或执行 `npm install`。
           启动后自动打开浏览器访问 `http://localhost:10086`（端口占用会自动顺延）。
 

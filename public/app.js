@@ -415,7 +415,7 @@ function toast(msg, kind = '') {
 }
 async function api(path, opts) {
   /* 所有配置类接口自动带上当前设备；设备管理/目录接口除外 */
-  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status|usage|topology)(\?|$)/.test(path)) {
+  if (state.deviceId && /^\/api\/(config|action|snapshot|history|status|usage|topology|link-quality)(\?|$)/.test(path)) {
     path += (path.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(state.deviceId);
   }
   const r = await fetch(path, opts);

@@ -60,6 +60,11 @@ function safeEndpoint(url) {
 function friendlyError(e, depth = 0) {
   if (!e) return '未知错误';
   if (depth > 3) return '网络请求失败';
+  const m = String((e && e.message) || e);
+  /* DNS 解析失败：直接给可操作提示，而不是裸 EAI_AGAIN / ENOTFOUND */
+  if (/EAI_AGAIN|ENOTFOUND|getaddrinfo/i.test(m)) {
+    return 'DNS 解析失败（' + m + '）· 请检查网络/DNS，或配置代理 / 镜像源';
+  }
   if ((typeof AggregateError !== 'undefined' && e instanceof AggregateError) || (Array.isArray(e.errors) && e.errors.length)) {
     const parts = (e.errors || []).map((x) => {
       if (!x) return '';
@@ -226,11 +231,25 @@ async function httpGet(url, opts = {}, redirects = 4) {
   return r;
 }
 async function fetchJson(url, opts) {
-  const r = await httpGet(url, opts);
+  let r;
+  try {
+    r = await httpGet(url, opts);
+  } catch (e) {
+    /* DNS 解析失败（EAI_AGAIN / ENOTFOUND 等）给出可操作提示，而不是裸错误码 */
+    const m = String((e && e.message) || e);
+    if (/EAI_AGAIN|ENOTFOUND|getaddrinfo/i.test(m)) {
+      throw new Error(`无法解析 ${safeEndpoint(new URL(url).host)} 的 DNS（${m}）· 请检查路由器/DNS，或配置代理 / 镜像源`);
+    }
+    throw e;
+  }
   if (r.status < 200 || r.status >= 300) {
     throw new Error(`HTTP ${r.status} · ${r.body.toString('utf8').slice(0, 160)}`);
   }
-  try { return JSON.parse(r.body.toString('utf8')); } catch (e) { throw new Error('返回内容不是 JSON'); }
+  try { return JSON.parse(r.body.toString('utf8')); } catch (e) {
+    /* 镜像站返回 HTML/错误页时，带上端点和内容摘要，便于判断是否填错地址 */
+    const head = r.body.toString('utf8').replace(/\s+/g, ' ').slice(0, 120);
+    throw new Error(`返回内容不是 JSON（${safeEndpoint(url)}）· 实际返回：${head || '(空)'}`);
+  }
 }
 async function downloadBinary(url, opts = {}) {
   const r = await httpGet(url, {

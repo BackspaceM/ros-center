@@ -42,6 +42,7 @@ const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
 const TOPOLOGY_FILE = path.join(DATA_DIR, 'topology.json');
 const TOPO_ICON_DIR = path.join(DATA_DIR, 'topology-icons');
 const BACKUP_STATUS_FILE = path.join(DATA_DIR, 'backup-status.json');
+const QUALITY_NW_FILE = path.join(DATA_DIR, 'quality-netwatch.json');
 const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
 let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
@@ -1266,25 +1267,20 @@ async function rosWrite(dev, section, action, payload) {
 }
 
 /* ================= 拓扑 ↔ DHCP 租约联动 =================
-   RouterOS 静态租约只有 address / mac-address / host-name / comment 等有限字段，
-   拓扑特有的 type / icon / parent / ports 等编码进 comment（前缀 ROS-TOPO-v1:），
-   「重新发现」读租约时解析回来，保证类型、图标、层级不丢。
-   编码用 base64url，只含安全字符，不会破坏 RouterOS comment。 */
+   RouterOS 静态租约的 comment 只写拓扑设备名（纯 ASCII；含中文等 WinBox 可能
+   显示异常的字符则留空），不再塞 base64 元数据。拓扑特有的 type / icon / parent
+   等字段仍完整保存在 data/topology.json， 「重新发现」通过 MAC 复用拓扑节点 id，
+   由前端 custom 覆盖 auto，类型/图标/层级不丢也不重复。 */
 const TOPO_COMMENT_PREFIX = 'ROS-TOPO-v1:';
 const TOPO_META_KEYS = ['id', 'name', 'type', 'icon', 'parent', 'parentPort', 'iface', 'ports', 'anim', 'note', 'order', 'calcFrom', 'ipRate'];
-function encodeTopoComment(node, keepComment) {
-  const meta = {};
-  for (const k of TOPO_META_KEYS) {
-    const v = node && node[k];
-    if (v === undefined || v === null || v === '' || v === false) continue;
-    if (Array.isArray(v) && !v.length) continue;
-    meta[k] = v;
-  }
-  /* 补全已有租约时保留用户原本手写的备注，避免覆盖 */
-  if (keepComment && !decodeTopoComment(keepComment)) meta.uc = String(keepComment).slice(0, 120);
-  try { return TOPO_COMMENT_PREFIX + Buffer.from(JSON.stringify(meta), 'utf8').toString('base64url'); }
-  catch (e) { return TOPO_COMMENT_PREFIX; }
+/* 设备名 → RouterOS comment：仅保留纯 ASCII 可打印字符，含非 ASCII 直接留空。
+   WinBox 对部分 UTF-8 字符显示不稳定，宁可留空也不写乱码。 */
+function topoCommentName(node) {
+  const s = String((node && node.name) || '').trim();
+  if (!s || /[^\x20-\x7E]/.test(s)) return '';
+  return s.slice(0, 80);
 }
+/* 兼容历史版本写入的 base64 元数据租约：仍能解析字段，用于「重新发现」平滑过渡。 */
 function decodeTopoComment(comment) {
   const s = String(comment || '').trim();
   if (!s.startsWith(TOPO_COMMENT_PREFIX)) return null;
@@ -1316,17 +1312,18 @@ async function syncTopologyLeases(dev) {
     if (!mk) { result.noMac++; continue; }
     if (!IPV4_RE.test(ip)) { result.noMac++; continue; }  // 静态租约是 /ip（IPv4）路径
     const existing = byMac.get(mk) || byIp.get(ip);
-    const comment = encodeTopoComment(n);
+    const comment = topoCommentName(n);
     if (existing) {
-      /* 已存在：仅在缺失标记时补写 comment（保留用户原备注）；设备名与备注独立，不回写 host-name */
-      if (!decodeTopoComment(existing.comment)) {
-        const enriched = encodeTopoComment(n, existing.comment);
-        try { await rosWrite(dev, SECTION_MAP.dhcpLeases, 'set', { ids: [existing['.id']], values: { comment: enriched } }); result.updated++; }
+      /* 已存在：仅迁移历史 base64 元数据 comment → 设备名；手写的普通备注不动 */
+      if (decodeTopoComment(existing.comment)) {
+        const plain = topoCommentName(n);
+        try { await rosWrite(dev, SECTION_MAP.dhcpLeases, 'set', { ids: [existing['.id']], values: { comment: plain } }); result.updated++; }
         catch (e) { result.skipped++; }
       } else result.skipped++;
       continue;
     }
-    const values = { address: ip, 'mac-address': String(n.mac).trim().slice(0, 32), comment };
+    const values = { address: ip, 'mac-address': String(n.mac).trim().slice(0, 32) };
+    if (comment) values.comment = comment;
     /* 新建租约时 host-name 填拓扑设备名作为初始值（RouterOS 的 host-name 字段）；
        拓扑设备名与 RouterOS comment 备注互不覆盖，各自独立 */
     if (n.name) values['host-name'] = String(n.name).slice(0, 64);
@@ -1796,47 +1793,142 @@ function pingOne(dev, host) {
       loss: Math.round((1 - times.length / Math.max(recs.length, 6)) * 100) };
   }).catch((e) => ({ avg: null, jitter: null, loss: null, error: e.message }));
 }
-async function linkQualitySnapshot(dev, targetParam) {
-  const key = String(targetParam || '');
-  if (dev.qualityCache && dev.qualityCache.key === key && Date.now() - dev.qualityCache.at < QUALITY_TTL) return dev.qualityCache.data;
-  /* 1) RouterOS 原生 Netwatch：只读、持续探测，状态最可信 */
-  let netwatch = [];
+/* Netwatch 托管条目：只记录由本程序创建/接管的 .id，删除时不会误删用户在 WinBox 手工建的探针 */
+function qualityNwManaged() {
   try {
-    const rows = await rosPrint(dev, SECTION_MAP.netwatch);
-    netwatch = (rows || []).filter((r) => r && r.host).map((r) => ({
-      host: String(r.host), label: String(r.comment || r.host),
-      nwStatus: String(r.status || '').toLowerCase(), since: String(r.since || ''),
-    }));
-  } catch (e) { /* 未配置 Netwatch 或无读取权限 */ }
+    const o = JSON.parse(fs.readFileSync(QUALITY_NW_FILE, 'utf8'));
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch (e) { return {}; }
+}
+function saveQualityNwManaged(o) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(QUALITY_NW_FILE, JSON.stringify(o, null, 2) + '\n', { mode: 0o600 });
+  } catch (e) { console.error('[quality-netwatch] save failed:', e.message); }
+}
+/* 把目标写入 RouterOS /tool/netwatch（v7 与 v6 均支持 host/type/interval/comment）。
+   只在 Netwatch 模式下由「目标设置」保存触发；与只读探测互为独立路径。 */
+async function syncQualityNetwatch(dev, targets, interval) {
+  const list = (Array.isArray(targets) ? targets : [])
+    .map((t) => ({ host: String((t && t.host) || '').trim(), label: String((t && t.label) || '').trim() }))
+    .filter((t) => /^[a-zA-Z0-9_.:-]+$/.test(t.host)).slice(0, 5);
+  const iv = /^\d+\s*(?:ms|s|m|h)$/.test(String(interval || '').trim()) ? String(interval).trim() : '1m';
+  let rows = [];
+  if (dev.forceDemo) rows = demoPrint(dev, 'netwatch') || [];
+  else {
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，无法写入 Netwatch / Router offline');
+    const r = await dev.api.exec(['/tool/netwatch/print']);
+    if (r.status && r.status.type === 'trap') throw new Error(r.status.message || '读取 Netwatch 失败');
+    rows = r.re || [];
+  }
+  const all = qualityNwManaged();
+  const owned = Array.isArray(all[dev.id]) ? all[dev.id] : [];
+  const wanted = new Set(list.map((t) => t.host));
+  const ownedIds = new Set(owned.map((x) => String(x.id || '')).filter(Boolean));
+  let added = 0, updated = 0, removed = 0;
+  const exec = async (cmd) => {
+    if (dev.forceDemo) return null;
+    const r = await dev.api.exec(cmd);
+    if (r.status && r.status.type === 'trap') throw new Error(r.status.message || 'Netwatch 操作失败');
+    return r;
+  };
+  /* 1) 移除已从列表删除、且由本程序创建的条目 */
+  for (const rec of owned) {
+    if (wanted.has(rec.host)) continue;
+    const row = rows.find((r) => String(r['.id']) === String(rec.id || ''));
+    if (!row) continue;
+    if (dev.forceDemo) demoRemove(dev, 'netwatch', [row['.id']]);
+    else await exec(['/tool/netwatch/remove', `=.id=${row['.id']}`]);
+    ownedIds.delete(String(row['.id'])); removed++;
+  }
+  /* 2) 已存在则更新备注/间隔（仅本程序托管的条目）；不存在则新增 */
+  for (const t of list) {
+    const row = rows.find((r) => String(r.host || '') === t.host);
+    const comment = t.label.slice(0, 100);
+    if (row) {
+      const id = String(row['.id'] || '');
+      if (ownedIds.has(id) && (String(row.comment || '') !== comment || String(row.interval || '') !== iv)) {
+        if (dev.forceDemo) demoSet(dev, 'netwatch', id, { comment, interval: iv });
+        else await exec(['/tool/netwatch/set', `=.id=${id}`, `=comment=${comment}`, `=interval=${iv}`]);
+        updated++;
+      }
+      if (!ownedIds.has(id)) { ownedIds.add(id); updated++; }
+      continue;
+    }
+    if (dev.forceDemo) demoAdd(dev, 'netwatch', { host: t.host, type: 'icmp', interval: iv, comment, status: 'up', since: '00:00:01' });
+    else await exec(['/tool/netwatch/add', `=host=${t.host}`, '=type=icmp', `=interval=${iv}`, `=comment=${comment}`]);
+    added++;
+  }
+  /* 3) 重新读取，按 host 回填新增条目的 .id，供下次精确更新/删除 */
+  let fresh = [];
+  try {
+    fresh = dev.forceDemo ? (demoPrint(dev, 'netwatch') || []) : ((await dev.api.exec(['/tool/netwatch/print'])).re || []);
+  } catch (e) { /* 回填失败不影响本次写入结果 */ }
+  const next = [];
+  for (const t of list) {
+    const row = fresh.find((r) => String(r.host || '') === t.host);
+    if (row) next.push({ host: t.host, id: String(row['.id'] || '') });
+  }
+  all[dev.id] = next;
+  saveQualityNwManaged(all);
+  dev.qualityCache = null;
+  return { ok: true, added, updated, removed, total: next.length, interval: iv };
+}
+
+async function linkQualitySnapshot(dev, targetParam, mode) {
+  const m = mode === 'netwatch' || mode === 'icmp' ? mode : 'legacy';
+  const targetKey = String(targetParam || '');
+  const key = m + '|' + targetKey;
+  if (dev.qualityCache && dev.qualityCache.key === key && Date.now() - dev.qualityCache.at < QUALITY_TTL) return dev.qualityCache.data;
+  /* 1) Netwatch 模式：读取路由器上的原生探针状态（权威 up/down） */
+  let netwatch = [];
+  if (m !== 'icmp') {
+    try {
+      const rows = await rosPrint(dev, SECTION_MAP.netwatch);
+      netwatch = (rows || []).filter((r) => r && r.host).map((r) => ({
+        host: String(r.host), label: String(r.comment || r.host),
+        nwStatus: String(r.status || '').toLowerCase(), since: String(r.since || ''),
+      }));
+    } catch (e) { /* 未配置 Netwatch 或无读取权限 */ }
+  }
   /* 2) 用户自定义目标：host|标签，逗号分隔，最多 5 个 */
   let custom = [];
-  if (key) {
-    custom = key.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 5).map((x) => {
+  if (targetKey) {
+    custom = targetKey.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 5).map((x) => {
       const p = x.split('|');
       return { host: String(p[0] || '').trim(), label: String(p[1] || p[0] || '').trim() };
     }).filter((t) => /^[a-zA-Z0-9_.:-]+$/.test(t.host));
   }
-  /* 3) 合并：自定义优先 → Netwatch 条目 → 网关 + 公共 DNS 保底 */
+  /* 3) 合并目标：ICMP 模式只用自定义目标；Netwatch 模式自定义目标优先，未能同步时也会有提示行 */
   let targets = custom.slice();
-  for (const n of netwatch) if (!targets.some((t) => t.host === n.host)) targets.push(n);
+  if (m === 'netwatch') {
+    for (const n of netwatch) if (!targets.some((t) => t.host === n.host)) targets.push(n);
+  } else if (m === 'legacy') {
+    for (const n of netwatch) if (!targets.some((t) => t.host === n.host)) targets.push(n);
+  }
   if (!targets.length && dev.forceDemo) {
     targets = [{ host: '10.0.0.1', label: '网关' }, { host: '223.5.5.5', label: 'DNS' }, { host: '1.1.1.1', label: '外部网站' }];
   }
   if (!targets.length) targets = [{ host: String(dev.cfg.host || '1.1.1.1'), label: '网关' }, { host: '1.1.1.1', label: '外部网站' }];
   targets = targets.slice(0, 5);
-  /* 4) Netwatch 已有状态直接用；否则才 ping 补充，避免无 test 权限时误报严重 */
+  /* 4) Netwatch 状态直接用；ICMP 模式只 ping（不会被 Netwatch 条目顶掉） */
   const rows = [];
   for (const t of targets) {
     const nw = netwatch.find((n) => n.host === t.host);
-    const probe = (nw && nw.nwStatus) ? { avg: null, jitter: null, loss: null }
-      : await pingOne(dev, t.host);
+    const hasNwState = !!(nw && nw.nwStatus && nw.nwStatus !== 'unknown');
+    let probe;
+    if (hasNwState) probe = { avg: null, jitter: null, loss: null };
+    else if (m === 'netwatch' && custom.length && !nw) {
+      /* 自定义目标尚未写入 Netwatch：明确提示用户去同步，而不是误报 ICMP 结果 */
+      probe = { avg: null, jitter: null, loss: null, error: '尚未同步到 Netwatch，请在目标设置中保存 / not synced - save in target settings' };
+    } else probe = await pingOne(dev, t.host);
     const row = { ...t, ...probe,
-      source: (nw && nw.nwStatus) ? 'netwatch' : 'ping',
+      source: hasNwState ? 'netwatch' : 'ping',
       nwStatus: nw ? nw.nwStatus : '', since: nw ? nw.since : '' };
     row.state = qualityState(row);
     rows.push(row);
   }
-  const data = { ok: true, ts: Date.now(), rows };
+  const data = { ok: true, ts: Date.now(), mode: m, rows };
   dev.qualityCache = { at: Date.now(), key, data };
   return data;
 }
@@ -1874,6 +1966,11 @@ async function autoTopology(dev) {
     .map((s) => [String(s.name), String(s.interface)]));
 
   const macKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^0-9a-f]/g, '');
+  /* 拓扑自定义节点：MAC → id、id → 节点。租约节点复用其 id 以免重复建模。 */
+  const customList = customTopology(dev).filter((n) => n && !n.deleted);
+  const customById = new Map(customList.map((n) => [String(n.id), n]));
+  const customByMac = new Map();
+  for (const n of customList) { const mk = macKey(n.mac); if (mk) customByMac.set(mk, String(n.id)); }
   const byMac = new Map();
   for (const r of neighbors) {
     if (!r || typeof r !== 'object') continue;
@@ -1896,24 +1993,28 @@ async function autoTopology(dev) {
     if (status && !/^(bound|waiting)$/i.test(status)) continue;
     const mac = macKey(r['mac-address']);
     if (mac && byMac.has(mac)) continue;
-    /* 拓扑同步过来的静态租约：还原 comment 里的类型/图标/层级等字段，
-       并用原始节点 id，避免「重新发现」时生成一个重复节点。 */
+    /* 拓扑同步的静态租约：comment 现在只是设备名，完整字段保存在 topology.json。
+       用 MAC 复用拓扑自定义节点的 id，前端 custom 会覆盖同名 auto 节点——
+       既避免「重新发现」重复建模，又保留拓扑里的设备名/类型/图标/层级。
+       历史 base64 元数据仍兼容解析。 */
     const meta = decodeTopoComment(r.comment);
+    const customId = (mac && customByMac.get(mac)) || (meta && meta.id);
     /* 拓扑 name 是设备名、RouterOS comment 是备注，各自独立：
-       优先用拓扑元数据里的设备名，没有才回退到 host-name / 地址。 */
-    const name = (meta && meta.name) || String(r['host-name'] || r.address || mac.slice(0, 8) || '终端');
-    const type = (meta && meta.type) || (/dns|unbound|adguard|pihole/i.test(name) ? 'dns'
+       优先用拓扑元数据/自定义节点的设备名，没有才回退到 host-name / 地址。 */
+    const customNode = customId ? customById.get(customId) : null;
+    const name = (meta && meta.name) || (customNode && customNode.name) || String(r['host-name'] || r.address || mac.slice(0, 8) || '终端');
+    const type = (meta && meta.type) || (customNode && customNode.type) || (/dns|unbound|adguard|pihole/i.test(name) ? 'dns'
       : /proxy|squid|clash/i.test(name) ? 'proxy'
       : /ap|wifi|wlan/i.test(name) ? 'ap' : /nas|server|storage/i.test(name) ? 'nas' : 'client');
-    const node = { id: (meta && meta.id) || ('auto_l_' + (mac || encodeURIComponent(name))), name, type,
+    const node = { id: customId || ('auto_l_' + (mac || encodeURIComponent(name))), name, type,
       ip: String(r.address || ''), mac: String(r['mac-address'] || ''),
-      parent: (meta && meta.parent) || (mac && byMac.get(mac)) || 'root',
-      parentPort: (meta && meta.parentPort) || '',
-      iface: (meta && meta.iface) || String(r.interface || serverIface.get(String(r.server || '')) || ''),
-      ports: (meta && Array.isArray(meta.ports)) ? meta.ports : [],
-      auto: true, note: (meta && (meta.note || meta.uc)) || (status === 'waiting' ? '等待中' : ''),
-      icon: (meta && meta.icon) || '', anim: (meta && meta.anim) || 'none',
-      order: (meta && Number.isFinite(Number(meta.order))) ? Number(meta.order) : 0 };
+      parent: (meta && meta.parent) || (customNode && customNode.parent) || (mac && byMac.get(mac)) || 'root',
+      parentPort: (meta && meta.parentPort) || (customNode && customNode.parentPort) || '',
+      iface: (meta && meta.iface) || (customNode && customNode.iface) || String(r.interface || serverIface.get(String(r.server || '')) || ''),
+      ports: (meta && Array.isArray(meta.ports)) ? meta.ports : ((customNode && customNode.ports) || []),
+      auto: true, note: (meta && (meta.note || meta.uc)) || (customNode && customNode.note) || (status === 'waiting' ? '等待中' : ''),
+      icon: (meta && meta.icon) || (customNode && customNode.icon) || '', anim: (meta && meta.anim) || (customNode && customNode.anim) || 'none',
+      order: (meta && Number.isFinite(Number(meta.order))) ? Number(meta.order) : ((customNode && customNode.order) || 0) };
     nodes.push(node);
     if (mac) byMac.set(mac, node.id);
   }
@@ -2104,30 +2205,43 @@ function deviceList() {
    只做「检查 + 下载」，不替换自身进程或容器：桌面版需手动安装，Docker 版需外部 pull/recreate。 */
 const UPDATE_FILE = path.join(DATA_DIR, 'update.json');
 const UPDATE_DIR = path.join(DATA_DIR, 'updates');
-const updateState = { config: updates.normalizeConfig({}), status: null };
+const updateState = { config: updates.normalizeConfig({}), configSource: 'default', status: null };
 try {
   const raw = JSON.parse(fs.readFileSync(UPDATE_FILE, 'utf8'));
   updateState.config = updates.normalizeConfig(raw.config || {});
-  if (raw.status && typeof raw.status === 'object') updateState.status = raw.status;
+  /* 只有 WebUI 保存成功才写 configSource=webui；此后环境变量不再覆盖，避免两处配置打架 */
+  if (raw.configSource === 'webui') updateState.configSource = 'webui';
+  /* 失败状态不落盘：上次网络故障的错误不应在重启后继续常驻 */
+  if (raw.status && typeof raw.status === 'object' && raw.status.ok !== false) updateState.status = raw.status;
 } catch (e) { /* 首次启动使用默认配置 */ }
-/* 部署时可用环境变量预设，Docker 场景便于直接指定代理 / 镜像源 */
-try {
-  const env = process.env;
-  const cfg = { ...updateState.config };
-  if (env.ROS_UPDATE_ENABLED !== undefined && env.ROS_UPDATE_ENABLED !== '') cfg.enabled = env.ROS_UPDATE_ENABLED === '1';
-  if (env.ROS_UPDATE_SOURCE) cfg.source = String(env.ROS_UPDATE_SOURCE);
-  if (env.ROS_UPDATE_PROXY) cfg.proxy = String(env.ROS_UPDATE_PROXY);
-  if (env.ROS_UPDATE_ENDPOINT) cfg.endpoint = String(env.ROS_UPDATE_ENDPOINT);
-  if (env.ROS_UPDATE_IMAGE) cfg.image = String(env.ROS_UPDATE_IMAGE);
-  if (env.ROS_UPDATE_INTERVAL) cfg.intervalHours = Number(env.ROS_UPDATE_INTERVAL) || cfg.intervalHours;
-  if (env.ROS_UPDATE_AUTO_APPLY !== undefined && env.ROS_UPDATE_AUTO_APPLY !== '') cfg.autoApply = env.ROS_UPDATE_AUTO_APPLY === '1';
-  updateState.config = updates.normalizeConfig(cfg);
-} catch (e) { /* 环境变量非法时保留默认 */ }
+/* 环境变量 = 部署预设。仅当 WebUI 从未保存过配置时生效；一旦 WebUI 保存过，以 WebUI 为准。
+   这样 NAS compose 里的 ROS_UPDATE_* 与 WebUI 填写的镜像站优先级明确、不再互相覆盖。 */
+if (updateState.configSource !== 'webui') {
+  try {
+    const env = process.env;
+    const cfg = { ...updateState.config };
+    if (env.ROS_UPDATE_ENABLED !== undefined && env.ROS_UPDATE_ENABLED !== '') cfg.enabled = env.ROS_UPDATE_ENABLED === '1';
+    if (env.ROS_UPDATE_SOURCE) cfg.source = String(env.ROS_UPDATE_SOURCE);
+    if (env.ROS_UPDATE_PROXY) cfg.proxy = String(env.ROS_UPDATE_PROXY);
+    if (env.ROS_UPDATE_ENDPOINT) cfg.endpoint = String(env.ROS_UPDATE_ENDPOINT);
+    if (env.ROS_UPDATE_IMAGE) cfg.image = String(env.ROS_UPDATE_IMAGE);
+    if (env.ROS_UPDATE_INTERVAL) cfg.intervalHours = Number(env.ROS_UPDATE_INTERVAL) || cfg.intervalHours;
+    if (env.ROS_UPDATE_AUTO_APPLY !== undefined && env.ROS_UPDATE_AUTO_APPLY !== '') cfg.autoApply = env.ROS_UPDATE_AUTO_APPLY === '1';
+    updateState.config = updates.normalizeConfig(cfg);
+    if (updateState.config.endpoint || updateState.config.proxy) updateState.configSource = 'env';
+  } catch (e) { /* 环境变量非法时保留默认 */ }
+}
 
 function saveUpdateState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(UPDATE_FILE, JSON.stringify(updateState, null, 2) + '\n', { mode: 0o600 });
+    /* 失败状态不落盘，避免上次网络故障的错误在重启后继续常驻 */
+    const persist = {
+      config: updateState.config,
+      configSource: updateState.configSource,
+      status: (updateState.status && updateState.status.ok !== false) ? updateState.status : null,
+    };
+    fs.writeFileSync(UPDATE_FILE, JSON.stringify(persist, null, 2) + '\n', { mode: 0o600 });
   } catch (e) { console.warn('[updates] save failed:', e.message); }
 }
 function appliedVersion() {
@@ -2164,7 +2278,11 @@ function derivedSource() { return runtimeInfo().selfUpdate === 'docker' ? 'docke
 function runtimeUpdateConfig() { return { ...updateState.config, source: derivedSource() }; }
 function publicUpdateConfig() {
   const cfg = runtimeUpdateConfig();
-  return { ...cfg, proxy: updates.maskProxy(cfg.proxy), proxySet: !!cfg.proxy };
+  return {
+    ...cfg, proxy: updates.maskProxy(cfg.proxy), proxySet: !!cfg.proxy,
+    configSource: updateState.configSource,
+    effectiveEndpoint: updates.safeEndpoint(updates.endpointFor(cfg)),
+  };
 }
 let updateChecking = false, updateTimer = null;
 
@@ -2550,8 +2668,15 @@ const server = http.createServer(async (req, res) => {
   }
   /* 链路质量：Netwatch 目标的延迟 / 抖动 / 丢包 */
   if (p === '/api/link-quality' && req.method === 'GET') {
-    try { return json(res, 200, await linkQualitySnapshot(reqDevice(req, url), url.searchParams.get('targets'))); }
+    try { return json(res, 200, await linkQualitySnapshot(reqDevice(req, url), url.searchParams.get('targets'), url.searchParams.get('mode'))); }
     catch (e) { return json(res, 500, { error: e.message }); }
+  }
+  /* 链路质量 · Netwatch 模式：把目标写入 /tool/netwatch，使 WinBox 中可见并产生持续探测数据 */
+  if (p === '/api/link-quality/netwatch' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      return json(res, 200, await syncQualityNetwatch(reqDevice(req, url, body), body.targets, body.interval));
+    } catch (e) { return json(res, 500, { error: e.message }); }
   }
   /* 最近一次成功备份的状态与位置 */
   if (p === '/api/backup/status' && req.method === 'GET') {
@@ -3065,6 +3190,7 @@ const server = http.createServer(async (req, res) => {
       const patch = { ...b };
       if (patch.proxy === undefined || patch.proxy === updates.maskProxy(cur.proxy)) patch.proxy = cur.proxy;
       updateState.config = updates.normalizeConfig({ ...cur, ...patch, source: derivedSource() });
+      updateState.configSource = 'webui';   // WebUI 保存后即为准，环境变量不再覆盖
       saveUpdateState();
       scheduleUpdateChecks();
       return json(res, 200, { ok: true, config: publicUpdateConfig() });

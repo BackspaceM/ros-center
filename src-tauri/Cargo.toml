@@ -1,0 +1,19 @@
+[package]
+name = "ros-center"
+version = "1.1.40"
+description = "ROS Center desktop"
+authors = ["BackspaceM"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "ros_center_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

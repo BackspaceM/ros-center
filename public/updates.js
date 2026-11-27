@@ -276,6 +276,14 @@
     set('updProxy', cfg.proxy || '');
     set('updImage', cfg.image || '');
     set('updTag', cfg.tag || 'latest');
+    const note = $('updSourceNote');
+    if (note) {
+      const src = cfg.configSource === 'webui' ? L('WebUI（当前生效）', 'WebUI (active)')
+        : cfg.configSource === 'env' ? L('部署环境变量（WebUI 保存后将被覆盖）', 'Deployment env (overridden once saved in WebUI)')
+        : L('默认值', 'Default');
+      const ep = cfg.effectiveEndpoint || (cfg.endpoint || '');
+      note.innerHTML = `<b>${esc(L('配置来源', 'Config source'))}：</b>${esc(src)}<br><b>${esc(L('生效端点', 'Active endpoint'))}：</b>${esc(ep || '—')}`;
+    }
     toggleSource();
   }
   function toggleSource() {
@@ -342,6 +350,7 @@
               <div class="form-row"><label>${esc(L('镜像源 / API 端点', 'Mirror / endpoint'))}</label><div>
                 <input type="text" id="updEndpoint" placeholder="https://mirror.example.com/..." autocomplete="off">
                 <div class="form-hint">${esc(L('留空用官方接口；被墙时可填同结构 JSON 的反代地址。', 'Blank = official API; use a mirror returning the same JSON if blocked.'))}</div></div></div>
+              <div class="upd-source-note" id="updSourceNote"></div>
               <div class="form-row"><label>${esc(L('HTTP 代理', 'HTTP proxy'))}</label><div>
                 <input type="text" id="updProxy" placeholder="http://[user:pass@]host:port" autocomplete="off">
                 <div class="form-hint">${esc(L('服务端检查请求经此 CONNECT 代理；密码读取时以 *** 显示。', 'Server checks via this CONNECT proxy; stored password is masked on read.'))}</div></div></div>

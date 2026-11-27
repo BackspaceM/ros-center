@@ -106,9 +106,20 @@ function renderDashboard() {
 /* ---------- 仪表盘可选块：全部来自真实接口速率 / Netwatch / 防火墙计数器 ---------- */
 const LINKS_KEY = () => 'rosCenter.links.' + (state.deviceId || '');
 const QUALITY_KEY = () => 'rosCenter.qualityTargets.' + (state.deviceId || '');
-function qualityTargets() {
-  try { const p = JSON.parse(localStorage.getItem(QUALITY_KEY())); return Array.isArray(p) ? p : []; } catch (e) { return []; }
+/* 目标设置：{ mode: 'icmp'|'netwatch', interval, targets: [{host,label}] }
+   兼容旧版纯数组（默认 ICMP 模式）。 */
+function qualityPrefs() {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem(QUALITY_KEY())); } catch (e) { /* ignore */ }
+  if (Array.isArray(p)) return { mode: 'icmp', interval: '1m', targets: p };
+  if (p && Array.isArray(p.targets)) {
+    return { mode: p.mode === 'netwatch' ? 'netwatch' : 'icmp',
+      interval: p.interval || '1m', targets: p.targets };
+  }
+  return { mode: 'icmp', interval: '1m', targets: [] };
 }
+function qualityTargets() { return qualityPrefs().targets; }
+function qualityMode() { return qualityPrefs().mode; }
 function linkPrefs() {
   try { const p = JSON.parse(localStorage.getItem(LINKS_KEY())); return Array.isArray(p) ? p : []; } catch (e) { return []; }
 }
@@ -172,6 +183,8 @@ function openLinkSettings(d) {
 }
 function dashQualityBlock() {
   const rows = (state.quality && state.quality.rows) || [];
+  const mode = qualityMode();
+  const modeTag = `<span class="tag ${mode === 'netwatch' ? 'violet' : ''}" title="${esc(L('当前探测模式', 'Active probe mode'))}">${esc(mode === 'netwatch' ? L('Netwatch 探针', 'Netwatch') : L('ICMP 探测', 'ICMP'))}</span>`;
   const body = !state.quality ? `<div class="empty">${t('loading')}</div>` : `<div class="table-scroll"><table class="mini-table">
     <thead><tr><th>${t('th_target')}</th><th class="num">${t('th_delay')}</th><th class="num">${t('th_jitter')}</th><th class="num">${t('th_loss')}</th><th>${L('状态', 'Status')}</th></tr></thead>
     <tbody>${rows.map((r) => {
@@ -189,48 +202,120 @@ function dashQualityBlock() {
     }).join('') || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
   return `<div class="panel" data-block="quality">
     <div class="panel-head"><div><h2>${t('link_quality_title')}</h2><p class="sub">${t('link_quality_sub')}</p></div>
-      <button class="btn btn-sm" id="qualityCfgBtn" type="button">⚙ ${t('quality_targets')}</button></div>
+      <div style="display:flex;align-items:center;gap:8px">${modeTag}<button class="btn btn-sm" id="qualityCfgBtn" type="button">⚙ ${t('quality_targets')}</button></div></div>
     <div class="panel-body dash-mini-body">${body}</div></div>`;
 }
-function qtRow(host, label) {
-  return `<div class="qt-row"><input type="text" class="qt-host" placeholder="1.1.1.1" value="${esc(host || '')}">
-    <input type="text" class="qt-label" placeholder="${esc(L('名称', 'Label'))}" value="${esc(label || '')}">
-    <button class="btn btn-sm" type="button" data-qt-del title="${esc(t('delete'))}">×</button></div>`;
+function qtRow(host, label, mode) {
+  const netwatch = mode === 'netwatch';
+  return `<div class="lease-card qt-card" data-name="${esc((host || '') + ' ' + (label || '')).toLowerCase()}">
+    <label>${esc(L('目标地址', 'Host'))} <small>host</small></label>
+    <input type="text" class="qt-host" placeholder="1.1.1.1" value="${esc(host || '')}" autocomplete="off">
+    <label>${esc(netwatch ? L('备注 / WinBox 名称', 'Comment / WinBox name') : L('显示名称', 'Label'))} <small>${netwatch ? 'comment' : 'label'}</small></label>
+    <div class="qt-field-row"><input type="text" class="qt-label" placeholder="${esc(L('名称', 'Label'))}" value="${esc(label || '')}" autocomplete="off">
+      <button class="btn btn-sm qt-del" type="button" data-qt-del title="${esc(t('delete'))}">×</button></div>
+  </div>`;
 }
 function openQualityTargets() {
-  const rows = qualityTargets();
-  openModal(t('quality_targets'),
-    `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg></div>
-       <div><b>${esc(L('链路质量探测目标', 'Quality probe targets'))}</b><p>${esc(L('填写要探测的地址与显示名称，最多 5 个；留空则使用 Netwatch 目标。', 'Enter up to 5 probe targets and labels; leave empty to use Netwatch.'))}</p></div></div>
-     <div class="ui-toolbar"><span class="ui-summary">${esc(L('ICMP / Netwatch 探针', 'ICMP / Netwatch probes'))}</span>
-       <div class="ui-quick"><button class="btn btn-sm" id="qtAdd" type="button">+ ${esc(t('add'))}</button></div></div>
-     <div class="ui-list" id="qtList">${rows.map((r) => qtRow(r.host, r.label)).join('') || qtRow('', '')}</div>`,
-    `<span class="ui-summary">${esc(L('最多 ', 'Up to '))}5 ${esc(L('个目标', 'targets'))}</span>
+  const prefs = qualityPrefs();
+  const modeInput = (value, title, desc, icon) => `<label class="qt-mode-card lease-card${prefs.mode === value ? ' selected' : ''}" data-mode="${value}">
+    <input type="radio" name="qtMode" value="${value}" ${prefs.mode === value ? 'checked' : ''}>
+    <span class="qt-mode-ic">${icon}</span>
+    <span class="qt-mode-copy"><b>${esc(title)}</b><small>${esc(desc)}</small></span>
+    <span class="qt-mode-check">✓</span></label>`;
+  const body = `
+    <div class="lease-intro ui-intro">
+      <div class="lease-intro-icon ui-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg></div>
+      <div><b>${esc(L('链路质量探测', 'Link quality probes'))}</b>
+        <p>${esc(L('选择探测模式，填写要探测的地址与名称（最多 5 个）；Netwatch 模式会把目标写入路由器的 /Tool/Netwatch，WinBox 中可见。', 'Pick a probe mode and up to 5 targets. Netwatch mode writes targets into RouterOS /Tool/Netwatch so they show up in WinBox.'))}</p></div>
+    </div>
+    <div class="lease-form-wrap">
+      <div class="lease-group">
+        <div class="lease-group-title"><i style="background:var(--blue)"></i>${esc(L('探测模式', 'Probe mode'))} <small>${esc(L('决定状态来源', 'Status source'))}</small></div>
+        <div class="qt-mode-grid">
+          ${modeInput('icmp', L('ICMP 探测', 'ICMP ping'), L('由路由器实时 ping：延迟 / 抖动 / 丢包', 'Live ping from the router: latency / jitter / loss'),
+            `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>`)}
+          ${modeInput('netwatch', L('Netwatch 探针', 'Netwatch probe'), L('写入路由器 Netwatch，状态取自主机持续探测', 'Written to RouterOS Netwatch; status from continuous probing'),
+            `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18h16M6 18V9m6 9V5m6 13v-6"/><circle cx="6" cy="7" r="2"/><circle cx="12" cy="3" r="2"/><circle cx="18" cy="11" r="2"/></svg>`)}
+        </div>
+        <div class="qt-netwatch-opts" id="qtNwOpts" ${prefs.mode === 'netwatch' ? '' : 'hidden'}>
+          <div class="lease-card"><label>${esc(L('检测间隔', 'Interval'))} <small>interval</small></label>
+            <select id="qtInterval">
+              ${['10s', '30s', '1m', '5m'].map((v) => `<option value="${v}" ${prefs.interval === v ? 'selected' : ''}>${v}</option>`).join('')}
+            </select></div>
+          <p class="qt-hint">${esc(L('保存时自动在路由器的 /Tool/Netwatch 新增或更新对应条目；从列表移除目标会删除由本程序创建的 Netwatch 条目（手工创建的不会动）。状态由 Netwatch 持续探测提供，延迟 / 抖动 / 丢包仍由 ICMP 补充。', 'On save, matching /Tool/Netwatch entries are added or updated. Removed targets delete entries created by ROS Center; manually created ones are left alone. Status comes from Netwatch, latency / jitter / loss from ICMP.'))}</p>
+        </div>
+      </div>
+      <div class="lease-group">
+        <div class="lease-group-title"><i style="background:var(--green)"></i>${esc(L('探测目标', 'Probe targets'))} <small>${esc(L('最多 5 个', 'Up to 5'))}</small></div>
+        <div class="ui-toolbar"><span class="ui-summary">${esc(L('留空时自动使用网关与外部 DNS', 'Leave empty to use gateway and public DNS'))}</span>
+          <div class="ui-quick"><button class="btn btn-sm" id="qtAdd" type="button">+ ${esc(t('add'))}</button></div></div>
+        <div class="lease-grid qt-list" id="qtList">${prefs.targets.map((r) => qtRow(r.host, r.label, prefs.mode)).join('') || qtRow('', '', prefs.mode)}</div>
+      </div>
+    </div>`;
+  openModal(t('quality_targets'), body,
+    `<span class="ui-summary" id="qtFootHint">${esc(L('最多 ', 'Up to '))}5 ${esc(L('个目标', 'targets'))}</span>
      <button class="btn" data-close type="button">${t('cancel')}</button><button class="btn primary" data-save type="button">${t('confirm')}</button>`,
     (m) => {
       const list = m.querySelector('#qtList');
+      const nwOpts = m.querySelector('#qtNwOpts');
+      const hint = m.querySelector('#qtFootHint');
+      let currentMode = prefs.mode;
+      const syncModeUI = () => {
+        nwOpts.hidden = currentMode !== 'netwatch';
+        hint.textContent = currentMode === 'netwatch'
+          ? L('Netwatch 模式 · 保存后写入路由器', 'Netwatch mode · written to the router on save')
+          : L('ICMP 模式 · 实时 ping', 'ICMP mode · live ping');
+        list.querySelectorAll('.qt-card').forEach((c) => {
+          const l = c.querySelector('.qt-label');
+          l.placeholder = currentMode === 'netwatch' ? L('WinBox 备注', 'WinBox comment') : L('名称', 'Label');
+        });
+      };
       const bindDel = () => list.querySelectorAll('[data-qt-del]').forEach((b) => {
-        b.onclick = () => { b.closest('.qt-row').remove(); };
+        b.onclick = () => { b.closest('.qt-card').remove(); };
       });
       bindDel();
-      m.querySelector('#qtAdd').onclick = () => { list.insertAdjacentHTML('beforeend', qtRow('', '')); bindDel(); };
+      m.querySelectorAll('input[name="qtMode"]').forEach((r) => {
+        r.onchange = () => {
+          if (!r.checked) return;
+          currentMode = r.value;
+          m.querySelectorAll('.qt-mode-card').forEach((c) => c.classList.toggle('selected', c.dataset.mode === currentMode));
+          syncModeUI();
+        };
+      });
+      m.querySelector('#qtAdd').onclick = () => {
+        list.insertAdjacentHTML('beforeend', qtRow('', '', currentMode)); bindDel();
+      };
       m.querySelector('[data-close]').onclick = closeModal;
-      m.querySelector('[data-save]').onclick = () => {
-        const chosen = [...list.querySelectorAll('.qt-row')].map((r) => ({
+      m.querySelector('[data-save]').onclick = async () => {
+        const targets = [...list.querySelectorAll('.qt-card')].map((r) => ({
           host: r.querySelector('.qt-host').value.trim(), label: r.querySelector('.qt-label').value.trim(),
         })).filter((r) => /^[a-zA-Z0-9_.:-]+$/.test(r.host)).slice(0, 5);
-        localStorage.setItem(QUALITY_KEY(), JSON.stringify(chosen));
-        state.quality = null; state.qualityAt = 0;
-        closeModal(); renderDashboard();
+        const next = { mode: currentMode, interval: m.querySelector('#qtInterval').value || '1m', targets };
+        try {
+          if (next.mode === 'netwatch') {
+            /* 先把目标写入 RouterOS Netwatch，成功后再落到本地设置，避免配置不一致 */
+            toast(L('正在同步 Netwatch 条目…', 'Syncing Netwatch entries…'));
+            await api('/api/link-quality/netwatch', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ targets, interval: next.interval }),
+            });
+          }
+          localStorage.setItem(QUALITY_KEY(), JSON.stringify(next));
+          state.quality = null; state.qualityAt = 0;
+          closeModal(); renderDashboard();
+          toast(t('saved_ok'), 'ok');
+        } catch (e) { toast(e.message, 'err'); }
       };
+      syncModeUI();
     });
 }
 async function refreshDashExtras() {
   const now = Date.now();
   if (!state.qualityLoading && now - state.qualityAt > 30000) {
     state.qualityLoading = true;
-    const qs = qualityTargets().map((r) => encodeURIComponent(r.host + '|' + r.label)).join(',');
-    try { state.quality = await api('/api/link-quality' + (qs ? '?targets=' + qs : '')); }
+    const p = qualityPrefs();
+    const qs = p.targets.map((r) => encodeURIComponent(r.host + '|' + r.label)).join(',');
+    try { state.quality = await api('/api/link-quality?mode=' + encodeURIComponent(p.mode) + (qs ? '&targets=' + qs : '')); }
     catch (e) { state.quality = { error: e.message, rows: [] }; }
     state.qualityAt = Date.now(); state.qualityLoading = false;
     if (state.section === 'dashboard') renderDashboard();
