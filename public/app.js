@@ -254,8 +254,8 @@ const tx = (obj) => (obj && (obj[lang] || obj.zh)) || '';
 const L = (zh, en) => (lang === 'zh' ? zh : en);
 
 /* ================= 状态 ================= */
+/* 自动刷新开关 UI 已移除：始终默认启用，不再读取/写入历史偏好 */
 let autoRefreshPref = true;
-try { autoRefreshPref = localStorage.getItem('ros-auto-refresh') !== '0'; } catch (e) { /* ignore */ }
 const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
@@ -357,7 +357,8 @@ function applyTheme(persist) {
 if (systemDark && systemDark.addEventListener) systemDark.addEventListener('change', () => { if (mode === 'system') { applyTheme(false); if (state.section === 'dashboard') renderDashboard(); } });
 
 /* 动画效果总开关（记忆偏好，关闭后所有 CSS 动画/过渡立即停用） */
-let motionOn = (() => { try { return localStorage.getItem('ros-motion') !== 'off'; } catch (e) { return true; } })();
+/* 动画总开关 UI 已移除：始终默认开启（拓扑图内仍可单独控制） */
+let motionOn = true;
 function applyMotion() {
   const root = document.documentElement;
   root.dataset.motion = motionOn ? 'on' : 'off';
@@ -634,7 +635,7 @@ function iconSvg(name) {
 /* ================= 多设备切换 ================= */
 function renderDevicePicker() {
   const sel = $('deviceSelect'); if (!sel) return;
-  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}${d.enabled === false ? ' · ' + esc(L('已禁用', 'Disabled')) : ''}</option>`).join('');
+  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
   sel.value = state.deviceId;
   const cur = state.devices.find((d) => d.id === state.deviceId);
   $('deviceDot').classList.toggle('live', !!(cur && (cur.status.mode === 'live' || cur.status.connected)));
@@ -664,8 +665,6 @@ async function switchDevice(id, silent) {
   state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); restoreDashIface();
   state.latest = null; state.connRows = []; state.usageData = null; state.usageDetailPage = 1; state.usageIfaceSig = '';
   renderDevicePicker();
-  const nowDev = state.devices.find((x) => x.id === id);
-  if (nowDev && $('adminName')) $('adminName').textContent = nowDev.user || 'admin';
   if (socket) { const old = socket; socket = null; old.onclose = null; old.close(); }
   connect();
   await loadSnapshot();
@@ -959,7 +958,14 @@ function updateTopbar(d) {
   setBar('cpuBar', cpu); setBar('memBar', memPct); setBar('diskBar', diskPct);
   $('uptimeText').textContent = fmtUptime(d.uptime);
 }
-function setBar(id, pct) { const el = $(id); if (!el) return; el.style.width = Math.min(100, Math.max(0, pct)) + '%'; el.className = pct >= 85 ? 'high' : pct >= 65 ? 'warn' : ''; }
+/* 圆环进度：conic-gradient 用 CSS 变量驱动，中心显示百分比 */
+function setBar(id, pct) {
+  const el = $(id); if (!el) return;
+  const p = Math.min(100, Math.max(0, pct));
+  el.style.setProperty('--p', p + '%');
+  el.classList.toggle('high', p >= 85);
+  el.classList.toggle('warn', p >= 65 && p < 85);
+}
 
 /* ================= 页面路由 ================= */
 function renderPage() {
@@ -1031,7 +1037,9 @@ async function boot() {
     toast(t('mode_title') + ': ' + (t('mode_' + mode) || mode), 'ok');
     if (state.section === 'dashboard') renderDashboard();
   };
-  $('motionBtn').onclick = () => {
+  /* 动画总开关已移除：默认开启，不再提供顶栏切换（拓扑图内仍可单独控制） */
+  const motionBtn = $('motionBtn');
+  if (motionBtn) motionBtn.onclick = () => {
     motionOn = !motionOn;
     applyMotion();
     toast(L('动画效果', 'Motion') + ': ' + (motionOn ? L('已开启', 'On') : L('已关闭', 'Off')), 'ok');
@@ -1111,7 +1119,7 @@ async function boot() {
       const d = await api('/api/status');
       const statusText = d.mode === 'demo' ? t('demo_only') : (d.mode === 'live' ? t('device_online') : t('device_offline'));
       openModal(t('export_hint'), `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg></div>
-          <div><b>${esc(t('export_hint'))}</b><p><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)} · <b>${L('状态', 'Status')}:</b> ${esc(statusText)} · <b>${t('system')}:</b> ${esc(d.user)}</p></div></div>
+          <div><b>${esc(t('export_hint'))}</b><p><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)} · <b>${L('状态', 'Status')}:</b> ${esc(statusText)}</p></div></div>
         <pre class="code">${esc(JSON.stringify({ host: d.host, port: d.port, mode: d.mode, interval: d.interval, uptime: d.uptime }, null, 2))}</pre>`,
         `<button class="btn" data-close>${t('close')}</button>`, (m) => { m.querySelector('[data-close]').onclick = closeModal; });
     } catch (e) { toast(e.message, 'err'); }
@@ -1126,11 +1134,11 @@ async function boot() {
       if (authLogout) authLogout.hidden = false;
     }
   } catch (e) { /* ignore */ }
-  $('adminBtn').onclick = () => navigate('connectionSettings');
+  /* 顶栏用户名入口已移除；设备管理仍可由侧栏 ⚙ 进入 */
+  const adminBtn = $('adminBtn');
+  if (adminBtn) adminBtn.onclick = () => navigate('connectionSettings');
   await loadDevices();
   restoreDashIface();
-  const curDev = state.devices.find((d) => d.id === state.deviceId);
-  if (curDev && curDev.user) $('adminName').textContent = curDev.user;
   try { state.schema = await api('/api/schema'); }
   catch (e) { document.body.innerHTML = '<div style="padding:40px;font:14px sans-serif">无法加载配置目录：' + esc(e.message) + '</div>'; return; }
   const urlSection = new URLSearchParams(location.search).get('section');

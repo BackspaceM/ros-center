@@ -50,9 +50,9 @@
       </div>
       <div class="top-right">
         <div class="health" id="health">
-          <div class="health-item"><span class="h-label" data-i18n="cpu">CPU</span><span class="h-value" id="cpuVal">--</span><span class="h-bar"><i id="cpuBar"></i></span></div>
-          <div class="health-item"><span class="h-label" data-i18n="mem">内存</span><span class="h-value" id="memVal">--</span><span class="h-bar"><i id="memBar"></i></span></div>
-          <div class="health-item"><span class="h-label" data-i18n="disk">存储</span><span class="h-value" id="diskVal">--</span><span class="h-bar"><i id="diskBar"></i></span></div>
+          <div class="health-item" title="CPU"><span class="h-donut" id="cpuBar"><b id="cpuVal">--</b></span><span class="h-label" data-i18n="cpu">CPU</span></div>
+          <div class="health-item" title="Memory"><span class="h-donut" id="memBar"><b id="memVal">--</b></span><span class="h-label" data-i18n="mem">内存</span></div>
+          <div class="health-item" title="Disk"><span class="h-donut" id="diskBar"><b id="diskVal">--</b></span><span class="h-label" data-i18n="disk">存储</span></div>
         </div>
         <span class="top-sep"></span>
         <div class="uptime"><span data-i18n="uptime">运行</span> <b id="uptimeText">--</b></div>
@@ -66,15 +66,10 @@
         <label class="theme-pick" title="界面风格 / Theme">
           <span class="palette-icon">◐</span>
           <select id="themeSelect" aria-label="Theme"></select>
+          <span class="theme-caret">▾</span>
         </label>
         <button class="mode-toggle" id="modeBtn" type="button" aria-label="Light / dark mode" title="浅色 / 深色 / 跟随系统">☀</button>
-        <button class="motion-toggle" id="motionBtn" type="button" aria-label="动画效果 / Motion" title="动画效果 / Motion">✦</button>
         <button class="lang" id="langBtn" type="button"><span class="lang-globe"></span><span id="langLabel">EN</span></button>
-        <label class="auto-refresh" id="autoRefresh" title="自动刷新 / Auto refresh">
-          <span class="ar-icon" aria-hidden="true">⟳</span><span class="ar-label" data-i18n="auto_refresh">自动刷新</span>
-          <input type="checkbox" id="autoRefreshChk" checked><span class="ar-track" aria-hidden="true"><i></i></span>
-        </label>
-        <div class="admin" id="adminBtn" title="连接设置 / Connection settings"><span class="avatar">B</span><span id="adminName">Backspace</span><span class="caret">▾</span></div>
       </div>
     </header>
 

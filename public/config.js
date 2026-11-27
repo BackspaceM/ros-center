@@ -1119,7 +1119,7 @@ function renderConnectionSettings() {
       return `<div class="dev-card${primary ? ' primary' : ''}${active ? ' active' : ''}" data-dev="${esc(d.id)}">
         <div class="dev-card-top">
           <div class="dev-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="6" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><path d="M13 12h4M6 3v3M18 3v3"/></svg></div>
-          <div class="dev-card-id"><b>${esc(d.name)}</b><span>${esc(d.host)}:${esc(d.port)} · ${esc(d.user)}</span></div>
+          <div class="dev-card-id"><b>${esc(d.name)}</b><span class="dev-card-ip">${esc(d.host)}</span></div>
           <div class="dev-card-badges">${deviceStatusTag(d)}${primary ? `<span class="tag blue">${esc(t('device_current'))}</span>` : ''}${active ? `<span class="tag green">${esc(t('device_active'))}</span>` : ''}${d.demo ? `<span class="tag">${esc(t('conn_demo'))}</span>` : ''}</div>
         </div>
         <div class="dev-card-foot">
