@@ -971,7 +971,7 @@ function newId() { return 'd_' + Date.now().toString(36) + '_' + Math.random().t
 
 class Device {
   constructor(cfg) {
-    this.cfg = cfg;                 // { id, name, host, port, user, password, tls, demo }
+    this.cfg = cfg;                 // { id, name, host, port, user, password, tls, demo, enabled }
     this.api = null;
     this.reconnectTimer = null;
     this.monitorApi = null;       // 专用于 /interface/monitor-traffic 流式监听的连接
@@ -987,7 +987,7 @@ class Device {
     this.connectionsReal = false; this.connectionsAt = 0;
     this.lastConnPoll = 0;
     this.polling = false;
-    this.mode = cfg.demo ? 'demo' : 'connecting';
+    this.mode = cfg.enabled === false ? 'disabled' : (cfg.demo ? 'demo' : 'connecting');
     this.lastError = '';
     this.lastPacket = null;
     this.history = [];
@@ -1007,15 +1007,31 @@ class Device {
   get id() { return this.cfg.id; }
   get name() { return this.cfg.name; }
   get forceDemo() { return !!this.cfg.demo; }
+  /* 未显式配置视为启用：老设备升级后不会全部掉线；仅首次播种的默认设备禁用 */
+  get enabled() { return this.cfg.enabled !== false; }
   snapshotCfg() {
     return { id: this.cfg.id, name: this.cfg.name, host: this.cfg.host, port: this.cfg.port,
-      user: this.cfg.user, tls: !!this.cfg.tls, demo: !!this.cfg.demo, passwordSet: !!this.cfg.password };
+      user: this.cfg.user, tls: !!this.cfg.tls, demo: !!this.cfg.demo, enabled: this.enabled, passwordSet: !!this.cfg.password };
   }
   publicStatus() {
     return { id: this.id, name: this.name, mode: this.mode, host: this.cfg.host, port: this.cfg.port,
-      tls: !!this.cfg.tls, user: this.cfg.user, connected: !!(this.api && this.api.connected),
+      tls: !!this.cfg.tls, user: this.cfg.user, connected: !!(this.api && this.api.connected), enabled: this.enabled,
       error: this.lastError, points: this.history.length, forceDemo: this.forceDemo,
       uptime: packetUptime(this), interval: INTERVAL, dataReal: this.mode === 'live' && !this.forceDemo };
+  }
+  /* 禁用：停掉一切连接与重连定时器，防止错误凭据反复登录把账号锁死 */
+  setEnabled(on) {
+    this.cfg.enabled = !!on;
+    if (!on) {
+      this.stopTrafficStream();
+      if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+      if (this.api) { this.api.close(); this.api = null; }
+      this.mode = 'disabled'; this.lastError = '';
+    } else {
+      this.mode = this.forceDemo ? 'demo' : 'connecting';
+      this.lastError = '';
+      this.reconnectNow();
+    }
   }
   stopTrafficStream() {
     if (this.monitorRetry) { clearTimeout(this.monitorRetry); this.monitorRetry = null; }
@@ -1024,6 +1040,7 @@ class Device {
     this.streamActive = false;
   }
   reconnectNow() {
+    if (!this.enabled) { this.setEnabled(false); return; }
     this.stopTrafficStream();
     if (this.api) { this.api.close(); this.api = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
@@ -1035,6 +1052,7 @@ class Device {
     this.ensureConnection();
   }
   ensureConnection() {
+    if (!this.enabled) { this.mode = 'disabled'; return; }
     if (this.forceDemo || (this.api && this.api.connected) || this.reconnectTimer) return;
     this.mode = 'connecting';
     this.reconnectTimer = setTimeout(async () => {
@@ -1085,6 +1103,8 @@ function loadDeviceRegistry() {
       password: typeof old.password === 'string' ? old.password : (process.env.ROS_PASSWORD || ''),
       tls: typeof old.tls === 'boolean' ? old.tls : process.env.ROS_TLS === '1',
       demo: typeof old.demo === 'boolean' ? old.demo : process.env.DEMO_MODE === '1',
+      /* 首次安装的默认设备禁用：避免错误凭据反复登录导致 RouterOS 封禁 IP */
+      enabled: typeof old.enabled === 'boolean' ? old.enabled : (process.env.DEMO_MODE === '1'),
     };
     reg = { devices: [seeded], activeId: seeded.id, webPort: savedListenPort(old.webPort) || PORT, hostPort: Number(process.env.WEB_PORT || 0) || 0 };
     if (validPort(reg.webPort)) PORT = Number(reg.webPort);
@@ -1106,7 +1126,7 @@ function loadDeviceRegistry() {
     }));
   }
   if (!devices.size) {
-    const fallback = { id: newId(), name: '主路由', host: '10.0.0.1', port: 8728, user: 'admin', password: '', tls: false, demo: true };
+    const fallback = { id: newId(), name: '主路由', host: '10.0.0.1', port: 8728, user: 'admin', password: '', tls: false, demo: true, enabled: true };
     devices.set(fallback.id, new Device(fallback));
     activeId = fallback.id;
     saveDeviceRegistry();
@@ -2555,11 +2575,12 @@ const server = http.createServer(async (req, res) => {
       if (!validPort(b.port)) throw new Error('端口必须在 1-65535 之间');
       if (!b.user || typeof b.user !== 'string') throw new Error('账号不能为空');
       const id = newId();
-      const dev = new Device({ id, name: String(b.name).trim(), host: String(b.host).trim(), port: Number(b.port), user: String(b.user).trim(), password: String(b.password || ''), tls: !!b.tls, demo: !!b.demo });
+      /* 新增设备默认禁用：由用户确认凭据后再启用，避免错误账号反复登录被 RouterOS 封禁 */
+      const dev = new Device({ id, name: String(b.name).trim(), host: String(b.host).trim(), port: Number(b.port), user: String(b.user).trim(), password: String(b.password || ''), tls: !!b.tls, demo: !!b.demo, enabled: b.enabled === true });
       devices.set(id, dev);
       if (!saveDeviceRegistry()) { devices.delete(id); throw new Error('写入 devices.json 失败（请检查 data 目录权限）'); }
-      dev.ensureConnection();
-      console.log(`[devices] added ${dev.name} (${dev.cfg.host}) by=${req.socket.remoteAddress}`);
+      if (dev.enabled) dev.ensureConnection();
+      console.log(`[devices] added ${dev.name} (${dev.cfg.host}) enabled=${dev.enabled} by=${req.socket.remoteAddress}`);
       return json(res, 200, { ok: true, id, devices: deviceList(), activeId });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
@@ -2579,6 +2600,14 @@ const server = http.createServer(async (req, res) => {
         dev.reconnectNow();
         return json(res, 200, { ok: true, status: dev.publicStatus() });
       }
+      if (action === 'enable' || action === 'disable') {
+        const on = action === 'enable';
+        if (!on && dev.enabled && [...devices.values()].filter((d) => d.enabled).length <= 1) throw new Error('至少保留一台启用设备 / keep at least one enabled');
+        dev.setEnabled(on);
+        if (!saveDeviceRegistry()) throw new Error('写入 devices.json 失败');
+        console.log(`[devices] ${dev.name} ${on ? 'enabled' : 'disabled'} by=${req.socket.remoteAddress}`);
+        return json(res, 200, { ok: true, devices: deviceList(), activeId });
+      }
       if (action === 'edit') {
         const b = await readBody(req);
         if (b.name !== undefined) { if (!validName(b.name)) throw new Error('设备名称不正确'); dev.cfg.name = String(b.name).trim(); }
@@ -2588,8 +2617,16 @@ const server = http.createServer(async (req, res) => {
         if (b.password !== undefined && b.password !== '') dev.cfg.password = String(b.password);
         if (b.tls !== undefined) dev.cfg.tls = !!b.tls;
         if (b.demo !== undefined) dev.cfg.demo = !!b.demo;
+        const wasEnabled = dev.enabled;
+        if (b.enabled !== undefined) {
+          if (!b.enabled && wasEnabled && [...devices.values()].filter((d) => d.enabled).length <= 1) throw new Error('至少保留一台启用设备 / keep at least one enabled');
+          dev.cfg.enabled = !!b.enabled;
+        }
         if (!saveDeviceRegistry()) throw new Error('写入 devices.json 失败');
-        dev.reconnectNow();
+        if (dev.enabled !== wasEnabled) {
+          if (dev.enabled) dev.setEnabled(true);
+          else dev.setEnabled(false);
+        } else dev.reconnectNow();
         return json(res, 200, { ok: true, devices: deviceList(), activeId });
       }
       throw new Error('不支持的设备操作');

@@ -46,11 +46,13 @@ function run() {
     console.error('[launcher] 无法启动：' + SERVER);
     return;
   }
+  /* windowsHide 始终为 true：Tauri 原生壳下绝不能弹出黑色 CMD 窗口；
+     兼容版由 Start.bat 自己的控制台承载输出，隐藏子进程窗口也不影响日志。 */
   child = spawn(process.execPath, [SERVER], {
     cwd: APP_DIR,
     env: process.env,
     stdio: 'inherit',
-    windowsHide: false,
+    windowsHide: true,
   });
   child.on('error', (e) => console.error('[launcher] spawn error:', e.message));
   child.on('exit', (code, signal) => {

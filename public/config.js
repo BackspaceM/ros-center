@@ -1020,6 +1020,7 @@ async function openWireguardQr(row, sec) {
 /* ================= 多设备管理 ================= */
 function deviceStatusTag(d) {
   const st = d.status || {};
+  if (d.enabled === false || st.mode === 'disabled') return `<span class="tag">${esc(L('已禁用', 'Disabled'))}</span>`;
   const online = !!(st.connected || st.mode === 'live');
   const cls = online ? 'green' : (d.demo ? 'amber' : 'red');
   let label;
@@ -1049,27 +1050,9 @@ function renderConnectionSettings() {
 
     <div class="dev-settings-grid">
       <section class="dev-set-card">
-        <div class="dev-set-head"><div class="dev-set-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg></div>
-          <div><b>${t('conn_web_port')}</b><small>${t('conn_web_port_hint')}</small></div></div>
-        <div class="dev-set-body">
-          <div class="form-row"><label>${t('conn_web_port')}</label>
-            <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 10086)}">
-              <p class="form-hint">${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 10086)}</p></div></div>
-          <button class="btn primary" id="devSavePort">${t('save')}</button>
-        </div>
-      </section>
-
-      <section class="dev-set-card">
         <div class="dev-set-head"><div class="dev-set-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v5c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
-          <div><b>${t('conn_security')}</b><small>${esc(t('note'))}</small></div></div>
+          <div><b>${t('conn_login_card')}</b><small>${esc(t('login_hint'))}</small></div></div>
         <div class="dev-set-body">
-          <div class="dev-warn">${t('conn_security_tip')}</div>
-          <details class="dev-cli"><summary>RouterOS CLI · ${esc(L('只读账号配置', 'read-only account'))}</summary>
-<pre class="code">/user group add name=webui policy=read,api
-/user add name=webui group=webui password=${L('强密码', 'strong-password')}
-/ip service set api address=10.0.0.0/24</pre></details>
-          <div class="dev-subhead">${t('login_title')}</div>
-          <div class="dev-hint">${t('login_hint')}</div>
           ${state.authEnabled ? `<div class="dev-warn">${t('login_current')}: <b>${esc(state.authUser)}</b></div>` : ''}
           <div class="form-row"><label>${t('login_user')}</label><div><input id="authUser" value="${esc(state.authUser || 'admin')}" autocomplete="off"><p class="form-hint">${t('login_user_hint')}</p></div></div>
           <div class="form-row"><label>${t('login_pass')}</label><div><input type="password" id="authPass" autocomplete="new-password" placeholder="••••••"><p class="form-hint">${t('login_pass_hint')}</p></div></div>
@@ -1078,6 +1061,23 @@ function renderConnectionSettings() {
             ${state.authEnabled ? `<button class="btn ghost-danger" id="authDisable">${t('login_disable')}</button>` : ''}
           </div>
           <div id="authResult"></div>
+          <div class="dev-subhead dev-port-head">${t('conn_web_port')}</div>
+          <div class="form-row"><label>${t('conn_web_port')}</label>
+            <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 10086)}">
+              <p class="form-hint">${t('conn_web_port_hint')} · ${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 10086)}</p></div></div>
+          <button class="btn" id="devSavePort">${t('save')}</button>
+        </div>
+      </section>
+
+      <section class="dev-set-card">
+        <div class="dev-set-head"><div class="dev-set-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+          <div><b>${t('conn_sec_title')}</b><small>${esc(t('conn_security'))}</small></div></div>
+        <div class="dev-set-body">
+          <div class="dev-warn">${t('conn_security_tip')}</div>
+          <details class="dev-cli"><summary>${esc(t('conn_cli_title'))}</summary>
+<pre class="code">/user group add name=webui policy=read,api
+/user add name=webui group=webui password=${L('强密码', 'strong-password')}
+/ip service set api address=10.0.0.0/24</pre></details>
         </div>
       </section>
 
@@ -1108,7 +1108,7 @@ function renderConnectionSettings() {
   const renderRows = (force) => {
     const tb = $('devBody'); if (!tb) return;
     /* 状态签名去重：WS 每秒帧只在真正变化时重画，避免打断点击 */
-    const sig = state.devices.map((d) => [d.id, d.status && d.status.mode, d.status && d.status.connected, d.demo,
+    const sig = state.devices.map((d) => [d.id, d.status && d.status.mode, d.status && d.status.connected, d.demo, d.enabled,
       d.id === state.devicePrimary, d.id === state.deviceId].join(':')).join('|');
     if (!force && tb.dataset.sig === sig) return;
     tb.dataset.sig = sig;
@@ -1122,19 +1122,31 @@ function renderConnectionSettings() {
           <div class="dev-card-id"><b>${esc(d.name)}</b><span>${esc(d.host)}:${esc(d.port)} · ${esc(d.user)}</span></div>
           <div class="dev-card-badges">${deviceStatusTag(d)}${primary ? `<span class="tag blue">${esc(t('device_current'))}</span>` : ''}${active ? `<span class="tag green">${esc(t('device_active'))}</span>` : ''}${d.demo ? `<span class="tag">${esc(t('conn_demo'))}</span>` : ''}</div>
         </div>
-        <div class="dev-card-actions">
-          ${active ? '' : `<button class="icon-btn" data-act="use" title="${t('device_primary')}">✓</button>`}
-          <button class="icon-btn" data-act="edit" title="${t('device_edit')}">✎</button>
-          <button class="icon-btn" data-act="reconn" title="${t('device_reconnect')}">↻</button>
-          <button class="icon-btn del" data-act="del" title="${t('device_del')}">✕</button>
+        <div class="dev-card-foot">
+          <label class="dev-enable" title="${esc(L('禁用后不再自动连接该路由器', 'Disabled devices never auto-connect'))}">
+            <span>${esc(d.enabled === false ? L('已禁用', 'Disabled') : L('已启用', 'Enabled'))}</span>
+            <label class="upd-switch"><input type="checkbox" data-act="toggle" ${d.enabled !== false ? 'checked' : ''}><i></i></label>
+          </label>
+          <div class="dev-card-actions">
+            <button class="icon-btn" data-act="edit" title="${t('device_edit')}">✎</button>
+            <button class="icon-btn" data-act="reconn" title="${t('device_reconnect')}">↻</button>
+            <button class="icon-btn del" data-act="del" title="${t('device_del')}">✕</button>
+            ${active ? '<button class="icon-btn ph" type="button" aria-hidden="true"></button>' : `<button class="icon-btn use" data-act="use" title="${t('device_primary')}">✓</button>`}
+          </div>
         </div>
       </div>`;
     }).join('') || `<div class="empty">${t('no_data')}</div>`;
-    tb.querySelectorAll('[data-act]').forEach((b) => b.onclick = () => {
+    tb.querySelectorAll('[data-act]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
       const id = b.closest('.dev-card').dataset.dev;
       const dev = state.devices.find((x) => x.id === id);
       const act = b.dataset.act;
-      if (act === 'use') setPrimary(id);
+      if (act === 'toggle') {
+        const on = b.checked;
+        api('/api/devices/' + id + '/' + (on ? 'enable' : 'disable'), { method: 'POST' })
+          .then(() => refresh()).catch((err) => { b.checked = !on; toast(err.message, 'err'); });
+      }
+      else if (act === 'use') setPrimary(id);
       else if (act === 'edit') openDeviceForm(dev);
       else if (act === 'reconn') api('/api/devices/' + id + '/reconnect', { method: 'POST' }).then(() => refresh()).catch((e) => toast(e.message, 'err'));
       else if (act === 'del') confirmModal(t('device_del'), t('device_del_msg'), true, () =>
@@ -1155,7 +1167,7 @@ function renderConnectionSettings() {
       <div class="lease-intro ui-intro">
         <div class="lease-intro-icon ui-intro-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M6 20h12M12 17v3"/><circle cx="6.5" cy="10.5" r="1" fill="currentColor"/><path d="M11 10.5h6"/></svg></div>
         <div><b>${esc(isNew ? t('device_add') : t('device_edit'))}${dev ? ' · ' + esc(dev.name) : ''}</b>
-          <p>${esc(L('填写 RouterOS 的连接信息，可先测试连接再保存；保存后自动连接该设备。', 'Enter RouterOS connection details; test before saving. Connects automatically on save.'))}</p></div>
+          <p>${esc(L('填写 RouterOS 的连接信息，可先测试连接再保存；新设备默认不启用，勾选「启用此设备」后才会连接。', 'Enter RouterOS connection details; test before saving. New devices stay disabled until you enable them.'))}</p></div>
       </div>
       <div class="picker-toolbar">
         <div class="picker-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -1164,23 +1176,30 @@ function renderConnectionSettings() {
       <div class="lease-form-wrap">
         <div class="lease-group"><div class="lease-group-title"><i style="background:var(--blue)"></i>${esc(L('连接信息', 'Connection'))} <small>${esc(L('RouterOS 设备', 'RouterOS device'))}</small></div>
           <div class="lease-grid" id="dvGrid">
-            ${card(L('设备名称', 'name', `<input id="dvName" value="${esc(dev ? dev.name : '')}" placeholder="主路由">`))}
-            ${card(L('主机地址', 'host', `<input id="dvHost" value="${esc(dev ? dev.host : '')}" placeholder="10.0.0.1">`))}
-            ${card(L('API 端口', 'port', `<input type="number" id="dvPort" min="1" max="65535" value="${esc(dev ? dev.port : 8728)}">`))}
-            ${card(L('用户名', 'user', `<input id="dvUser" value="${esc(dev ? dev.user : '')}" autocomplete="off">`))}
-            ${card(L('密码', 'password', `<input type="password" id="dvPass" autocomplete="new-password" placeholder="${esc(t('device_no_password'))}">`, true))}
+            ${card(L('设备名称', 'Device name'), 'name', `<input id="dvName" value="${esc(dev ? dev.name : '')}" placeholder="主路由">`)}
+            ${card(L('主机地址', 'Host'), 'host', `<input id="dvHost" value="${esc(dev ? dev.host : '')}" placeholder="10.0.0.1">`)}
+            ${card(L('API 端口', 'API port'), 'port', `<input type="number" id="dvPort" min="1" max="65535" value="${esc(dev ? dev.port : 8728)}">`)}
+            ${card(L('用户名', 'User'), 'user', `<input id="dvUser" value="${esc(dev ? dev.user : '')}" autocomplete="off">`)}
+            ${card(L('密码', 'Password'), 'password', `<input type="password" id="dvPass" autocomplete="new-password" placeholder="${esc(t('device_no_password'))}">`, true)}
           </div></div>
         <div class="lease-group"><div class="lease-group-title"><i style="background:var(--green)"></i>${esc(L('连接选项', 'Options'))}</div>
           <div class="lease-grid">
-            ${sw(L('使用 TLS 加密', 'tls', 'dvTls', !!(dev && dev.tls)))}
-            ${sw(L('演示数据', 'demo', 'dvDemo', !!(dev && dev.demo)))}
+            ${sw(L('启用此设备', 'Enable device'), 'enabled', 'dvEnabled', dev ? dev.enabled !== false : false)}
+            ${sw(L('使用 TLS 加密', 'Use TLS'), 'tls', 'dvTls', !!(dev && dev.tls))}
+            ${sw(L('演示数据', 'Demo data'), 'demo', 'dvDemo', !!(dev && dev.demo))}
           </div></div>
       </div>
       <div id="dvResult"></div>`;
     openModal(isNew ? t('device_add') : t('device_edit'), body,
-      `<span class="ui-summary">${esc(L('保存后即连接该设备', 'Connects on save'))}</span>
+      `<span class="ui-summary" id="dvFootHint">${esc(L('未勾选启用时仅保存配置，不会连接', 'Disabled devices are saved without connecting'))}</span>
        <button class="btn" data-close>${t('cancel')}</button><button class="btn" id="dvTest">${t('device_test')}</button><button class="btn primary" id="dvSave">${t('save')}</button>`,
       (m) => {
+        const fh = m.querySelector('#dvFootHint');
+        const en = m.querySelector('#dvEnabled');
+        const syncHint = () => { if (fh) fh.textContent = en.checked
+          ? L('保存后即连接该设备', 'Connects on save')
+          : L('未勾选启用时仅保存配置，不会连接', 'Disabled devices are saved without connecting'); };
+        if (en) en.onchange = syncHint;
         const ds = m.querySelector('#dvSearch');
         if (ds) ds.oninput = () => {
           const q = ds.value.trim().toLowerCase();
@@ -1189,7 +1208,8 @@ function renderConnectionSettings() {
         m.querySelector('[data-close]').onclick = closeModal;
         const vals = () => ({ name: m.querySelector('#dvName').value.trim(), host: m.querySelector('#dvHost').value.trim(),
           port: Number(m.querySelector('#dvPort').value), user: m.querySelector('#dvUser').value.trim(),
-          password: m.querySelector('#dvPass').value, tls: m.querySelector('#dvTls').checked, demo: m.querySelector('#dvDemo').checked });
+          password: m.querySelector('#dvPass').value, enabled: m.querySelector('#dvEnabled').checked,
+          tls: m.querySelector('#dvTls').checked, demo: m.querySelector('#dvDemo').checked });
         m.querySelector('#dvTest').onclick = async () => {
           const btn = m.querySelector('#dvTest'); btn.disabled = true;
           m.querySelector('#dvResult').innerHTML = `<span class="tag amber">${t('loading')}</span>`;

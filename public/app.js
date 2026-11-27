@@ -79,7 +79,8 @@ const I18N = {
     conn_tls: '使用 API-SSL (TLS)', conn_demo: '演示模式（不连接真实路由器）', conn_test: '测试连接',
     conn_save: '保存并连接', conn_saved: '连接设置已保存，正在重新连接', conn_test_ok: '连接成功', conn_test_fail: '连接失败',
     conn_tip: '填写后点"测试连接"验证，再点"保存并连接"。设置保存在容器的 /app/data/settings.json，重启不会丢失。首次使用演示模式可先熟悉界面。',
-    conn_masked: '已保存密码（留空表示不修改）', conn_current: '当前状态', conn_security: '安全建议',
+    conn_masked: '已保存密码（留空表示不修改）', conn_current: '当前状态', conn_security: '访问安全建议',
+    conn_sec_title: 'WebUI 访问安全', conn_login_card: 'WebUI 账户与登录保护', conn_cli_title: 'RouterOS CLI 只读账号配置',
     conn_security_tip: '请在 RouterOS 上为 WebUI 单独建只读账号，并用防火墙限制 API 端口来源，切勿把服务暴露到公网。',
     sidebar_hint: '点击箭头折叠 · 拖动边缘调宽',
     conn_web_port: 'WebUI 监听端口', conn_web_port_hint: '容器内监听端口；修改后需重启容器，并把 compose 的端口映射同步为「外部端口:此端口」',
@@ -201,6 +202,7 @@ const I18N = {
     conn_save: 'Save & connect', conn_saved: 'Settings saved, reconnecting', conn_test_ok: 'Connection successful', conn_test_fail: 'Connection failed',
     conn_tip: 'Click "Test connection" to verify, then "Save & connect". Settings persist in /app/data/settings.json. Demo mode is handy for a first look.',
     conn_masked: 'Password saved (leave blank to keep)', conn_current: 'Current status', conn_security: 'Security tip',
+    conn_sec_title: 'WebUI access security', conn_login_card: 'WebUI account & sign-in', conn_cli_title: 'RouterOS CLI read-only account',
     conn_security_tip: 'Create a dedicated read-only user on RouterOS and restrict the API port with firewall rules. Never expose this service to the internet.',
     sidebar_hint: 'Collapse · drag edge to resize',
     conn_web_port: 'WebUI listen port', conn_web_port_hint: 'Container listen port. Restart the container after changing it and update the compose mapping to "external:this port"',
@@ -493,20 +495,51 @@ function buildNav(filter = '') {
   });
   const fold = $('foldAllBtn');
   if (fold) fold.textContent = groups.every((g) => state.collapsedGroups.has(g.id)) ? '+' : '−';
+  renderMobileNav();
 }
 function saveCollapsedGroups() {
   try { localStorage.setItem('ros-traffic-groups', JSON.stringify([...state.collapsedGroups])); } catch (e) { /* ignore */ }
+}
+/* 手机端导航：右上角按钮向下弹出菜单，选中一项后自动收起 */
+function renderMobileNav(filter = '') {
+  const list = $('mnmList'); if (!list || !state.schema) return;
+  const f = filter.trim().toLowerCase();
+  list.innerHTML = state.schema.groups.map((g) => {
+    const items = state.schema.sections.filter((s) => s.group === g.id &&
+      (!f || tx(s.title).toLowerCase().includes(f) || s.id.includes(f) || tx(g).toLowerCase().includes(f)));
+    if (!items.length) return '';
+    return `<div class="mnm-group">${esc(tx(g))}</div>` + items.map((s) =>
+      `<button class="mnm-item ${s.id === state.section ? 'active' : ''}" data-section="${esc(s.id)}" title="${esc(tx(s.title))}">
+        ${iconSvg(sectionIconName(s))}<span>${esc(tx(s.title))}</span></button>`).join('');
+  }).join('') || `<div class="mnm-group">${esc(L('没有匹配的菜单', 'No matching menu'))}</div>`;
+  list.querySelectorAll('.mnm-item').forEach((b) => b.onclick = () => {
+    closeMobileNav(); navigate(b.dataset.section);
+  });
+}
+function closeMobileNav() {
+  const menu = $('mobileNavMenu'), btn = $('mobileNavBtn');
+  if (menu) menu.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+function openMobileNav() {
+  const menu = $('mobileNavMenu'), btn = $('mobileNavBtn');
+  if (!menu || !btn) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) { renderMobileNav(); const s = $('mnmSearch'); if (s) { s.value = ''; setTimeout(() => s.focus(), 30); } }
 }
 /* Command+K / Ctrl+K：聚焦侧栏搜索，折叠时自动展开 */
 function focusNavSearch() {
   const sb = $('sidebar'), inp = $('navSearch'), box = $('sideSearch');
   if (!sb || !inp) return;
+  /* 手机端：快捷键打开右上角菜单的搜索框 */
+  if (window.innerWidth <= 720) { if ($('mobileNavMenu') && $('mobileNavMenu').hidden) openMobileNav(); return; }
   if (sb.classList.contains('collapsed')) {
     sb.classList.remove('collapsed');
     try { localStorage.setItem('ros-traffic-collapsed', '0'); } catch (e) { /* ignore */ }
     setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats(); }, 200);
   }
-  sb.classList.add('mobile-open');
   inp.focus(); inp.select();
   if (box) { box.classList.remove('shortcut-focus'); void box.offsetWidth; box.classList.add('shortcut-focus'); setTimeout(() => box.classList.remove('shortcut-focus'), 1000); }
 }
@@ -601,7 +634,7 @@ function iconSvg(name) {
 /* ================= 多设备切换 ================= */
 function renderDevicePicker() {
   const sel = $('deviceSelect'); if (!sel) return;
-  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}${d.enabled === false ? ' · ' + esc(L('已禁用', 'Disabled')) : ''}</option>`).join('');
   sel.value = state.deviceId;
   const cur = state.devices.find((d) => d.id === state.deviceId);
   $('deviceDot').classList.toggle('live', !!(cur && (cur.status.mode === 'live' || cur.status.connected)));
@@ -644,6 +677,7 @@ async function switchDevice(id, silent) {
 }
 
 function navigate(id) {
+  closeMobileNav();
   state.section = id; state.rows = []; state.selectedIds.clear(); state.rowFilter = ''; state.page = 1;
   state.sort = { key: '#', dir: 'asc' };
   const sec = state.schema.sections.find((s) => s.id === id);
@@ -1013,7 +1047,20 @@ async function boot() {
     try { localStorage.setItem('ros-traffic-collapsed', c ? '1' : '0'); } catch (e) { /* ignore */ }
     setTimeout(() => { if (state.section === 'dashboard') renderDashboard(); if (state.section === 'trafficStats') renderTrafficStats(); }, 200);
   };
-  $('menuToggle').onclick = () => $('sidebar').classList.toggle('mobile-open');
+  const mBtn = $('mobileNavBtn');
+  if (mBtn) mBtn.onclick = (e) => { e.stopPropagation(); openMobileNav(); };
+  const mMenu = $('mobileNavMenu');
+  if (mMenu) mMenu.onclick = (e) => e.stopPropagation();
+  const mSearch = $('mnmSearch');
+  if (mSearch) mSearch.oninput = () => renderMobileNav(mSearch.value);
+  const navBd = $('navBackdrop');
+  if (navBd) navBd.onclick = closeMobileNav;
+  document.addEventListener('click', (e) => {
+    const menu = $('mobileNavMenu'), btn = $('mobileNavBtn');
+    if (menu && !menu.hidden && !menu.contains(e.target) && btn && !btn.contains(e.target)) closeMobileNav();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMobileNav(); });
+  window.addEventListener('resize', () => { if (window.innerWidth > 720) closeMobileNav(); });
   const rz = $('sideResize');
   rz.onmousedown = (e) => {
     e.preventDefault(); rz.classList.add('dragging');
