@@ -126,7 +126,7 @@ function openBrowser(url) {
     const cmd = process.platform === 'darwin' ? ['open', [url]]
       : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
         : ['xdg-open', [url]];
-    spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).unref();
+    spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
   } catch (e) { /* 打不开浏览器不影响服务 */ }
 }
 async function bootstrap() {

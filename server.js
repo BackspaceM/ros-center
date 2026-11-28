@@ -43,6 +43,16 @@ const TOPOLOGY_FILE = path.join(DATA_DIR, 'topology.json');
 const TOPO_ICON_DIR = path.join(DATA_DIR, 'topology-icons');
 const BACKUP_STATUS_FILE = path.join(DATA_DIR, 'backup-status.json');
 const QUALITY_NW_FILE = path.join(DATA_DIR, 'quality-netwatch.json');
+const DATA_POLICY_FILE = path.join(DATA_DIR, 'data-policy.json');
+const BACKUP_CONFIG_FILE = path.join(DATA_DIR, 'backup-config.json');
+const AVATAR_DIR = path.join(DATA_DIR, 'user', 'avatar');
+/* 采集数据保留策略：单份最大容量（MB，超过自动分片）、最大保存份数（超过覆盖最旧）。
+   给一个月的建议：单份 5 MB / 最多 30 份（≈30 天日分片）。 */
+const DEFAULT_DATA_POLICY = { chunkMB: 5, maxFiles: 30, keepDays: 30 };
+const DATA_POLICY_LIMITS = { chunkMB: [1, 100], maxFiles: [2, 120], keepDays: [1, 365] };
+/* 速率趋势分钟桶：按设备落盘（按天分片），重启后 1h/24h/7d/30d 曲线仍有真实数据。
+   Docker 部署已将宿主机 /data 映射到容器内 /app/data，目录随镜像持久化。 */
+const TREND_DIR = path.join(DATA_DIR, 'trend');
 const LEGACY_SETTINGS = path.join(DATA_DIR, 'settings.json');
 let PORT = envNum('PORT', 10086);
 function envNum(key, d) { const n = Number(process.env[key]); return Number.isFinite(n) && n > 0 ? n : d; }
@@ -218,16 +228,19 @@ class RouterOSAPI {
    RouterOS v7 的 /export 经 API 只回空 !done，内容不进 !re；/file/print 对 >4KB 文件
    也不返回 contents。标准做法是 /export file=xxx 写文件，再用 FTP RETR 读回。
    RouterOS FTP 服务与 API 共用同一套用户凭据。这里只实现登录 + PASV + RETR + DELE。 */
-function ftpRetrieve(cfg, remoteName, timeoutMs = 20000) {
+/* ftpRetrieveBuffer：返回原始 Buffer（可下载 .backup 二进制）；
+   opts.keepRemote=true 时不删除路由器上的文件（下载已有备份必须保留）。 */
+function ftpRetrieveBuffer(cfg, remoteName, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 30000;
   return new Promise((resolve, reject) => {
     const port = Number(cfg.ftpPort || 21);
     const ctrl = net.connect({ host: cfg.host, port }, () => { /* 等 220 */ });
     let done = false, step = 0, pendingData = '';
     const timer = setTimeout(() => finish(new Error('FTP 读取超时 / FTP timeout')), timeoutMs);
-    const finish = (err, text) => {
+    const finish = (err, buf) => {
       if (done) return; done = true; clearTimeout(timer);
       try { ctrl.destroy(); } catch (e) { /* ignore */ }
-      if (err) reject(err); else resolve(text);
+      if (err) reject(err); else resolve(buf);
     };
     const send = (cmd) => { try { ctrl.write(cmd + '\r\n'); } catch (e) { finish(e); } };
     ctrl.on('error', (e) => finish(e));
@@ -255,14 +268,17 @@ function ftpRetrieve(cfg, remoteName, timeoutMs = 20000) {
         dataSock.on('data', (b) => buffers.push(b));
         dataSock.on('error', (e) => finish(e));
         dataSock.on('end', () => {
-          const text = Buffer.concat(buffers).toString('utf8');
-          /* 读完后删除路由器上的临时文件，避免堆积；删除失败不影响结果 */
-          step = 7; send('DELE ' + remoteName);
-          finish(null, text);
+          const buf = Buffer.concat(buffers);
+          /* 临时导出文件读完后删除，避免堆积；下载已有备份(keepRemote) 必须保留 */
+          if (!opts.keepRemote) { step = 7; try { send('DELE ' + remoteName); } catch (e) { /* ignore */ } }
+          finish(null, buf);
         });
       }
     });
   });
+}
+function ftpRetrieve(cfg, remoteName, timeoutMs = 20000) {
+  return ftpRetrieveBuffer(cfg, remoteName, { timeoutMs }).then((buf) => buf.toString('utf8'));
 }
 
 const MIME = {
@@ -317,6 +333,67 @@ let usageResetNotice = false;
 let usageMigrated = false;
 let usageDirty = false;
 let usageStore = loadUsage();
+
+/* ---- 采集数据保留策略（/data/data-policy.json）---- */
+function clampPolicyNum(v, key) {
+  const [lo, hi] = DATA_POLICY_LIMITS[key];
+  const n = Math.round(num(v, DEFAULT_DATA_POLICY[key]));
+  return Math.min(hi, Math.max(lo, n));
+}
+function loadDataPolicy() {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(DATA_POLICY_FILE, 'utf8')); } catch (e) { return { ...DEFAULT_DATA_POLICY, devices: {} }; }
+  const policy = {
+    chunkMB: clampPolicyNum(raw && raw.chunkMB, 'chunkMB'),
+    maxFiles: clampPolicyNum(raw && raw.maxFiles, 'maxFiles'),
+    keepDays: clampPolicyNum(raw && raw.keepDays, 'keepDays'),
+    devices: {},
+  };
+  /* 设备级覆盖：只保存真正的覆盖项，未列出的设备继续继承全局策略 */
+  if (raw && raw.devices && typeof raw.devices === 'object') {
+    for (const [id, p] of Object.entries(raw.devices)) {
+      if (!p || typeof p !== 'object' || !/^[a-zA-Z0-9_\-]+$/.test(id)) continue;
+      policy.devices[id] = {
+        chunkMB: clampPolicyNum(p.chunkMB, 'chunkMB'),
+        maxFiles: clampPolicyNum(p.maxFiles, 'maxFiles'),
+        keepDays: clampPolicyNum(p.keepDays, 'keepDays'),
+      };
+    }
+  }
+  return policy;
+}
+let dataPolicy = loadDataPolicy();
+function policyFor(devId) {
+  const o = devId && dataPolicy.devices && dataPolicy.devices[devId];
+  return o ? { ...dataPolicy, ...o } : dataPolicy;
+}
+function saveDataPolicy() {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(DATA_POLICY_FILE, JSON.stringify(dataPolicy, null, 2) + '\n', { mode: 0o600 }); return true; }
+  catch (e) { return false; }
+}
+/* 备份配置：用户设定的备份名称，最终文件名 = 设备名 + '-' + 备份名称 */
+function safeNameStem(v) {
+  return String(v == null ? '' : v).replace(/[^\p{L}\p{N}_\-]/gu, '').slice(0, 64);
+}
+function safeRouterFileName(v, exts) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s || s.length > 128 || s.indexOf('..') >= 0) return '';
+  if (!new RegExp('^[\\p{L}\\p{N}_.+\\-]+\\.(' + exts + ')$', 'iu').test(s)) return '';
+  return s;
+}
+function loadBackupConfig() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(BACKUP_CONFIG_FILE, 'utf8'));
+    const name = safeNameStem(raw && raw.name).slice(0, 48);
+    return { name };
+  } catch (e) { return { name: '' }; }
+}
+let backupConfig = loadBackupConfig();
+function saveBackupConfig() {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(BACKUP_CONFIG_FILE, JSON.stringify(backupConfig, null, 2) + '\n', { mode: 0o600 }); return true; }
+  catch (e) { return false; }
+}
+
 function emptyUsageStore() { return { version: USAGE_VERSION, devices: {} }; }
 function loadUsage() {
   let raw;
@@ -942,6 +1019,16 @@ function usageSummary(dev, opts = {}) {
     }
     if (found) rate = { rx: Math.round(acc.rx), tx: Math.round(acc.tx), real: true };
   }
+  /* 昨日同期总量（用于「较昨日 +X%」对比） */
+  const yesterdayStr = dayKey(nowMs - 86400000);
+  const yv = dayTotals.get(yesterdayStr) || { rx: 0, tx: 0 };
+  const yesterday = { rx: Math.round(yv.rx), tx: Math.round(yv.tx) };
+  /* 峰值速率：取实时趋势分钟桶中的最高瞬时速率（与仪表盘实时流量同源），带时间点 */
+  let peak = { rx: 0, tx: 0, total: 0, at: 0 };
+  for (const [m, b] of (dev.trendMin || new Map())) {
+    const n = num(b.n) || 1, rx = num(b.rx) / n, tx = num(b.tx) / n, t = rx + tx;
+    if (t > peak.total) peak = { rx: Math.round(rx), tx: Math.round(tx), total: Math.round(t), at: m * 60000 };
+  }
   return {
     deviceId: dev.id, ts: Date.now(), mode: dev.mode, demo: dev.forceDemo,
     dataReal: !dev.forceDemo && dev.mode === 'live',
@@ -949,7 +1036,7 @@ function usageSummary(dev, opts = {}) {
     interval: INTERVAL, sampleTs: num(b.lastTs), resets: num(b.resets),
     resetLog: (b.resetLog || []).slice(-5), gaps: num(b.gaps),
     migrated: usageMigrated, resetNotice: usageResetNotice,
-    today, week, month, total, series, detail, detailRange: range, rate,
+    today, week, month, total, yesterday, peak, series, detail, detailRange: range, rate,
     interfaces: sel, scope: sel.length ? 'custom' : 'all', available,
     matched: available.filter((i) => ifaceSelected(i.name, patterns)).length,
     hours: Object.keys(b.hours || {}).length, days: Object.keys(b.days || {}).length,
@@ -992,6 +1079,7 @@ class Device {
     this.lastPacket = null;
     this.history = [];
     this.resourceHistory = [];
+    this.trendMin = new Map();     // 分钟桶：1h/24h 图表，进程内滚动保留 26 小时
     this.ifaceTotals = new Map();
     this.ipRates = new Map();     // IP -> { rxBps, txBps, rxBytes, txBytes, ts }  拓扑按 IP 测速
     this.ipRatePrev = new Map();  // 上次连接表字节快照（用于求差值）
@@ -1014,9 +1102,14 @@ class Device {
       user: this.cfg.user, tls: !!this.cfg.tls, demo: !!this.cfg.demo, enabled: this.enabled, passwordSet: !!this.cfg.password };
   }
   publicStatus() {
+    const res = this.lastResource || {};
+    /* 每台设备各自上报固件版本 / 板型，供「设备与固件」清单逐台显示与判定状态；
+       只有当前切换设备提供实时采集，其他设备为最近一次连接缓存，不发起额外登录。 */
+    const version = String(res.version || '').replace(/\s*\(.*?\)\s*$/, '').trim();
     return { id: this.id, name: this.name, mode: this.mode, host: this.cfg.host, port: this.cfg.port,
       tls: !!this.cfg.tls, user: this.cfg.user, connected: !!(this.api && this.api.connected), enabled: this.enabled,
       error: this.lastError, points: this.history.length, forceDemo: this.forceDemo,
+      version, board: String(res['board-name'] || '').trim(),
       uptime: packetUptime(this), interval: INTERVAL, dataReal: this.mode === 'live' && !this.forceDemo };
   }
   /* 禁用：停掉一切连接与重连定时器，防止错误凭据反复登录把账号锁死 */
@@ -1150,6 +1243,8 @@ function activeDevice() { return devices.get(activeId) || devices.values().next(
 function deviceById(id) { return devices.get(id) || activeDevice(); }
 
 loadDeviceRegistry();
+/* 启动加载每台设备的速率趋势分钟桶（1h/24h 曲线重启不丢） */
+for (const dev of devices.values()) loadTrend(dev);
 /* 启动清理：删除已不存在设备的统计桶，避免残留历史占用并让「删除设备清历史」保持一致 */
 for (const id of Object.keys(usageStore.devices)) {
   if (!devices.has(id)) { delete usageStore.devices[id]; usageDirty = true; }
@@ -1243,6 +1338,56 @@ async function rosPrint(dev, section) {
   return (section.id === 'connections' || section.id === 'connections6')
     ? rows.map(normalizeConnectionRow) : rows;
 }
+/* 桥接端口的角色 / 状态 / 路径开销只在 monitor 里返回；以太网速率与双工同理。
+   仅在读取 bridgePorts 时补一次，失败不影响配置列表本身。 */
+async function enrichBridgePorts(dev, rows) {
+  if (!(dev.api && dev.api.connected) || !Array.isArray(rows) || !rows.length) return rows;
+  try {
+    const mon = await dev.api.exec(['/interface/bridge/port/monitor', '=numbers=all', '=once=']);
+    const list = mon.re || [];
+    const byId = new Map(list.filter((r) => r['.id']).map((r) => [r['.id'], r]));
+    const byName = new Map(list.filter((r) => r.interface || r.name).map((r) => [String(r.interface || r.name), r]));
+    rows.forEach((row) => {
+      const m = byId.get(row['.id']) || byName.get(String(row.interface || '')) || byName.get(String(row.name || ''));
+      if (!m) return;
+      ['role', 'state', 'path-cost', 'edge', 'priority'].forEach((k) => {
+        if (m[k] !== undefined && row[k] === undefined) row[k] = m[k];
+      });
+    });
+  } catch (e) { /* monitor 不可用时保留 print 数据 */ }
+  try {
+    const eth = await dev.api.exec(['/interface/ethernet/monitor', '=numbers=all', '=once=']);
+    const byName = new Map((eth.re || []).filter((r) => r.name).map((r) => [r.name, r]));
+    rows.forEach((row) => {
+      const m = byName.get(String(row.interface || ''));
+      if (!m) return;
+      if (m['full-duplex'] !== undefined) row['full-duplex'] = m['full-duplex'];
+      if (m.rate !== undefined) row.rate = m.rate;
+      if (m.status !== undefined) row.status = m.status;
+    });
+  } catch (e) { /* 虚拟网卡可能不返回协商速率 */ }
+  return rows;
+}
+/* RouterOS 链与接口匹配的硬约束：input/prerouting(含 nat dstnat) 不能匹配出接口；
+   output/postrouting(含 nat srcnat) 不能匹配入接口。写入前剔除非法组合，避免
+   "outgoing interface matching not possible in input and prerouting chains" 一类报错。 */
+const CHAIN_NO_OUT = new Set(['input', 'prerouting', 'dstnat']);
+const CHAIN_NO_IN = new Set(['output', 'postrouting', 'srcnat']);
+async function sanitizeChainIfaces(dev, section, action, ids, values) {
+  const keys = (section.fields || []).map((f) => f.key);
+  if (!keys.includes('chain')) return values;
+  const hasIn = keys.includes('in-interface'), hasOut = keys.includes('out-interface');
+  if (!hasIn && !hasOut) return values;
+  let chain = values.chain;
+  if (chain == null && action === 'set' && ids.length && (('in-interface' in values) || ('out-interface' in values))) {
+    try { const rows = (await rosPrint(dev, section)) || []; const r = rows.find((x) => x['.id'] === ids[0]); chain = r && r.chain; } catch (e) { /* ignore */ }
+  }
+  chain = String(chain || '');
+  const v = { ...values };
+  if (hasOut && CHAIN_NO_OUT.has(chain)) delete v['out-interface'];
+  if (hasIn && CHAIN_NO_IN.has(chain)) delete v['in-interface'];
+  return v;
+}
 async function rosWrite(dev, section, action, payload) {
   const { ids = [], values = {} } = payload || {};
   if (dev.forceDemo) {
@@ -1265,7 +1410,7 @@ async function rosWrite(dev, section, action, payload) {
     }
   }
   if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未写入任何配置 / Router offline - nothing was changed');
-  const cmds = []; const wv = wordsFromValues(section.fields, values);
+  const cmds = []; const wv = wordsFromValues(section.fields, await sanitizeChainIfaces(dev, section, action, ids, values));
   switch (action) {
     case 'add': cmds.push([`${section.path}/add`, ...wv]); break;
     case 'set':
@@ -1402,6 +1547,27 @@ const SPECIAL = {
     const r = await dev.api.exec(['/system/reboot']); if (r.status.type === 'trap') throw new Error(r.status.message);
     return { ok: true };
   },
+  shutdown: async (dev) => {
+    if (dev.forceDemo) return { ok: true, demo: true, simulated: true };
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接，未执行关机 / Router offline - shutdown not executed');
+    const r = await dev.api.exec(['/system/shutdown']); if (r.status.type === 'trap') throw new Error(r.status.message);
+    return { ok: true };
+  },
+  /* 固件：检查可用更新（只读探测）；install 会下载并重启路由器，谨慎执行。 */
+  fwCheck: async (dev) => {
+    if (dev.forceDemo) return { ok: true, demo: true, version: '7.25.2', available: false };
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接 / Router offline');
+    await dev.api.exec(['/system/package/update/check-for-updates']);
+    const rows = await dev.api.exec(['/system/package/update/print']);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return { ok: true, installedVersion: (row && row['installed-version']) || '', latestVersion: (row && row['latest-version']) || '', status: (row && row.status) || '', available: !!(row && row['latest-version'] && row['installed-version'] && row['latest-version'] !== row['installed-version']) };
+  },
+  fwInstall: async (dev) => {
+    if (dev.forceDemo) return { ok: true, demo: true, simulated: true };
+    if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接 / Router offline');
+    const r = await dev.api.exec(['/system/package/update/install']); if (r.status.type === 'trap') throw new Error(r.status.message);
+    return { ok: true, rebooting: true };
+  },
   backup: async (dev, p) => {
     const name = String((p && p.name) || ('backup-' + new Date().toISOString().slice(0, 10))).replace(/[^a-zA-Z0-9_\-]/g, '');
     if (dev.forceDemo) { writeBackupStatus(dev, name, true); return { ok: true, name, demo: true, simulated: true }; }
@@ -1434,9 +1600,10 @@ const SPECIAL = {
 function demoResource(dev) {
   const cpu = Math.max(3, Math.min(78, 12 + Math.round(Math.sin(Date.now() / 23000 + dev.id.length) * 9 + (Math.random() - 0.5) * 6)));
   return {
-    'cpu-load': String(cpu), 'total-memory': '1073741824',
+    'cpu-load': String(cpu), 'cpu-count': '4', 'cpu-frequency': '1400', 'architecture-name': 'arm64',
+    'total-memory': '1073741824',
     'free-memory': String(Math.round(1073741824 * (0.32 + Math.random() * 0.08))),
-    'total-hdd-space': '16777216', 'free-hdd-space': String(Math.round(16777216 * 0.71)),
+    'total-hdd-space': '1073741824', 'free-hdd-space': String(Math.round(1073741824 * 0.71)),
     /* 演示路由器的运行时间：用固定基准 + 进程存活时间递增，不随 WebUI 重启从 0 开始
        （原来是 Date.now()-startedAt，WebUI 刚起就显示"运行 4分"，明显不对）。 */
     uptime: fmtDuration(12 * 86400 + 7 * 3600 + 34 * 60 + (Date.now() - dev.startedAt) / 1000), 'board-name': 'RB5009UG+S+',
@@ -1469,14 +1636,14 @@ function demoSnapshot(dev) {
   });
 }
 async function collectLive(dev, client, useStream) {
-  const list = await client.exec(['/interface/print', '=.proplist=name,type,comment,disabled,running,speed,rx-byte,tx-byte,rx-packet,tx-packet,rx-error,tx-error,rx-drop,tx-drop']);
+  const list = await client.exec(['/interface/print', '=.proplist=name,type,comment,disabled,running,speed,mac-address,rx-byte,tx-byte,rx-packet,tx-packet,rx-error,tx-error,rx-drop,tx-drop']);
   if (list.status.type === 'trap') throw new Error('interface print: ' + (list.status.message || 'trap'));
   dev.ifaceMeta.clear();
   for (const row of list.re) {
     if (!row.name) continue;
     dev.ifaceMeta.set(row.name, {
       type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: row.disabled || 'false',
-      linkBps: linkSpeedBps(row.speed),
+      macAddress: row['mac-address'] || '', linkBps: linkSpeedBps(row.speed),
       rxErrors: num(row['rx-error']), txErrors: num(row['tx-error']), rxDrops: num(row['rx-drop']), txDrops: num(row['tx-drop']),
     });
   }
@@ -1500,7 +1667,7 @@ async function collectLive(dev, client, useStream) {
     if (!useStream) dev.lastRates.set(row.name, { rxBps, txBps, rxPps, txPps }); // 轮询模式同样是 monitor-traffic 真实值
     out.push({
       name: row.name, type: row.type || '', comment: row.comment || '', running: row.running || 'false', disabled: 'false',
-      linkBps: linkSpeedBps(row.speed),
+      'mac-address': row['mac-address'] || '', linkBps: linkSpeedBps(row.speed),
       rxBps, txBps, rxPps, txPps,
       rxBytes: hasCounters ? num(row['rx-byte']) : null, txBytes: hasCounters ? num(row['tx-byte']) : null,
       countersReal: hasCounters,
@@ -1572,7 +1739,7 @@ function ifacesFromCache(dev) {
     const total = dev.ifaceTotals.get(name) || null;   // 只缓存真实计数器，没有就是未知
     out.push({
       name, type: meta.type, comment: meta.comment, running: meta.running, disabled: 'false',
-      linkBps: meta.linkBps || 0,
+      'mac-address': meta.macAddress || '', linkBps: meta.linkBps || 0,
       rxBps: rate.rxBps || 0, txBps: rate.txBps || 0, rxPps: rate.rxPps || 0, txPps: rate.txPps || 0,
       rxBytes: total ? Math.round(total.rx) : null, txBytes: total ? Math.round(total.tx) : null,
       countersReal: !!total,
@@ -1586,6 +1753,184 @@ function historyPoint(ts, ifaces, totalRx, totalTx) {
   const per = {};
   for (const i of ifaces || []) per[i.name] = { rx: i.rxBps || 0, tx: i.txBps || 0 };
   return { ts, rx: totalRx, tx: totalTx, per };
+}
+
+/* ---- 速率趋势持久化：TREND_DIR/<deviceId>/<YYYY-MM-DD>.json（按天分片的分钟桶） ----
+   与 usageStore（流量累计）独立；只保存真实在线采样，演示/离线不落盘。
+   分片策略：单份超过 chunkMB 自动再切（day.1/day.2…）；目录内文件数超过 maxFiles 覆盖最旧；
+   保留天数由 keepDays 控制。旧版单文件 TREND_DIR/<id>.json 会被自动迁移后删除。 */
+function TREND_KEEP_MIN(devId) { return Math.max(60, num(policyFor(devId) && policyFor(devId).keepDays, 30) * 24 * 60); }
+function trendDevDir(id) { return path.join(TREND_DIR, String(id).replace(/[^a-zA-Z0-9_\-]/g, '')); }
+function trendLegacyFile(id) { return path.join(TREND_DIR, String(id).replace(/[^a-zA-Z0-9_\-]/g, '') + '.json'); }
+function dayOfMinute(m) { return new Date(m * 60000).toISOString().slice(0, 10); }
+function parseTrendBuckets(raw, cutoff, map) {
+  if (!raw || !Array.isArray(raw.buckets)) return 0;
+  let n = 0;
+  for (const b of raw.buckets) {
+    if (!b || !Number.isFinite(Number(b.m))) continue;
+    const m = Number(b.m);
+    if (m < cutoff) continue; // 过期桶不载入
+    map.set(m, { rx: num(b.rx), tx: num(b.tx), n: num(b.n), per: b.per && typeof b.per === 'object' ? b.per : {} });
+    n++;
+  }
+  return n;
+}
+function loadTrend(dev) {
+  if (!dev || !dev.id) return;
+  const map = new Map();
+  const cutoff = Math.floor(Date.now() / 60000) - TREND_KEEP_MIN(dev.id);
+  try {
+    const dir = trendDevDir(dev.id);
+    if (fs.existsSync(dir)) {
+      for (const f of fs.readdirSync(dir).sort()) {
+        if (!/\.json$/.test(f)) continue;
+        try { parseTrendBuckets(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')), cutoff, map); } catch (e) { /* 跳过损坏分片 */ }
+      }
+    }
+  } catch (e) { /* 目录读失败：从空开始 */ }
+  /* 迁移旧版单文件 */
+  try {
+    const legacy = trendLegacyFile(dev.id);
+    if (fs.existsSync(legacy)) {
+      try { parseTrendBuckets(JSON.parse(fs.readFileSync(legacy, 'utf8')), cutoff, map); } catch (e) { /* ignore */ }
+      try { fs.unlinkSync(legacy); } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+  dev.trendMin = map;
+}
+function saveTrend(dev, force) {
+  if (!dev || !dev.id || !dev.trendMin) return;
+  if (!dev.trendDirty && !force) return;
+  try {
+    const pol = policyFor(dev.id);
+    const dir = trendDevDir(dev.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const cutoff = Math.floor(Date.now() / 60000) - TREND_KEEP_MIN(dev.id);
+    /* 按天分组 */
+    const byDay = new Map();
+    for (const [m, b] of dev.trendMin) {
+      if (m < cutoff) continue;
+      const d = dayOfMinute(m);
+      const arr = byDay.get(d) || [];
+      arr.push({ m, rx: Math.round(b.rx), tx: Math.round(b.tx), n: b.n, per: b.per || {} });
+      byDay.set(d, arr);
+    }
+    const maxBytes = Math.max(1, pol.chunkMB) * 1024 * 1024;
+    const written = [];
+    for (const [d, arr] of byDay) {
+      arr.sort((a, b) => a.m - b.m);
+      /* 单份容量上限：超过就切成 day.1 / day.2 … */
+      let parts = [[]], size = 0;
+      for (const b of arr) {
+        const delta = JSON.stringify(b).length + 1;
+        if (size + delta > maxBytes && parts[parts.length - 1].length) { parts.push([]); size = 0; }
+        parts[parts.length - 1].push(b); size += delta;
+      }
+      parts.forEach((buckets, idx) => {
+        const name = (idx === 0 ? d : d + '.' + idx) + '.json';
+        fs.writeFileSync(path.join(dir, name), JSON.stringify({ version: 2, id: dev.id, day: d, part: idx, updatedAt: Date.now(), buckets }) + '\n', { mode: 0o600 });
+        written.push(name);
+      });
+    }
+    /* 清理：删除本设备目录中本次未写入的旧分片（含被策略覆盖的旧数据） */
+    for (const f of fs.readdirSync(dir)) {
+      if (/\.json$/.test(f) && written.indexOf(f) < 0) { try { fs.unlinkSync(path.join(dir, f)); } catch (e) { /* ignore */ } }
+    }
+    /* 最大保存份数：超过则删除最旧的天（按文件名日期排序，保留最新 maxFiles 个不同天） */
+    const days = [...new Set(written.map((f) => f.replace(/\.\d+\.json$/, '').replace(/\.json$/, '')))].sort();
+    if (days.length > pol.maxFiles) {
+      const drop = new Set(days.slice(0, days.length - pol.maxFiles));
+      for (const f of fs.readdirSync(dir)) {
+        const d = f.replace(/\.\d+\.json$/, '').replace(/\.json$/, '');
+        if (drop.has(d)) { try { fs.unlinkSync(path.join(dir, f)); } catch (e) { /* ignore */ } }
+      }
+    }
+    dev.trendDirty = false;
+  } catch (e) { /* 落盘失败不影响运行 */ }
+}
+function saveAllTrends(force) { for (const dev of devices.values()) saveTrend(dev, force); }
+/* 分钟滚动桶：保留原始速率样本的均值，供仪表盘 1h/24h、流量统计 7d/30d 图表。 */
+function recordTrend(dev, packet) {
+  if (!dev.trendMin) dev.trendMin = new Map();
+  const ts = num(packet.ts, Date.now());
+  const key = Math.floor(ts / 60000);
+  const cur = dev.trendMin.get(key) || { rx: 0, tx: 0, n: 0, per: {} };
+  cur.rx += num(packet.totalRx);
+  cur.tx += num(packet.totalTx);
+  cur.n += 1;
+  for (const i of packet.ifaces || []) {
+    if (!i || !i.name) continue;
+    const p = cur.per[i.name] || (cur.per[i.name] = { rx: 0, tx: 0 });
+    p.rx += num(i.rxBps); p.tx += num(i.txBps);
+  }
+  dev.trendMin.set(key, cur);
+  dev.trendDirty = true;
+  const oldest = key - TREND_KEEP_MIN(dev.id);
+  for (const k of dev.trendMin.keys()) if (k < oldest) dev.trendMin.delete(k);
+}
+function trendSeries(dev, range) {
+  const now = Date.now();
+  const out = [];
+  const bucketAvg = (b) => ({ rx: b.n ? Math.round(b.rx / b.n) : 0, tx: b.n ? Math.round(b.tx / b.n) : 0,
+    per: Object.fromEntries(Object.entries(b.per || {}).map(([n, v]) => [n, { rx: b.n ? Math.round(v.rx / b.n) : 0, tx: b.n ? Math.round(v.tx / b.n) : 0 }])) });
+  if (range === '1h') {
+    const end = Math.floor(now / 60000);
+    for (let m = end - 59; m <= end; m++) {
+      const b = dev.trendMin && dev.trendMin.get(m);
+      const avg = b ? bucketAvg(b) : { rx: 0, tx: 0, per: {} };
+      out.push({ ts: m * 60000, rx: avg.rx, tx: avg.tx });
+    }
+    return out;
+  }
+  /* 24h 按小时聚合；7d/30d 按天聚合（天均值 = 当天各分钟桶均值） */
+  const spanMs = range === '24h' ? 3600000 : range === '7d' ? 7 * 86400000 : 30 * 86400000;
+  const slotMs = range === '24h' ? 3600000 : 86400000;
+  const slots = range === '24h' ? 24 : range === '7d' ? 7 : 30;
+  const agg = new Map();
+  for (const [m, b] of (dev.trendMin || new Map())) {
+    if (m * 60000 < now - spanMs) continue;
+    const sk = Math.floor(m * 60000 / slotMs) * slotMs;
+    const cur = agg.get(sk) || { rx: 0, tx: 0, n: 0 };
+    cur.rx += num(b.rx); cur.tx += num(b.tx); cur.n += num(b.n);
+    agg.set(sk, cur);
+  }
+  const endSlot = Math.floor(now / slotMs) * slotMs;
+  for (let i = slots - 1; i >= 0; i--) {
+    const sk = endSlot - i * slotMs;
+    const b = agg.get(sk);
+    out.push({ ts: sk, rx: b && b.n ? Math.round(b.rx / b.n) : 0, tx: b && b.n ? Math.round(b.tx / b.n) : 0 });
+  }
+  return out;
+}
+/* 演示模式的 1h / 24h 曲线：用确定性波形补出与 6 分钟不同的历史形态 */
+function demoTrendSeries(dev, range) {
+  const basePkt = dev.lastPacket || {};
+  const base = Math.max(4e6, num(basePkt.totalRx) || 0, num(basePkt.totalTx) || 0);
+  const now = Date.now();
+  const phase = (String(dev.id).split('').reduce((s, c) => s + c.charCodeAt(0), 0) % 17) / 3;
+  const make = (ts, idx, span) => {
+    const u = (ts / span + phase) % (Math.PI * 2);
+    const day = ((new Date(ts).getHours() + 24) % 24) / 24 * Math.PI * 2;
+    const wave = range === '24h'
+      ? 0.46 + 0.30 * Math.sin(day - 1.1) + 0.14 * Math.sin(day * 2 + 0.7) + 0.05 * Math.sin(u * 3)
+      : 0.62 + 0.22 * Math.sin(u) + 0.10 * Math.sin(u * 2.7 + 1.3) + 0.04 * Math.sin(u * 7);
+    const v = Math.max(1e5, base * Math.max(0.12, wave));
+    return { ts, rx: Math.round(v), tx: Math.round(v * (0.16 + 0.07 * Math.sin(u * 1.7 + 0.8))) };
+  };
+  if (range === '1h') {
+    const end = Math.floor(now / 60000);
+    return Array.from({ length: 60 }, (_, i) => make((end - 59 + i) * 60000, i, 60000));
+  }
+  if (range === '24h') {
+    const end = Math.floor(now / 3600000);
+    return Array.from({ length: 24 }, (_, i) => make((end - 23 + i) * 3600000, i, 3600000));
+  }
+  if (range === '7d' || range === '30d') {
+    const days = range === '7d' ? 7 : 30, span = 86400000;
+    const end = Math.floor(now / span) * span;
+    return Array.from({ length: days }, (_, i) => make((end - (days - 1 - i) * span) + 43200000, i, span));
+  }
+  return [];
 }
 function emitStreamPacket(dev) {
   if (!dev.ifaceMeta.size) return;
@@ -1604,6 +1949,7 @@ function emitStreamPacket(dev) {
   };
   dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
   if (dev.history.length > HISTORY) dev.history.shift();
+  recordTrend(dev, packet);
   dev.lastPacket = packet;
   broadcast(dev.id, packet);
 }
@@ -1713,6 +2059,7 @@ async function pollDevice(dev) {
     };
     dev.history.push(historyPoint(packet.ts, ifaces, totalRx, totalTx));
     if (dev.history.length > HISTORY) dev.history.shift();
+    recordTrend(dev, packet);
     dev.resourceHistory.push({ ts: packet.ts, cpu: num(resource['cpu-load']), free: num(resource['free-memory']), total: num(resource['total-memory']) });
     if (dev.resourceHistory.length > HISTORY) dev.resourceHistory.shift();
     const logTick = Math.floor(Date.now() / 1000 / 8);
@@ -1775,10 +2122,28 @@ async function securitySnapshot(dev) {
   return data;
 }
 
-/* ---- 链路质量：优先 RouterOS 原生 Netwatch 探针状态，ping 仅补充延迟/抖动/丢包 ----
-   Netwatch 是路由器上持续运行的探针，只读 /tool/netwatch/print 即可拿到权威 up/down；
-   ping 需要 API 用户具备 test 策略，trap 时明确标记「未探测」而不是误报 100% 丢包。 */
+/* ---- 链路质量：RouterOS 原生 Netwatch 探针数据（状态 + RTT + 丢包）为权威来源 ----
+   /tool/netwatch/print 自带 rtt-avg / rtt-jitter / loss-percent，无需再补 ping；
+   ping 只用于非 Netwatch 目标，或 Netwatch 恰好缺 RTT 字段时的回退。 */
 const QUALITY_TTL = 20000;
+/* RouterOS 时间值可为复合格式：23ms544us / 1s500ms / 401us，统一换算成 ms */
+function rosTimeMs(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return NaN;
+  if (/^-?[0-9.]+$/.test(s)) return Number(s);
+  let total = 0, found = false;
+  const re = /([0-9]+(?:\.[0-9]+)?)\s*(ms|us|µs|h|m|s)/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    const n = Number(m[1]);
+    if (!Number.isFinite(n)) continue;
+    const u = m[2].toLowerCase();
+    total += u === 'h' ? n * 3600000 : u === 'm' ? n * 60000
+      : u === 's' ? n * 1000 : u === 'ms' ? n : n / 1000;
+    found = true;
+  }
+  return found ? Number(total.toFixed(3)) : NaN;
+}
 function qualityState(r) {
   const nw = String(r.nwStatus || '').toLowerCase();
   if (/^(up|ok|reachable|true|yes|enabled)$/.test(nw)) return 'ok';
@@ -1805,12 +2170,18 @@ function pingOne(dev, host) {
         error: /permission|not enough/i.test(msg) ? 'API 用户缺少 test 策略，无法 ping / needs "test" policy' : (msg || 'ping 被拒绝 / ping rejected') };
     }
     const recs = r.re || [];
-    const times = recs.map((x) => num(String(x.time || '').replace(/ms$/i, ''))).filter((n) => n > 0);
+    /* RouterOS time 字段可能是复合格式（23ms544us），统一用 rosTimeMs 换算 */
+    const times = recs.map((x) => rosTimeMs(x.time)).filter((n) => Number.isFinite(n) && n > 0);
     if (!times.length) return { avg: null, jitter: null, loss: null, error: '无 ICMP 响应 / no ICMP reply' };
     const avg = times.reduce((a, b) => a + b, 0) / times.length;
     const jitter = times.reduce((a, b) => a + Math.abs(b - avg), 0) / times.length;
-    return { avg: Number(avg.toFixed(1)), jitter: Number(jitter.toFixed(1)),
-      loss: Math.round((1 - times.length / Math.max(recs.length, 6)) * 100) };
+    /* 丢包优先取 RouterOS 的 packet-loss（末包累计值），无该字段再按应答数估算 */
+    const lastRec = recs[recs.length - 1] || {};
+    const lossRaw = lastRec['packet-loss'];
+    const loss = lossRaw != null && Number.isFinite(Number(String(lossRaw).replace('%', '')))
+      ? Math.round(Number(String(lossRaw).replace('%', '')))
+      : Math.round((1 - times.length / Math.max(recs.length, 6)) * 100);
+    return { avg: Number(avg.toFixed(2)), jitter: Number(jitter.toFixed(2)), loss };
   }).catch((e) => ({ avg: null, jitter: null, loss: null, error: e.message }));
 }
 /* Netwatch 托管条目：只记录由本程序创建/接管的 .id，删除时不会误删用户在 WinBox 手工建的探针 */
@@ -1908,6 +2279,11 @@ async function linkQualitySnapshot(dev, targetParam, mode) {
       netwatch = (rows || []).filter((r) => r && r.host).map((r) => ({
         host: String(r.host), label: String(r.comment || r.host),
         nwStatus: String(r.status || '').toLowerCase(), since: String(r.since || ''),
+        /* RouterOS 原生 RTT / 丢包：直接读 Netwatch 的累计统计，不再补 ping */
+        nwAvg: rosTimeMs(r['rtt-avg']),
+        nwJitter: rosTimeMs(r['rtt-jitter']),
+        nwLoss: (r['loss-percent'] == null || r['loss-percent'] === '') ? NaN
+          : Number(String(r['loss-percent']).replace('%', '')),
       }));
     } catch (e) { /* 未配置 Netwatch 或无读取权限 */ }
   }
@@ -1937,8 +2313,17 @@ async function linkQualitySnapshot(dev, targetParam, mode) {
     const nw = netwatch.find((n) => n.host === t.host);
     const hasNwState = !!(nw && nw.nwStatus && nw.nwStatus !== 'unknown');
     let probe;
-    if (hasNwState) probe = { avg: null, jitter: null, loss: null };
-    else if (m === 'netwatch' && custom.length && !nw) {
+    if (hasNwState) {
+      /* Netwatch 自带 RTT/抖动/丢包，直接用原生数据；仅在缺 RTT 时回退 ping */
+      if (Number.isFinite(nw.nwAvg)) {
+        probe = { avg: nw.nwAvg,
+          jitter: Number.isFinite(nw.nwJitter) ? nw.nwJitter : null,
+          loss: Number.isFinite(nw.nwLoss) ? nw.nwLoss : null };
+      } else {
+        probe = await pingOne(dev, t.host);
+        if (probe.error) probe = { avg: null, jitter: null, loss: null };
+      }
+    } else if (m === 'netwatch' && custom.length && !nw) {
       /* 自定义目标尚未写入 Netwatch：明确提示用户去同步，而不是误报 ICMP 结果 */
       probe = { avg: null, jitter: null, loss: null, error: '尚未同步到 Netwatch，请在目标设置中保存 / not synced - save in target settings' };
     } else probe = await pingOne(dev, t.host);
@@ -1961,6 +2346,84 @@ function snapshotOf(dev) {
 
 /* ================= WebSocket ================= */
 const clients = new Set();
+
+/* DHCP 租约读取缓存：拓扑页与租约抽屉会同时刷新，避免对路由器重复打印整张租约表 */
+const LEASE_CACHE = new Map();
+const TOPO_NODE_CACHE = new Map();
+function leaseStr(v) { return String(v == null ? '' : v).trim(); }
+function leaseBool(v) { return v === true || /^true$/i.test(leaseStr(v)); }
+function normalizeDhcpLeases(rows) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(rows) ? rows : []).forEach((r, i) => {
+    if (!r || typeof r !== 'object') return;
+    const id = leaseStr(r['.id']) || ('lease-' + i);
+    const address = leaseStr(r.address);
+    const mac = leaseStr(r['mac-address']);
+    if (!address && !mac) return;
+    const key = id + '|' + mac.toLowerCase() + '|' + address;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const status = leaseStr(r.status).toLowerCase();
+    out.push({
+      id, address, mac,
+      hostname: leaseStr(r['host-name']),
+      status: status || 'unknown',
+      server: leaseStr(r.server),
+      comment: leaseStr(r.comment),
+      dynamic: leaseBool(r.dynamic),
+      disabled: leaseBool(r.disabled),
+      blocked: leaseBool(r.blocked),
+      expires: leaseStr(r['expires-after']),
+      lastSeen: leaseStr(r['last-seen']),
+      nodeId: '',
+    });
+  });
+  return out;
+}
+function dhcpLeaseStats(leases) {
+  const list = Array.isArray(leases) ? leases : [];
+  return {
+    total: list.length,
+    bound: list.filter((l) => l.status === 'bound').length,
+    waiting: list.filter((l) => l.status === 'waiting').length,
+    dynamic: list.filter((l) => l.dynamic).length,
+    matched: list.filter((l) => l.nodeId).length,
+  };
+}
+async function readDhcpLeaseRows(dev, maxAge = 2500) {
+  if (!dev) return [];
+  const cached = LEASE_CACHE.get(dev.id);
+  if (cached && Date.now() - cached.at < maxAge) return cached.rows;
+  const rows = (await rosPrint(dev, SECTION_MAP.dhcpLeases)) || [];
+  LEASE_CACHE.set(dev.id, { at: Date.now(), rows });
+  return rows;
+}
+/* 轻量租约接口不重新发现邻居，用最近一次拓扑节点 + 自定义节点回填 nodeId。
+   优先级与 autoTopology 一致：自定义 MAC/IP 优先，其次自动节点。 */
+function annotateLeaseNodes(dev, leaseList) {
+  if (!dev) return leaseList;
+  const macKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^0-9a-f]/g, '');
+  const customList = customTopology(dev).filter((n) => n && !n.deleted);
+  const customByMac = new Map(), customByIp = new Map();
+  for (const n of customList) {
+    const mk = macKey(n.mac); if (mk) customByMac.set(mk, String(n.id));
+    const ip = String(n.ip || '').split('/')[0].trim(); if (ip) customByIp.set(ip, String(n.id));
+  }
+  const byMac = new Map(), byIp = new Map();
+  for (const n of TOPO_NODE_CACHE.get(dev.id) || []) {
+    if (!n) continue;
+    const mk = macKey(n.mac); if (mk) byMac.set(mk, String(n.id));
+    const ip = String(n.ip || '').split('/')[0].trim(); if (ip) byIp.set(ip, String(n.id));
+  }
+  for (const l of leaseList || []) {
+    const mk = macKey(l.mac);
+    l.nodeId = (mk && customByMac.get(mk)) || (l.address && customByIp.get(l.address))
+      || (mk && byMac.get(mk)) || (l.address && byIp.get(l.address)) || '';
+  }
+  return leaseList;
+}
+
 /* 自动发现：路由器本身 + LLDP/MNDP 邻居 + DHCP 租约。
    任一路读取失败只降级提示，不让整张拓扑图不可用。 */
 async function autoTopology(dev) {
@@ -1976,7 +2439,7 @@ async function autoTopology(dev) {
   let neighbors = [], leases = [], dhcpServers = [];
   try { neighbors = (await rosPrint(dev, SECTION_MAP.neighbors)) || []; }
   catch (e) { notes.push('邻居发现不可用：' + e.message); }
-  try { leases = (await rosPrint(dev, SECTION_MAP.dhcpLeases)) || []; }
+  try { leases = await readDhcpLeaseRows(dev); }
   catch (e) { notes.push('DHCP 租约不可用：' + e.message); }
   /* 租约本身不带接口名，从 DHCP 服务端配置把 server → interface 映射出来，
      让纯 DHCP 终端也能显示所在 LAN 接口的实时速率（与根节点一致的接口级数据） */
@@ -1991,7 +2454,9 @@ async function autoTopology(dev) {
   const customById = new Map(customList.map((n) => [String(n.id), n]));
   const customByMac = new Map();
   for (const n of customList) { const mk = macKey(n.mac); if (mk) customByMac.set(mk, String(n.id)); }
-  const byMac = new Map();
+  const customByIp = new Map();
+  for (const n of customList) { const ip = String(n.ip || '').split('/')[0].trim(); if (ip) customByIp.set(ip, String(n.id)); }
+  const byMac = new Map(), byIp = new Map();
   for (const r of neighbors) {
     if (!r || typeof r !== 'object') continue;
     const mac = macKey(r['mac-address']);
@@ -2006,6 +2471,7 @@ async function autoTopology(dev) {
       ports: [], auto: true, note: String(r.platform || ''), iface: String(r.interface || '') };
     nodes.push(node);
     if (mac) byMac.set(mac, node.id);
+    if (node.ip) byIp.set(node.ip, node.id);
   }
   for (const r of leases) {
     if (!r || typeof r !== 'object') continue;
@@ -2037,9 +2503,18 @@ async function autoTopology(dev) {
       order: (meta && Number.isFinite(Number(meta.order))) ? Number(meta.order) : ((customNode && customNode.order) || 0) };
     nodes.push(node);
     if (mac) byMac.set(mac, node.id);
+    if (node.ip) byIp.set(node.ip, node.id);
   }
-  return { nodes, ok: neighbors.length > 0 || leases.length > 0, notes,
-    counts: { neighbors: neighbors.length, leases: leases.length } };
+  const leaseList = normalizeDhcpLeases(leases);
+  for (const l of leaseList) {
+    const mk = macKey(l.mac);
+    l.nodeId = (mk && customByMac.get(mk)) || (l.address && customByIp.get(l.address))
+      || (mk && byMac.get(mk)) || (l.address && byIp.get(l.address)) || '';
+  }
+  const stats = dhcpLeaseStats(leaseList);
+  TOPO_NODE_CACHE.set(dev.id, nodes);
+  return { nodes, ok: neighbors.length > 0 || leases.length > 0, notes, leases: leaseList,
+    counts: { neighbors: neighbors.length, leases: leaseList.length, bound: stats.bound, waiting: stats.waiting, matched: stats.matched } };
 }
 
 function wsAccept(key) { return crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64'); }
@@ -2107,29 +2582,111 @@ const SESSION_COOKIE = 'ros_session';
 const SESSION_MAX_AGE = 7 * 24 * 3600;
 
 function loadAuthConfig() {
+  const roleOf = (x) => (['admin', 'write', 'read'].includes(x.role) ? x.role : 'admin');
   try {
     const a = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
     if (a && a.disabled === true) return null;                    // WebUI 明确关闭登录
-    if (a && a.user && a.salt && a.hash) return { user: String(a.user), salt: String(a.salt), hash: String(a.hash), source: 'webui' };
+    if (a && Array.isArray(a.users) && a.users.length) {
+      const users = a.users.filter((x) => x && x.user && x.salt && x.hash)
+        .map((x) => ({ user: String(x.user), salt: String(x.salt), hash: String(x.hash), source: 'webui', createdAt: x.createdAt || 0, role: roleOf(x) }));
+      if (users.length) return { user: users[0].user, salt: users[0].salt, hash: users[0].hash,
+        source: 'webui', users, twoFactor: a.twoFactor || null, defaultPassword: !!a.defaultPassword };
+    }
+    if (a && a.user && a.salt && a.hash) return { user: String(a.user), salt: String(a.salt), hash: String(a.hash),
+      source: 'webui', users: [{ user: String(a.user), salt: String(a.salt), hash: String(a.hash), source: 'webui', createdAt: 0, role: 'admin' }],
+      twoFactor: a.twoFactor || null };
   } catch (e) { /* 文件不存在或格式错误，回退到环境变量 */ }
   const u = process.env.WEB_USER || '', p = process.env.WEB_PASSWORD || '';
-  if (!u || !p) return null;
+  if (!u || !p) {
+    /* 初次安装：内置默认管理员 admin/admin，登录后提示新增管理员账户 */
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync('admin', salt, 32).toString('hex');
+    const entry = { user: 'admin', salt, hash, source: 'webui', role: 'admin', createdAt: Date.now() };
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(AUTH_FILE, JSON.stringify({ users: [entry], defaultPassword: true }, null, 2) + '\n', { mode: 0o600 });
+    } catch (e) { /* ignore */ }
+    return { user: 'admin', salt, hash, source: 'webui', users: [entry], twoFactor: null, defaultPassword: true };
+  }
   const salt = crypto.createHash('sha256').update('env:' + u + ':' + p).digest('hex').slice(0, 32);
-  return { user: u, salt, hash: crypto.scryptSync(p, salt, 32).toString('hex'), source: 'env' };
+  const hash = crypto.scryptSync(p, salt, 32).toString('hex');
+  return { user: u, salt, hash, source: 'env', users: [{ user: u, salt, hash, source: 'env', createdAt: 0, role: 'admin' }] };
 }
 let authCfg = loadAuthConfig();
 function authEnabled() { return !!authCfg; }
+function authUsers() { return (authCfg && Array.isArray(authCfg.users) && authCfg.users.length) ? authCfg.users : []; }
+function userRole(name) {
+  const hit = authUsers().find((u) => u.user === name);
+  return (hit && hit.role) || 'admin';
+}
+function sessionRole(req) {
+  const u = sessionUser(req);
+  return u ? userRole(u) : 'admin';
+}
+function saveAuthFile() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const out = { users: authUsers().map((u) => ({ user: u.user, salt: u.salt, hash: u.hash, source: u.source, createdAt: u.createdAt || 0, role: u.role || 'admin' })) };
+  if (authCfg && authCfg.twoFactor) out.twoFactor = authCfg.twoFactor;
+  if (authCfg && authCfg.defaultPassword) out.defaultPassword = true;
+  fs.writeFileSync(AUTH_FILE, JSON.stringify(out, null, 2) + '\n', { mode: 0o600 });
+}
+
+/* ---- TOTP 双因素认证（RFC 6238，HMAC-SHA1，30 秒步长，6 位） ---- */
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function b32encode(buf) {
+  let bits = '', out = '';
+  for (const b of buf) bits += b.toString(2).padStart(8, '0');
+  for (let i = 0; i < bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5).padEnd(5, '0'), 2)];
+  return out;
+}
+function b32decode(str) {
+  let bits = '';
+  for (const c of String(str || '').toUpperCase().replace(/=+$/, '')) {
+    const i = B32.indexOf(c); if (i < 0) continue;
+    bits += i.toString(2).padStart(5, '0');
+  }
+  const out = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(out);
+}
+function totpCode(secretB32, atMs) {
+  const counter = Math.floor((atMs == null ? Date.now() : atMs) / 30000);
+  const buf = Buffer.alloc(8); buf.writeUInt32BE(Math.floor(counter / 0x100000000), 0); buf.writeUInt32BE(counter >>> 0, 4);
+  const mac = crypto.createHmac('sha1', b32decode(secretB32)).update(buf).digest();
+  const off = mac[mac.length - 1] & 0x0f;
+  const num = ((mac[off] & 0x7f) << 24 | mac[off + 1] << 16 | mac[off + 2] << 8 | mac[off + 3]) % 1000000;
+  return String(num).padStart(6, '0');
+}
+function verifyTotp(secretB32, code) {
+  if (!secretB32 || !/^\d{6}$/.test(String(code || ''))) return false;
+  const now = Date.now();
+  /* ±2 步（±60s）容差：吸收手机与服务器之间的常见时钟漂移，避免「验证码一直不正确」 */
+  return [-2, -1, 0, 1, 2].some((d) => totpCode(secretB32, now + d * 30000) === String(code));
+}
+function twoFactorEnabled() { return !!(authCfg && authCfg.twoFactor && authCfg.twoFactor.enabled && authCfg.twoFactor.secret); }
 function checkPassword(cfg, user, pass) {
-  if (!cfg || user !== cfg.user || typeof pass !== 'string') return false;
-  const h = crypto.scryptSync(pass, cfg.salt, 32), expect = Buffer.from(cfg.hash, 'hex');
+  if (!cfg || typeof pass !== 'string') return false;
+  const hit = authUsers().find((u) => u.user === user) || (cfg.user === user ? cfg : null);
+  if (!hit) return false;
+  const h = crypto.scryptSync(pass, hit.salt, 32), expect = Buffer.from(hit.hash, 'hex');
   return h.length === expect.length && crypto.timingSafeEqual(h, expect);
 }
-function saveAuthConfig(user, password) {
+function saveAuthConfig(user, password, addOnly, role) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 32).toString('hex');
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(AUTH_FILE, JSON.stringify({ user, salt, hash }, null, 2) + '\n', { mode: 0o600 });
-  authCfg = { user, salt, hash, source: 'webui' };
+  const entry = { user, salt, hash, source: 'webui', createdAt: Date.now(), role: ['admin', 'write', 'read'].includes(role) ? role : 'admin' };
+  let users;
+  if (addOnly) {
+    if (authUsers().some((u) => u.user === user)) throw new Error('账户已存在 / Account already exists');
+    users = authUsers().concat(entry);
+  } else {
+    users = [entry];
+  }
+  const twoFactor = authCfg && authCfg.twoFactor;
+  /* 修改默认管理员密码或新增管理员账户后，不再提示默认密码 */
+  const keepDefault = !!(authCfg && authCfg.defaultPassword && addOnly && entry.role !== 'admin');
+  authCfg = { user: users[0].user, salt: users[0].salt, hash: users[0].hash, source: 'webui', users, twoFactor: twoFactor || null, defaultPassword: keepDefault };
+  saveAuthFile();
 }
 function clearAuthConfig() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -2167,8 +2724,14 @@ function cookieOf(req, name) {
 }
 function sessionUser(req) {
   const p = verifySession(cookieOf(req, SESSION_COOKIE));
-  return p && authCfg && p.u === authCfg.user ? p.u : null;
+  if (!p || !authCfg) return null;
+  const valid = authUsers().some((u) => u.user === p.u) || p.u === authCfg.user;
+  return valid ? p.u : null;
 }
+/* 仅在「登录保护已开启且会话无效」时才要求跳转登录；
+   auth 关闭时若直接返回 loginRequired，前端会跳登录页，而登录页发现 enabled=false
+   又跳回主页，造成无限循环。auth 关闭时的写操作应返回普通 400 业务错误。 */
+function needLogin(req) { return authEnabled() && !sessionUser(req); }
 function authorized(req) {
   if (!authEnabled()) return true;
   if (sessionUser(req)) return true;
@@ -2215,6 +2778,13 @@ function serveStatic(req, res, pathname) {
 function reqDevice(req, url, body) {
   const id = url.searchParams.get('device') || (body && body.device) || '';
   return devices.get(id) || activeDevice();
+}
+/* 写操作必须落在显式指定的设备上：id 无效时返回 null，绝不回退到主路由。
+   body.device 优先于 URL 的 ?device=（前端 api() 会自动附加当前设备，设备菜单操作的正文才是真实目标）。 */
+function reqDeviceStrict(req, url, body) {
+  const bodyId = body && body.device != null ? String(body.device).trim() : '';
+  const id = bodyId || String(url.searchParams.get('device') || '').trim();
+  return id ? (devices.get(id) || null) : activeDevice();
 }
 function deviceList() {
   return [...devices.values()].map((d) => ({ ...d.snapshotCfg(), status: d.publicStatus() }));
@@ -2507,28 +3077,148 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/health') return json(res, 200, { ok: true, app: 'ros-center', version: runtimeInfo().version, pid: process.pid, port: PORT, ts: Date.now() });
   if (p === '/login' || p === '/login.html') return serveStatic(req, res, '/login.html');
   if (p === '/api/auth' && req.method === 'GET') {
-    return json(res, 200, { enabled: authEnabled(), authenticated: !authEnabled() || !!sessionUser(req),
-      user: authCfg ? authCfg.user : '', source: authCfg ? authCfg.source : '' });
+    const su = sessionUser(req);
+    const authed = !authEnabled() || !!su;
+    return json(res, 200, { enabled: authEnabled(), authenticated: authed,
+      user: su || (authCfg ? authCfg.user : ''), source: authCfg ? authCfg.source : '',
+      role: authEnabled() ? userRole(su || (authCfg ? authCfg.user : '')) : 'admin',
+      defaultPassword: !!(authCfg && authCfg.defaultPassword),
+      users: authed ? authUsers().map((u) => ({ user: u.user, source: u.source, createdAt: u.createdAt || 0, role: u.role || 'admin' })) : [] });
+  }
+  /* WebUI 本地账户：只读列表；新增仅由「系统管理 · 用户」为 RouterOS 用户创建，且需管理员 */
+  if (p === '/api/webui/users' && req.method === 'GET') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    return json(res, 200, { users: authUsers().map((u) => ({ user: u.user, source: u.source, createdAt: u.createdAt || 0, role: u.role || 'admin' })) });
+  }
+  if (p === '/api/webui/users' && req.method === 'POST') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可新增账户 / Admins only' });
+    try {
+      const b = await readBody(req);
+      const user = String(b.user || '').trim(), password = String(b.password || '');
+      const role = ['admin', 'write', 'read'].includes(b.role) ? b.role : 'admin';
+      if (!/^[A-Za-z0-9_.\-]{1,32}$/.test(user)) throw new Error('用户名需为 1-32 位字母/数字/_/./-');
+      if (b.blank !== true && password.length < 6) throw new Error('密码至少 6 位');
+      if (!authEnabled()) throw new Error('请先设置首个 WebUI 账户 / Set the first account first');
+      saveAuthConfig(user, password, true, role);
+      console.log(`[auth] user added ${user} role=${role} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, users: authUsers().map((u) => ({ user: u.user, role: u.role || 'admin' })) });
+    } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/login' && req.method === 'POST') {
     if (!authEnabled()) return json(res, 200, { ok: true, enabled: false });
     try {
       const b = await readBody(req);
       if (!checkPassword(authCfg, b.user, b.password)) return json(res, 401, { error: '用户名或密码不正确 / Invalid username or password' });
-      setSessionCookie(res, signSession(authCfg.user));
-      console.log(`[auth] login ok user=${authCfg.user} by=${req.socket.remoteAddress}`);
-      return json(res, 200, { ok: true, user: authCfg.user });
+      if (twoFactorEnabled()) {
+        /* 启用 2FA：签发一个仅用于二次验证的临时 token，用户名为 2fa: 前缀，不写入会话 cookie */
+        const pending = signSession('2fa:' + String(b.user).trim());
+        return json(res, 200, { ok: false, need2fa: true, pending });
+      }
+      setSessionCookie(res, signSession(String(b.user).trim()));
+      console.log(`[auth] login ok user=${b.user} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, user: String(b.user).trim() });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/login/2fa' && req.method === 'POST') {
+    if (!authEnabled() || !twoFactorEnabled()) return json(res, 400, { error: '未启用双因素认证 / 2FA not enabled' });
+    try {
+      const b = await readBody(req);
+      const v = verifySession(String(b.pending || ''));
+      if (!v || !String(v.u).startsWith('2fa:')) return json(res, 401, { error: '验证已过期，请重新登录 / Session expired' });
+      if (!verifyTotp(authCfg.twoFactor.secret, b.code)) return json(res, 401, { error: '验证码不正确 / Invalid code' });
+      const loginUser = String(v.u).slice(4);
+      if (!authUsers().some((u) => u.user === loginUser)) return json(res, 401, { error: '账户不存在 / Account not found' });
+      setSessionCookie(res, signSession(loginUser));
+      console.log(`[auth] 2fa ok user=${loginUser} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, user: loginUser });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  /* 2FA 状态与设置（需已登录） */
+  if (p === '/api/auth/2fa/status' && req.method === 'GET') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (!authEnabled()) return json(res, 200, { enabled: false, configured: false, noAccount: true });
+    return json(res, 200, { enabled: twoFactorEnabled(), configured: !!(authCfg && authCfg.twoFactor && authCfg.twoFactor.secret) });
+  }
+  if (p === '/api/auth/2fa/setup' && req.method === 'POST') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可管理 2FA / Admins only' });
+    if (!authEnabled()) return json(res, 400, { error: '请先设置 WebUI 账户 / Set an account first' });
+    try {
+      const secret = b32encode(crypto.randomBytes(20));
+      /* otpauth 标签必须保留字面冒号分隔 issuer:account（仅各自编码），
+         把冒号编成 %3A 会让 Microsoft Authenticator 解析失败而卡住 */
+      const issuer = 'ROS-Center';
+      const label = encodeURIComponent(issuer) + ':' + encodeURIComponent(authCfg.user);
+      const otpauth = 'otpauth://totp/' + label + '?secret=' + secret + '&issuer=' + encodeURIComponent(issuer) + '&algorithm=SHA1&digits=6&period=30';
+      return json(res, 200, { secret, otpauth });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/auth/2fa/enable' && req.method === 'POST') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可管理 2FA / Admins only' });
+    if (!authEnabled()) return json(res, 400, { error: '请先设置 WebUI 账户 / Set an account first' });
+    try {
+      const b = await readBody(req);
+      if (!verifyTotp(b.secret, b.code)) return json(res, 400, { error: '验证码不正确：请将手机时间设为自动同步，并输入验证器中最新刷新的 6 位码 / Invalid code — set phone time to auto and use the latest code' });
+      authCfg.twoFactor = { secret: String(b.secret), enabled: true, user: sessionUser(req) || authCfg.user };
+      saveAuthFile();
+      return json(res, 200, { ok: true, enabled: true });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/auth/2fa/disable' && req.method === 'POST') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可管理 2FA / Admins only' });
+    if (!authEnabled()) return json(res, 400, { error: '请先设置 WebUI 账户 / Set an account first' });
+    try {
+      const b = await readBody(req);
+      if (!verifyTotp(authCfg.twoFactor && authCfg.twoFactor.secret, b.code)) return json(res, 400, { error: '验证码不正确 / Invalid code' });
+      authCfg.twoFactor = { secret: authCfg.twoFactor.secret, enabled: false, user: authCfg.twoFactor.user || authCfg.user };
+      saveAuthFile();
+      return json(res, 200, { ok: true, enabled: false });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/logout' && req.method === 'POST') {
     setSessionCookie(res, '');
     return json(res, 200, { ok: true });
   }
+  /* 只读账户：允许查看，所有写操作一律拒绝（登出除外） */
+  if (req.method !== 'GET' && sessionRole(req) === 'read') {
+    return json(res, 403, { error: '只读账户无法执行此操作 / Read-only account' });
+  }
+  /* WebUI 用户头像：保存到 /data/user/avatar/<user>.png；GET 直接返回图片（带 cookie 鉴权） */
+  if (p === '/api/user/avatar' && req.method === 'GET') {
+    if (!authorized(req)) return deny(res, req, p);
+    const user = String(sessionUser(req) || (authCfg ? authCfg.user : 'default') || 'default').replace(/[^a-zA-Z0-9_\-]/g, '');
+    const fp = path.join(AVATAR_DIR, user + '.png');
+    try {
+      const buf = fs.readFileSync(fp);
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+      return res.end(buf);
+    } catch (e) { res.writeHead(404, { 'Content-Length': 0 }); return res.end(); }
+  }
+  if (p === '/api/user/avatar' && req.method === 'POST') {
+    if (needLogin(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (!authEnabled()) return json(res, 400, { error: '请先设置 WebUI 账户 / Set an account first' });
+    try {
+      const b = await readBody(req);
+      const data = String(b.data || '');
+      const m = data.match(/^data:image\/(png|jpe?g|webp|gif);base64,(.+)$/i);
+      if (!m) throw new Error('图片格式不正确 / Invalid image');
+      const buf = Buffer.from(m[2], 'base64');
+      if (!buf.length || buf.length > 2 * 1024 * 1024) throw new Error('图片过大（上限 2 MB）/ Image too large');
+      fs.mkdirSync(AVATAR_DIR, { recursive: true });
+      const user = String(sessionUser(req) || authCfg.user).replace(/[^a-zA-Z0-9_\-]/g, '');
+      fs.writeFileSync(path.join(AVATAR_DIR, user + '.png'), buf, { mode: 0o600 });
+      return json(res, 200, { ok: true, url: '/api/user/avatar?t=' + Date.now() });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
 
   if (!authorized(req)) return deny(res, req, p);
 
   /* ---- WebUI 登录密码设置（需先登录） ---- */
   if (p === '/api/auth/password' && req.method === 'POST') {
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可修改 / Admins only' });
     try {
       const b = await readBody(req);
       const user = String(b.user || '').trim(), password = String(b.password || '');
@@ -2541,6 +3231,7 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/auth/password' && req.method === 'DELETE') {
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可关闭登录保护 / Admins only' });
     clearAuthConfig();
     console.log(`[auth] login disabled by=${req.socket.remoteAddress}`);
     return json(res, 200, { ok: true, enabled: false });
@@ -2643,8 +3334,9 @@ const server = http.createServer(async (req, res) => {
       devices.delete(id);
       if (activeId === id) activeId = devices.keys().next().value;
       if (!saveDeviceRegistry()) throw new Error('写入 devices.json 失败');
-      /* 设备管理页承诺「历史数据一并清除」：同步移除该设备的统计桶 */
+      /* 设备管理页承诺「历史数据一并清除」：同步移除该设备的统计桶与趋势文件 */
       if (usageStore.devices[id]) { delete usageStore.devices[id]; usageDirty = true; saveUsage(true); }
+      try { fs.unlinkSync(trendFile(id)); } catch (e) { /* 文件不存在则忽略 */ }
       console.log(`[devices] removed ${dev.name} by=${req.socket.remoteAddress}`);
       return json(res, 200, { ok: true, devices: deviceList(), activeId });
     } catch (e) { return json(res, 400, { error: e.message }); }
@@ -2678,8 +3370,56 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, ...usageSummary(dev, { range: String(body.range || '').trim() }) });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
+  /* 采集数据保留策略：单份最大容量(MB，超过自动分片) / 最大保存份数(超过覆盖最旧) / 保留天数 */
+  if (p === '/api/data-policy') {
+    if (req.method === 'GET') {
+      const stats = [];
+      for (const dev of devices.values()) {
+        const dir = trendDevDir(dev.id);
+        let files = 0, bytes = 0;
+        try { for (const f of fs.readdirSync(dir)) if (/\.json$/.test(f)) { files++; try { bytes += fs.statSync(path.join(dir, f)).size; } catch (e) { /* ignore */ } } } catch (e) { /* ignore */ }
+        stats.push({ id: dev.id, name: dev.name, files, bytes, custom: !!(dataPolicy.devices && dataPolicy.devices[dev.id]), policy: policyFor(dev.id) });
+      }
+      const advice = { chunkMB: 5, maxFiles: 30, keepDays: 30, note: '按天分片：一天约 1–2 MB，建议单份 5 MB、最多 30 份，可覆盖约 1 个月。' };
+      return json(res, 200, { ...dataPolicy, advice, limits: DATA_POLICY_LIMITS, stats });
+    }
+    if (req.method === 'POST') {
+      try {
+        const b = await readBody(req);
+        const deviceId = String(b.deviceId || '').trim();
+        if (deviceId && (!devices.has(deviceId) || !/^[a-zA-Z0-9_\-]+$/.test(deviceId))) throw new Error('设备不存在');
+        if (deviceId) {
+          if (b.inherit === true) {
+            delete dataPolicy.devices[deviceId];
+          } else {
+            const cur = dataPolicy.devices[deviceId] || policyFor(deviceId);
+            const next = { ...cur };
+            if (b.chunkMB !== undefined) next.chunkMB = clampPolicyNum(b.chunkMB, 'chunkMB');
+            if (b.maxFiles !== undefined) next.maxFiles = clampPolicyNum(b.maxFiles, 'maxFiles');
+            if (b.keepDays !== undefined) next.keepDays = clampPolicyNum(b.keepDays, 'keepDays');
+            dataPolicy.devices[deviceId] = { chunkMB: next.chunkMB, maxFiles: next.maxFiles, keepDays: next.keepDays };
+          }
+        } else {
+          if (b.chunkMB !== undefined) dataPolicy.chunkMB = clampPolicyNum(b.chunkMB, 'chunkMB');
+          if (b.maxFiles !== undefined) dataPolicy.maxFiles = clampPolicyNum(b.maxFiles, 'maxFiles');
+          if (b.keepDays !== undefined) dataPolicy.keepDays = clampPolicyNum(b.keepDays, 'keepDays');
+        }
+        if (!saveDataPolicy()) throw new Error('策略已应用，但写入 /data/data-policy.json 失败');
+        /* 全局策略变更重分片所有设备；单设备策略只重分片该设备 */
+        if (deviceId) { const dev = devices.get(deviceId); if (dev) saveTrend(dev, true); }
+        else saveAllTrends(true);
+        console.log(`[data-policy] ${deviceId ? 'device=' + deviceId + ' ' : ''}${JSON.stringify(deviceId ? policyFor(deviceId) : dataPolicy)} by=${req.socket.remoteAddress}`);
+        return json(res, 200, { ok: true, ...dataPolicy });
+      } catch (e) { return json(res, 400, { error: e.message }); }
+    }
+  }
   if (p === '/api/history') {
     const dev = reqDevice(req, url);
+    const range = String(url.searchParams.get('range') || '').trim();
+    if (dev && (range === '1h' || range === '24h' || range === '7d' || range === '30d')) {
+      const points = dev.forceDemo ? demoTrendSeries(dev, range) : trendSeries(dev, range);
+      return json(res, 200, { range, points, resource: dev.resourceHistory, demo: !!dev.forceDemo, updatedAt: Date.now() });
+    }
     return json(res, 200, { points: dev ? dev.history : [], resource: dev ? dev.resourceHistory : [] });
   }
   /* 拓扑按 IP 实时测速：返回所有开启了 ipRate 的节点及其速率，供「IP 流量监控」页使用 */
@@ -2715,10 +3455,148 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await syncQualityNetwatch(reqDevice(req, url, body), body.targets, body.interval));
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
+  /* 扫描信道：调用路由器 /interface/wifi/scan（旧包回退 /interface/wireless/scan） */
+  if (p === '/api/wifi/scan' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const dev = reqDevice(req, url, body);
+      if (!dev) return json(res, 404, { error: '设备不存在' });
+      const iface = String(body.interface || '').trim();
+      if (!/^[A-Za-z0-9_.:\-]+$/.test(iface)) return json(res, 400, { error: '请选择无线接口' });
+      const dur = Math.min(15, Math.max(3, parseInt(body.duration, 10) || 5));
+      if (dev.forceDemo) {
+        return json(res, 200, { ok: true, demo: true, interface: iface, rows: [], note: '演示模式未连接设备，无法执行真实扫描' });
+      }
+      if (!(dev.api && dev.api.connected)) return json(res, 200, { ok: false, interface: iface, rows: [], error: '路由器未连接，无法扫描' });
+      let r = await dev.api.exec([`/interface/wifi/scan`, `=interface=${iface}`, `=duration=${dur}s`]);
+      if (r.status && r.status.type === 'trap') {
+        r = await dev.api.exec([`/interface/wireless/scan`, `=interface=${iface}`, `=duration=${dur}`]);
+        if (r.status && r.status.type === 'trap') throw new Error(r.status.message || '扫描失败');
+      }
+      return json(res, 200, { ok: true, interface: iface, duration: dur, rows: r.re || [] });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
   /* 最近一次成功备份的状态与位置 */
+  if (p === '/api/backup/config') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (req.method === 'GET') return json(res, 200, { ok: true, ...backupConfig });
+    if (req.method === 'POST') {
+      try {
+        const b = await readBody(req);
+        const name = safeNameStem(b.name).slice(0, 48);
+        if (!name && String(b.name || '').trim()) throw new Error('备份名称只能包含字母、数字、汉字、下划线和短横线');
+        backupConfig = { name };
+        if (!saveBackupConfig()) throw new Error('写入 /data/backup-config.json 失败');
+        return json(res, 200, { ok: true, ...backupConfig });
+      } catch (e) { return json(res, 400, { error: e.message }); }
+    }
+  }
   if (p === '/api/backup/status' && req.method === 'GET') {
     const dev = reqDevice(req, url);
     return json(res, 200, { ok: true, deviceId: dev && dev.id, status: (dev && readBackupStatus()[dev.id]) || null });
+  }
+  /* ---- 备份文件：实时读取路由器 /file，winbox 删除后即时同步（不依赖本地缓存状态） ---- */
+  if (p === '/api/backup/files' && req.method === 'GET') {
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 200, { deviceId: '', files: [], demo: false });
+    if (dev.forceDemo) {
+      return json(res, 200, { deviceId: dev.id, demo: true, files: [], note: '演示模式不读取真实备份文件' });
+    }
+    if (!(dev.api && dev.api.connected)) return json(res, 200, { deviceId: dev.id, files: [], error: '路由器未连接' });
+    try {
+      const r = await dev.api.exec(['/file/print']);
+      if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '读取文件失败');
+      const files = (r.re || []).map((f) => {
+        const name = String(f.name || '');
+        if (!/\.(backup|rsc)$/i.test(name)) return null;
+        const isBackup = /\.backup$/i.test(name);
+        const kind = isBackup ? 'system' : 'config';
+        const auto = /^auto/i.test(name);
+        return { name, size: num(f.size), type: kind, method: auto ? 'auto' : 'manual',
+          created: String(f['creation-time'] || ''), ts: Date.parse(f['creation-time']) || 0 };
+      }).filter(Boolean).sort((a, b) => b.ts - a.ts);
+      return json(res, 200, { deviceId: dev.id, files, updatedAt: Date.now() });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+  /* 下载路由器上的备份文件：.rsc 文本直接下载，.backup 二进制经 FTP RETR 原样返回 */
+  if (p === '/api/backup/download' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 400, { error: '没有可用设备' });
+    const name = safeRouterFileName(String(url.searchParams.get('name') || '').trim(), 'backup|rsc');
+    if (!name) return json(res, 400, { error: '备份文件名不合法' });
+    try {
+      if (dev.forceDemo) return json(res, 400, { error: '演示模式没有可下载的真实备份' });
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接');
+      const buf = await ftpRetrieveBuffer(dev.cfg, name, { keepRemote: true });
+      const ct = /\.rsc$/i.test(name) ? 'text/plain; charset=utf-8' : 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': ct,
+        'Content-Disposition': 'attachment; filename="' + name.replace(/"/g, '') + '"',
+        'Content-Length': buf.length, 'Cache-Control': 'no-store',
+      });
+      return res.end(buf);
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+  /* 创建备份：仅支持 kind=config → /export file= (.rsc)；不再提供 .backup 系统备份 */
+  if (p === '/api/backup/create' && req.method === 'POST') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    try {
+      const body = await readBody(req);
+      const dev = reqDeviceStrict(req, url, body);
+      if (!dev) throw new Error('目标设备不存在，未创建备份');
+      const kind = 'config';
+      let name = safeNameStem(body.name);
+      if (!name) name = 'export-' + new Date().toISOString().slice(0, 10);
+      if (dev.forceDemo) return json(res, 200, { ok: true, demo: true, name, kind });
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接');
+      const fileName = name;
+      const r1 = await dev.api.exec(['/export', `=file=${fileName}`, '=show-sensitive=yes']);
+      if (r1 && r1.status && r1.status.type === 'trap') {
+        const r2 = await dev.api.exec(['/export', `=file=${fileName}`, '=hide-sensitive=no']);
+        if (r2 && r2.status && r2.status.type === 'trap') throw new Error(r2.status.message || '配置导出失败');
+      }
+      writeBackupStatus(dev, name, false, '/flash/' + name + '.rsc');
+      return json(res, 200, { ok: true, name, kind, fileName: name + '.rsc' });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+  /* 删除路由器上的备份文件：真实调用 /file/remove，与 winbox 删除一致 */
+  if (p === '/api/backup/remove' && req.method === 'POST') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    try {
+      const body = await readBody(req);
+      const dev = reqDeviceStrict(req, url, body);
+      if (!dev) throw new Error('目标设备不存在，未删除任何文件');
+      const name = safeRouterFileName(String(body.name || '').trim(), 'backup|rsc');
+      if (!name) throw new Error('文件名不合法');
+      if (dev.forceDemo) return json(res, 200, { ok: true, demo: true, name });
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接');
+      /* 读取完整文件列表后按名称精确匹配：RouterOS API 对 ?.name= 的查询并不可靠，
+         旧实现因此找不到文件，导致 UI 残留无法删除。 */
+      const list = await dev.api.exec(['/file/print']);
+      if (list && list.status && list.status.type === 'trap') throw new Error(list.status.message || '读取文件列表失败');
+      const row = (list.re || []).find((f) => String(f.name || '') === name);
+      if (!row || !row['.id']) {
+        return json(res, 404, { ok: false, notFound: true, name, error: '路由器上未找到该文件，可能已在 WinBox 中删除；列表已刷新' });
+      }
+      const rr = await dev.api.exec(['/file/remove', '=.id=' + row['.id']]);
+      if (rr && rr.status && rr.status.type === 'trap') throw new Error(rr.status.message || '删除失败');
+      console.log(`[backup] removed ${name} on ${dev.name} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, name });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
+  /* DHCP 租约轻量接口：拓扑页抽屉轮询用，返回归一化字段与在线统计 */
+  if (p === '/api/dhcp/leases' && req.method === 'GET') {
+    const dev = reqDevice(req, url);
+    if (!dev) return json(res, 200, { deviceId: '', leases: [], counts: { total: 0, bound: 0, waiting: 0, dynamic: 0, matched: 0 }, updatedAt: Date.now() });
+    try {
+      const leaseList = annotateLeaseNodes(dev, normalizeDhcpLeases(await readDhcpLeaseRows(dev, 2000)));
+      return json(res, 200, { deviceId: dev.id, leases: leaseList, counts: dhcpLeaseStats(leaseList),
+        updatedAt: Date.now(), demo: !!dev.forceDemo });
+    } catch (e) {
+      return json(res, 200, { deviceId: dev.id, leases: [], counts: { total: 0, bound: 0, waiting: 0, dynamic: 0, matched: 0 },
+        error: e.message, updatedAt: Date.now() });
+    }
   }
   /* 网络拓扑：自动发现 + 用户自定义节点（custom 按设备持久化） */
   if (p === '/api/topology') {
@@ -2728,6 +3606,7 @@ const server = http.createServer(async (req, res) => {
         const auto = await autoTopology(dev);
         const store = (dev && topoStore.devices[dev.id]) || {};
         return json(res, 200, { deviceId: dev && dev.id, auto: auto.nodes, custom: customTopology(dev),
+          leases: auto.leases || [],
           discovery: { ok: auto.ok, notes: auto.notes, counts: auto.counts },
           updatedAt: store.updatedAt || 0, demo: !!(dev && dev.forceDemo) });
       } catch (e) { return json(res, 500, { error: e.message }); }
@@ -2894,22 +3773,24 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ...(dev ? dev.snapshotCfg() : {}), mode: dev && dev.mode, connected: !!(dev && dev.api && dev.api.connected), error: dev && dev.lastError, hostPort: Number(process.env.WEB_PORT || 0) || PORT });
   }
   if (p === '/api/settings' && req.method === 'POST') {
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可修改设备连接 / Admins only' });
     try {
       const b = await readBody(req);
       const dev = activeDevice(); if (!dev) throw new Error('没有可用设备');
-      if (b.host !== undefined) { if (!validHost(b.host)) throw new Error('地址格式不正确'); dev.cfg.host = String(b.host).trim(); }
-      if (b.port !== undefined) { if (!validPort(b.port)) throw new Error('端口不正确'); dev.cfg.port = Number(b.port); }
-      if (b.user !== undefined) { if (!b.user) throw new Error('账号不能为空'); dev.cfg.user = String(b.user).trim(); }
-      if (b.password !== undefined && b.password !== '') dev.cfg.password = String(b.password);
-      if (b.tls !== undefined) dev.cfg.tls = !!b.tls;
-      if (b.demo !== undefined) dev.cfg.demo = !!b.demo;
+      let connChanged = false;
+      if (b.host !== undefined) { if (!validHost(b.host)) throw new Error('地址格式不正确'); if (String(b.host).trim() !== dev.cfg.host) connChanged = true; dev.cfg.host = String(b.host).trim(); }
+      if (b.port !== undefined) { if (!validPort(b.port)) throw new Error('端口不正确'); if (Number(b.port) !== dev.cfg.port) connChanged = true; dev.cfg.port = Number(b.port); }
+      if (b.user !== undefined) { if (!b.user) throw new Error('账号不能为空'); if (String(b.user).trim() !== dev.cfg.user) connChanged = true; dev.cfg.user = String(b.user).trim(); }
+      if (b.password !== undefined && b.password !== '') { dev.cfg.password = String(b.password); connChanged = true; }
+      if (b.tls !== undefined) { if (!!b.tls !== !!dev.cfg.tls) connChanged = true; dev.cfg.tls = !!b.tls; }
+      if (b.demo !== undefined) { if (!!b.demo !== !!dev.cfg.demo) connChanged = true; dev.cfg.demo = !!b.demo; }
       let restartRequired = false;
       if (b.webPort !== undefined) {
         if (!validPort(b.webPort)) throw new Error('WebUI 端口不正确');
         if (Number(b.webPort) !== PORT) { PORT = Number(b.webPort); restartRequired = true; }
       }
       if (!saveDeviceRegistry()) throw new Error('设置已应用，但写入 data/devices.json 失败');
-      dev.reconnectNow();
+      if (connChanged) dev.reconnectNow();
       return json(res, 200, { ok: true, restartRequired, ...dev.snapshotCfg() });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
@@ -2919,7 +3800,9 @@ const server = http.createServer(async (req, res) => {
     if (!section || !section.path) return json(res, 400, { error: '未知配置分类' });
     try {
       const dev = reqDevice(req, url);
-      return json(res, 200, { deviceId: dev && dev.id, rows: await rosPrint(dev, section),
+      const rows = await rosPrint(dev, section);
+      if (section.id === 'bridgePorts') await enrichBridgePorts(dev, rows);
+      return json(res, 200, { deviceId: dev && dev.id, rows,
         demo: !!(dev && dev.forceDemo), offline: !dev || !(dev.api && dev.api.connected) });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
@@ -2928,6 +3811,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const section = SECTION_MAP[body.section];
       if (!section || !section.path) throw new Error('未知配置分类');
+      if (section.adminOnly && sessionRole(req) !== 'admin') return json(res, 403, { error: '此分类仅管理员可修改 / Admins only' });
       if (!section.writable) throw new Error('该分类为只读');
       if (!['add', 'set', 'enable', 'disable', 'remove', 'run'].includes(body.action)) throw new Error('不支持的操作');
       if ((body.action === 'enable' || body.action === 'disable') && section.toggle === false) throw new Error('该分类不支持启用/禁用');
@@ -3020,9 +3904,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* ---- 备份与导入：① ROS Center 全量设置（服务端 data + 浏览器 localStorage 由前端合并） ---- */
-  const WEBUI_BACKUP_FILES = ['devices.json', 'topology.json', 'update.json', 'auth.json', 'secret.key', 'settings.json'];
+  const WEBUI_BACKUP_FILES = ['devices.json', 'topology.json', 'update.json', 'auth.json', 'secret.key', 'settings.json', 'data-policy.json', 'backup-config.json'];
   if (p === '/api/webui/backup' && req.method === 'GET') {
     if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可导出完整数据 / Admins only' });
     try {
       const files = {};
       for (const name of WEBUI_BACKUP_FILES) {
@@ -3038,12 +3923,20 @@ const server = http.createServer(async (req, res) => {
           }
         }
       } catch (e) { /* 图标目录不存在则跳过 */ }
+      const avatar = {};
+      try {
+        for (const name of fs.readdirSync(AVATAR_DIR)) {
+          const fp = path.join(AVATAR_DIR, name);
+          if (fs.statSync(fp).isFile() && /^[a-zA-Z0-9_\-]+\.png$/i.test(name)) avatar[name] = fs.readFileSync(fp).toString('base64');
+        }
+      } catch (e) { /* 头像目录不存在则跳过 */ }
       return json(res, 200, { format: 'ros-center-backup', version: runtimeInfo().version,
-        createdAt: new Date().toISOString(), files, icons });
+        createdAt: new Date().toISOString(), files, icons, avatar });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
   if (p === '/api/webui/restore' && req.method === 'POST') {
     if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可导入完整数据 / Admins only' });
     try {
       const b = await readBodyLimit(req, 16 * 1024 * 1024);
       if (!b || b.format !== 'ros-center-backup' || !b.files) throw new Error('备份文件格式不正确 / Invalid backup file');
@@ -3072,13 +3965,24 @@ const server = http.createServer(async (req, res) => {
           icons++;
         }
       }
-      return json(res, 200, { ok: true, written, icons, safeDir: path.basename(safeDir), restartRequired: true });
+      let avatars = 0;
+      if (b.avatar && typeof b.avatar === 'object') {
+        fs.mkdirSync(AVATAR_DIR, { recursive: true });
+        for (const [name, b64] of Object.entries(b.avatar)) {
+          if (!/^[a-zA-Z0-9_\-]+\.png$/i.test(name)) continue;
+          if (typeof b64 !== 'string' || b64.length > 4 * 1024 * 1024) continue;
+          fs.writeFileSync(path.join(AVATAR_DIR, name), Buffer.from(b64, 'base64'), { mode: 0o600 });
+          avatars++;
+        }
+      }
+      return json(res, 200, { ok: true, written, icons, avatars, safeDir: path.basename(safeDir), restartRequired: true });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
 
   /* ---- ② RouterOS 配置完整导出（含敏感项，可完美还原）与导入 ---- */
   if (p === '/api/routeros/export' && req.method === 'GET') {
     if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可导出 RouterOS 配置 / Admins only' });
     const dev = reqDevice(req, url);
     if (!dev) return json(res, 400, { error: '没有可用设备 / No device' });
     const name = String(url.searchParams.get('name') || '').replace(/[^a-zA-Z0-9_\-]/g, '') || ('routeros-full-' + new Date().toISOString().slice(0, 10));
@@ -3104,6 +4008,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/routeros/import' && req.method === 'POST') {
     if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可导入 RouterOS 配置 / Admins only' });
     try {
       const b = await readBodyLimit(req, 8 * 1024 * 1024);
       const text = String((b && b.text) || '');
@@ -3134,12 +4039,37 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, executed: ok, failed, rollback: roll, total: lines.length });
     } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
   }
+  /* 从路由器上的 .rsc 文件直接导入（系统 .backup 不支持在线导入） */
+  if (p === '/api/routeros/import-file' && req.method === 'POST') {
+    if (!authorized(req)) return json(res, 401, { error: 'Unauthorized', loginRequired: true });
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可导入 RouterOS 配置 / Admins only' });
+    try {
+      const b = await readBody(req);
+      const file = safeRouterFileName(b.file, 'rsc');
+      if (!file) throw new Error('请选择路由 flash 中的 .rsc 文件');
+      const dev = reqDeviceStrict(req, url, b);
+      if (!dev) throw new Error('目标设备不存在，未导入任何配置');
+      if (dev.forceDemo) return json(res, 200, { ok: true, demo: true, simulated: true, file });
+      if (!(dev.api && dev.api.connected)) throw new Error('路由器未连接 / Router offline');
+      const list = await dev.api.exec(['/file/print']);
+      if (list && list.status && list.status.type === 'trap') throw new Error(list.status.message || '读取文件列表失败');
+      if (!(list.re || []).some((f) => String(f.name || '') === file)) throw new Error('路由器上未找到该文件：' + file);
+      const roll = 'ros-center-before-import-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      try { await dev.api.exec(['/system/backup/save', `=name=${roll}`]); } catch (e) { /* 回滚点失败不阻断导入 */ }
+      const r = await dev.api.exec(['/import', `=file-name=${file}`]);
+      if (r && r.status && r.status.type === 'trap') throw new Error(r.status.message || '导入失败');
+      writeBackupStatus(dev, roll, false, '导入前自动备份 / Pre-import backup');
+      console.log(`[routeros] import ${file} on ${dev.name} by=${req.socket.remoteAddress}`);
+      return json(res, 200, { ok: true, file, rollback: roll });
+    } catch (e) { return json(res, 400, { error: e.message || String(e) }); }
+  }
 
   if (p === '/api/action' && req.method === 'POST') {
     try {
       const body = await readBody(req);
       const fn = SPECIAL[body.action]; if (!fn) throw new Error('不支持的操作');
-      const dev = reqDevice(req, url, body);
+      const dev = reqDeviceStrict(req, url, body);
+      if (!dev) throw new Error('目标设备不存在，已取消操作');
       const result = await fn(dev, body.params || {});
       console.log(`[action] ${dev.name} ${body.action} by=${req.socket.remoteAddress}`);
       return json(res, 200, { ok: true, ...result });
@@ -3162,6 +4092,7 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (p === '/api/quicksetup/apply' && req.method === 'POST') {
+    if (sessionRole(req) !== 'admin') return json(res, 403, { error: '仅管理员可执行一键配置 / Admins only' });
     try {
       const b = await readBody(req);
       const plan = quicksetup.buildPlan(b);
@@ -3357,6 +4288,6 @@ setInterval(() => { for (const dev of devices.values()) pollDevice(dev); }, INTE
 /* 拓扑 IP 测速：独立 1 秒定时器。没有任何节点开启时 pollIpRates 内部快速跳过，几乎零开销 */
 ipRateTimer = setInterval(() => { pollIpRates().catch(() => {}); }, IP_RATE_INTERVAL);
 if (ipRateTimer.unref) ipRateTimer.unref();
-setInterval(() => { saveUsage(); }, 15000); // 每 15 秒把流量统计落盘
-process.on('SIGINT', () => { saveUsage(true); for (const d of devices.values()) if (d.api) d.api.close(); server.close(() => process.exit(0)); });
-process.on('SIGTERM', () => { saveUsage(true); process.exit(0); });
+setInterval(() => { saveUsage(); saveAllTrends(); }, 15000); // 每 15 秒把流量统计与速率趋势落盘
+process.on('SIGINT', () => { saveUsage(true); saveAllTrends(true); for (const d of devices.values()) if (d.api) d.api.close(); server.close(() => process.exit(0)); });
+process.on('SIGTERM', () => { saveUsage(true); saveAllTrends(true); process.exit(0); });

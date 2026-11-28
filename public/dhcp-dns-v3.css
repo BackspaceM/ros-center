@@ -1,0 +1,86 @@
+/* ============================================================
+   DHCP & DNS v3 · 局部补充样式
+   所有规则严格限定在 .ui-v2 .content.pg-dhcp 作用域内
+   基础样式（kpis / span8 / span4 / panel-tabs / dt / toolbar /
+   chips / status / dot / badge / kv / usage-bar / mini-bar / spark
+   等）由 design.css 提供，这里只补充本页特有细节。
+   ============================================================ */
+
+/* 顶部 hub 分页已由 nav-hub 集成移除，标题直接顶到内容区顶部 */
+.ui-v2 .content.pg-dhcp .page-head { margin-top: 0; padding-top: 0; }
+.ui-v2 .content.pg-dhcp .page-head .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ui-v2 .content.pg-dhcp .page-head .actions .btn { flex: none; }
+.ui-v2 .content.pg-dhcp .card.span8 .card-head .btn.icon-only { flex: none; }
+
+/* 分类较多（8 类）：tabs 横向滚动，隐藏滚动条，保证能滑到最后两项 */
+.ui-v2 .content.pg-dhcp .panel-tabs {
+  display: flex; flex-wrap: nowrap; max-width: 100%;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch; scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.ui-v2 .content.pg-dhcp .panel-tabs::-webkit-scrollbar { display: none; }
+.ui-v2 .content.pg-dhcp .panel-tab { flex: 0 0 auto; white-space: nowrap; }
+.ui-v2 .content.pg-dhcp .panel-tab .pt-count { flex: none; }
+
+.ui-v2 .content.pg-dhcp .toolbar { flex-wrap: wrap; }
+.ui-v2 .content.pg-dhcp .toolbar .btn { flex: none; }
+.ui-v2 .content.pg-dhcp .toolbar .field { flex: 0 1 230px; min-width: 170px; }
+.ui-v2 .content.pg-dhcp .table-scroll { overflow-x: auto; }
+
+/* 表格长文本省略，避免撑破 span8 */
+.ui-v2 .content.pg-dhcp .dt .cell b,
+.ui-v2 .content.pg-dhcp .dt .cell small { display: block; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-v2 .content.pg-dhcp .dt .cell small { font-size: 9.5px; color: var(--v2-faint); }
+.ui-v2 .content.pg-dhcp .dt .dh-mac { font-size: 10px; color: var(--v2-faint); white-space: nowrap; }
+.ui-v2 .content.pg-dhcp .dt .dh-mono { font-size: 10.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.ui-v2 .content.pg-dhcp .dt .dh-cell { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-muted); }
+.ui-v2 .content.pg-dhcp .dt td.r.num { text-align: right; }
+
+/* 读取失败时的真实错误提示 */
+.ui-v2 .content.pg-dhcp .dh-notice { display: flex; align-items: center; gap: 10px; margin: 12px 14px 14px; padding: 10px 12px; border: 1px solid var(--v2-red); border-radius: 8px; background: var(--v2-red-soft); color: var(--v2-red); font-size: 11px; line-height: 1.5; }
+.ui-v2 .content.pg-dhcp .dh-notice .btn { margin-left: auto; white-space: nowrap; }
+
+/* 表格底部分页 */
+.ui-v2 .content.pg-dhcp .table-foot .dh-pager { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.ui-v2 .content.pg-dhcp .table-foot .dh-pager .btn.icon-only { width: 24px; height: 24px; padding: 0; }
+.ui-v2 .content.pg-dhcp .table-foot .dh-pager .btn.dh-prev .i { transform: rotate(180deg); }
+.ui-v2 .content.pg-dhcp .table-foot .dh-pager .btn[disabled] { opacity: .4; cursor: default; }
+.ui-v2 .content.pg-dhcp .table-foot .dh-pager .mono { font-size: 10.5px; color: var(--v2-muted); font-variant-numeric: tabular-nums; }
+
+/* KPI 地址池迷你条 */
+.ui-v2 .content.pg-dhcp .kpis .mini-bar { flex: none; width: 104px; }
+
+/* rail 的静态 DNS 链接与空状态 */
+.ui-v2 .content.pg-dhcp .rail .link { margin-top: 12px; }
+.ui-v2 .content.pg-dhcp .rail .pg-empty { padding: 14px 4px; color: var(--v2-faint); font-size: 10.5px; }
+.ui-v2 .content.pg-dhcp .rail .pg-empty .i { width: 18px; height: 18px; margin-bottom: 6px; }
+
+/* DNS 服务卡片：上游服务器 IPv4 / IPv6 过长时自动换行，DoH 状态样式 */
+.ui-v2 .content.pg-dhcp .rail .kv > span { flex: none; }
+.ui-v2 .content.pg-dhcp .rail .kv .dh-upstream {
+  flex: 1 1 auto; min-width: 0; max-width: 100%;
+  white-space: normal; word-break: break-word; overflow-wrap: anywhere;
+  line-height: 1.5; text-align: right;
+}
+.ui-v2 .content.pg-dhcp .rail .kv .dh-doh { font-weight: 550; color: var(--v2-faint); }
+.ui-v2 .content.pg-dhcp .rail .kv .dh-doh.on { color: var(--v2-green); }
+
+/* 地址池使用率图例：保留项跟随设计稿的琥珀色 */
+.ui-v2 .content.pg-dhcp .rail .usage-legend .row small { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px) {
+  .ui-v2 .content.pg-dhcp .panel-tabs { -webkit-overflow-scrolling: touch; }
+  .ui-v2 .content.pg-dhcp .dt { min-width: 700px; }
+  .ui-v2 .content.pg-dhcp .toolbar .toolbar-note { display: none; }
+  .ui-v2 .content.pg-dhcp .page-head .actions .btn { padding: 0 10px; }
+  .ui-v2 .content.pg-dhcp .toolbar .field { flex: 1 1 100%; }
+}
+
+/* 系统管理页：长文本 KPI（设备名称 / NTP 服务器）缩小并使用省略号 */
+.ui-v2 .content.pg-sys .kpi-main { min-width: 0; }
+.ui-v2 .content.pg-sys .kpi-main .kpi-num .sys-kpi-txt {
+  font-size: 19px; letter-spacing: .2px; line-height: 1.25;
+  display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ui-v2 .content.pg-sys .kpi-main { align-items: flex-start; }

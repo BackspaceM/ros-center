@@ -1,0 +1,349 @@
+/* ============================================================
+   ROS Center · Design shell
+   设计稿外壳（side / topbar / topsearch / 收起轨道）接入现有功能页
+   token 复用 .ui-v2 的 --v2-*，深浅色与配色继续由现有主题系统驱动
+   ============================================================ */
+
+body.design-shell { background: var(--v2-bg); color: var(--v2-ink); }
+body.design-shell svg.i {
+  width: 16px; height: 16px; fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none;
+}
+
+/* ---------------- shell ---------------- */
+body.design-shell .shell {
+  display: grid; grid-template-columns: var(--v2-side-w, 240px) minmax(0, 1fr);
+  min-height: 100vh; transition: grid-template-columns .18s ease;
+}
+body.design-shell .main { min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
+body.design-shell .side {
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+  background: var(--v2-surface-2); border-right: 1px solid var(--v2-line);
+  padding: 0 12px; z-index: 25; min-width: 0;
+}
+body.design-shell .brand { height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 6px; flex: none; }
+body.design-shell .side .logo {
+  width: 30px; height: 30px; border-radius: 9px; flex: none; overflow: hidden; cursor: pointer;
+}
+body.design-shell .side .logo img { width: 100%; height: 100%; display: block; }
+body.design-shell .brand-txt { min-width: 0; }
+body.design-shell .brand-txt b {
+  display: block; font-size: 15px; font-weight: 800; letter-spacing: -.35px; line-height: 1.15;
+  color: var(--v2-ink); white-space: nowrap;
+}
+body.design-shell .brand-txt small {
+  display: inline-block; margin-top: 3px; padding: 1px 6px; border-radius: 999px;
+  background: var(--v2-surface-3); border: 1px solid var(--v2-line);
+  color: var(--v2-muted); font-size: 9.5px; font-weight: 600; letter-spacing: .05em;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+body.design-shell .side-collapse {
+  margin-left: auto; width: 28px; height: 28px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--v2-faint); display: grid; place-items: center;
+  cursor: pointer; transition: background-color .12s, color .12s, transform .18s;
+}
+body.design-shell .side-collapse:hover { background: var(--v2-surface-3); color: var(--v2-ink); }
+body.design-shell .side-collapse .i { width: 16px; height: 16px; }
+
+/* nav */
+body.design-shell .side .nav { flex: 1; overflow: auto; padding: 0 4px 8px; scrollbar-width: none; }
+body.design-shell .side .nav::-webkit-scrollbar { display: none; }
+body.design-shell .side .nav-label {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .06em; color: var(--v2-faint);
+  padding: 14px 8px 6px;
+}
+body.design-shell .side .nav-label:first-child { padding-top: 4px; }
+body.design-shell .side .nav-item {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  width: 100%; height: 32px; padding: 0 8px; border-radius: 8px;
+  color: var(--v2-ink-2); font-size: 12.5px; font-weight: 500; text-align: left;
+  transition: background-color .12s, color .12s; white-space: nowrap;
+}
+body.design-shell .side .nav-item .i { color: var(--v2-faint); }
+body.design-shell .side .nav-item:hover { background: var(--v2-surface-3); color: var(--v2-ink); }
+body.design-shell .side .nav-item:hover .i { color: var(--v2-muted); }
+body.design-shell .side .nav-item.active { background: var(--v2-accent-soft); color: var(--v2-accent-ink); font-weight: 600; }
+body.design-shell .side .nav-item.active .i { color: var(--v2-accent); }
+body.design-shell .side .nav-item.active::before {
+  content: ""; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 2px;
+  background: var(--v2-accent); border-radius: 2px;
+}
+body.design-shell .side .nav-count {
+  margin-left: auto; font-size: 10px; line-height: 1; color: var(--v2-faint);
+  background: var(--v2-surface-3); border-radius: 999px; padding: 3px 6px;
+  font-variant-numeric: tabular-nums;
+}
+body.design-shell .side .nav-item.active .nav-count { background: var(--v2-surface); color: var(--v2-accent-ink); }
+
+/* footer */
+body.design-shell .side-foot {
+  display: flex; align-items: center; gap: 9px; margin: 6px 4px 0; padding: 9px 10px;
+  background: var(--v2-surface); border: 1px solid var(--v2-line); border-radius: 10px;
+  cursor: pointer; flex: none; transition: border-color .12s;
+}
+body.design-shell .side-foot:hover { border-color: color-mix(in srgb, var(--v2-accent) 30%, var(--v2-line)); }
+body.design-shell .side-foot .dev-ico {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--v2-accent-soft); color: var(--v2-accent);
+  display: grid; place-items: center; flex: none;
+}
+body.design-shell .side-foot .dev-ico .i { width: 15px; height: 15px; }
+body.design-shell .side-foot-txt { min-width: 0; }
+body.design-shell .side-foot b {
+  display: block; font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--v2-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.design-shell .side-foot small {
+  display: block; font-size: 10px; color: var(--v2-faint); line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.design-shell .side-foot .dot {
+  margin-left: auto; width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--v2-amber); box-shadow: 0 0 0 3px var(--v2-amber-soft);
+}
+body.design-shell .side-foot.live .dot { background: var(--v2-green); box-shadow: 0 0 0 3px var(--v2-green-soft); }
+body.design-shell .side-meta {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 8px 10px 14px; font-size: 10px; color: var(--v2-faint);
+  white-space: nowrap; overflow: hidden; flex: none;
+}
+body.design-shell .side-meta span { overflow: hidden; text-overflow: ellipsis; }
+body.design-shell .side-hidden { display: none !important; }
+
+/* ---------------- topbar ---------------- */
+body.design-shell .topbar {
+  position: sticky; top: 0; z-index: 20; height: var(--v2-topbar-h, 60px); flex: none;
+  display: flex; align-items: center; justify-content: flex-start; gap: 14px; padding: 0 28px;
+  background: color-mix(in srgb, var(--v2-bg) 84%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border-bottom: 1px solid var(--v2-line); box-shadow: none;
+}
+body.design-shell .topbar .menu-btn { display: none; }
+body.design-shell .mobile-brand { display: none; }
+body.design-shell .crumbs {
+  display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--v2-muted);
+  white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 32vw;
+}
+body.design-shell .crumbs .i { width: 12px; height: 12px; color: var(--v2-faint); }
+body.design-shell .crumbs b {
+  font-weight: 550; color: var(--v2-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+body.design-shell .topsearch-wrap {
+  position: relative; margin-left: 10px; flex: 0 1 320px; min-width: 180px;
+}
+body.design-shell .topsearch {
+  position: relative; display: flex; align-items: center; gap: 8px; margin: 0;
+  width: 100%; height: 34px; padding: 0 9px 0 10px;
+  background: var(--v2-surface); border: 1px solid var(--v2-line); border-radius: 8px; color: var(--v2-faint);
+}
+body.design-shell .topsearch:focus-within {
+  border-color: var(--v2-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--v2-accent) 12%, transparent);
+}
+body.design-shell .topsearch input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  color: var(--v2-ink); font-size: 12px;
+}
+body.design-shell .topsearch input::placeholder { color: var(--v2-faint); }
+body.design-shell .topsearch kbd {
+  font: 10px/1 var(--v2-font); color: var(--v2-faint); border: 1px solid var(--v2-line);
+  background: var(--v2-surface-3); border-radius: 4px; padding: 3px 5px; white-space: nowrap;
+  cursor: pointer;
+}
+body.design-shell .search-pop {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 120;
+  width: min(400px, calc(100vw - 36px)); max-height: min(62vh, 480px); overflow: auto;
+  padding: 6px; background: var(--v2-surface); border: 1px solid var(--v2-line);
+  border-radius: 12px; box-shadow: var(--v2-shadow-pop);
+}
+body.design-shell .search-pop[hidden] { display: none !important; }
+body.design-shell .search-pop .sp-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--v2-ink-2);
+  font-size: 12px; text-align: left; cursor: pointer;
+}
+body.design-shell .search-pop .sp-item:hover,
+body.design-shell .search-pop .sp-item.on { background: var(--v2-surface-3); color: var(--v2-ink); }
+body.design-shell .search-pop .sp-item .nav-icon,
+body.design-shell .search-pop .sp-item svg.i { width: 16px; height: 16px; color: var(--v2-faint); flex: none; }
+body.design-shell .search-pop .sp-item b { font-weight: 550; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.design-shell .search-pop .sp-item em {
+  margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--v2-faint); white-space: nowrap;
+}
+body.design-shell .search-pop .sp-empty {
+  padding: 22px 12px; text-align: center; font-size: 11px; color: var(--v2-faint);
+}
+
+body.design-shell .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+body.design-shell .topbar .dev-btn {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px;
+  border: 1px solid var(--v2-line); background: var(--v2-surface); border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: var(--v2-ink); transition: background-color .12s;
+  max-width: none; flex: 0 0 auto;
+}
+body.design-shell .topbar .dev-btn:hover { background: var(--v2-surface-2); }
+body.design-shell .topbar .dev-btn b {
+  font-size: 12px; font-weight: 600; white-space: nowrap; flex: 0 0 auto;
+}
+body.design-shell .topbar .dev-btn .dev-sub {
+  font-weight: 500; color: var(--v2-faint); font-size: 10.5px; margin-left: -2px;
+  white-space: nowrap; flex: 0 0 auto;
+}
+body.design-shell .topbar .dev-btn .dev-ico.sm {
+  width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+  background: var(--v2-accent-soft); color: var(--v2-accent); flex: none;
+}
+body.design-shell .topbar .dev-btn .dev-ico.sm .i { width: 13px; height: 13px; }
+body.design-shell .topbar .dev-btn .dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none; margin-left: 2px;
+  background: var(--v2-amber); box-shadow: 0 0 0 3px var(--v2-amber-soft);
+}
+body.design-shell .topbar .dev-btn .dot.live { background: var(--v2-green); box-shadow: 0 0 0 3px var(--v2-green-soft); }
+body.design-shell .topbar .dev-btn .i.chev { width: 14px; height: 14px; color: var(--v2-faint); margin-left: 2px; }
+
+body.design-shell .topbar .icon-btn {
+  width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center;
+  color: var(--v2-muted); border: 1px solid transparent; background: transparent;
+  position: relative; padding: 0; cursor: pointer;
+}
+body.design-shell .topbar .icon-btn:hover { background: var(--v2-surface-3); color: var(--v2-ink); }
+body.design-shell .topbar .icon-btn .badge-dot {
+  position: absolute; top: 7px; right: 8px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--v2-red); box-shadow: 0 0 0 2px var(--v2-bg);
+}
+body.design-shell .topbar .theme-btn .sun-ico,
+body.design-shell .topbar .theme-btn .moon-ico { display: grid; place-items: center; }
+body.design-shell .topbar .theme-btn .moon-ico { display: none; }
+html[data-scheme="dark"] body.design-shell .topbar .theme-btn .sun-ico { display: none; }
+html[data-scheme="dark"] body.design-shell .topbar .theme-btn .moon-ico { display: grid; }
+body.design-shell .topbar .theme-btn[data-mode="system"]::after {
+  content: ""; position: absolute; right: 7px; bottom: 7px; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 0 2px var(--v2-bg);
+}
+body.design-shell .topbar .avatar {
+  width: 30px; height: 30px; border-radius: 50%; margin-left: 2px; flex: none;
+  background: var(--v2-accent-soft); color: var(--v2-accent-ink);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; padding: 0;
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 20%, transparent); cursor: pointer;
+}
+body.design-shell .topbar .avatar:hover { filter: brightness(.98); }
+
+/* ---------------- content ---------------- */
+body.design-shell .shell .content {
+  flex: 1; padding: 24px 28px 40px; overflow: visible; min-width: 0;
+}
+body.design-shell .hub-tabs {
+  flex: none; padding: 2px 28px 0; background: transparent;
+  border-bottom: 1px solid var(--v2-line-soft); position: relative; z-index: 6;
+}
+body.design-shell .hub-tabs[hidden] { display: none !important; }
+body.design-shell .hub-tabs .hub-tab { color: var(--v2-muted); }
+body.design-shell .hub-tabs .hub-tab:hover { color: var(--v2-ink); background: transparent; }
+body.design-shell .hub-tabs .hub-tab.active { color: var(--v2-accent-ink); }
+body.design-shell .hub-tabs .hub-tab.active::after { background: var(--v2-accent); }
+body.design-shell .hub-tabs .hub-tabs-hint { display: none; }
+
+/* ---------------- collapsed rail ---------------- */
+@media (min-width: 1181px) {
+  body.design-shell .shell.side-collapsed { grid-template-columns: 80px minmax(0, 1fr); }
+  body.design-shell .shell.side-collapsed .side { padding: 0 12px; }
+  body.design-shell .shell.side-collapsed .brand { padding: 0 2px; gap: 4px; justify-content: center; }
+  body.design-shell .shell.side-collapsed .brand .logo {
+    width: 28px; height: 28px; border-radius: 8px;
+  }
+  body.design-shell .shell.side-collapsed .brand-txt { display: none; }
+  body.design-shell .shell.side-collapsed .side-collapse {
+    width: 24px; height: 24px; margin-left: 0; display: grid; place-items: center;
+  }
+  body.design-shell .shell.side-collapsed .side-collapse .i { width: 14px; height: 14px; transform: rotate(180deg); }
+  body.design-shell .shell.side-collapsed .side .nav { padding: 8px 0; }
+  body.design-shell .shell.side-collapsed .side .nav-label,
+  body.design-shell .shell.side-collapsed .side .nav-count { display: none; }
+  body.design-shell .shell.side-collapsed .side .nav-item {
+    height: 36px; justify-content: center; padding: 0; margin: 1px 0;
+  }
+  body.design-shell .shell.side-collapsed .side .nav-item > span { display: none; }
+  body.design-shell .shell.side-collapsed .side .nav-item .i { width: 18px; height: 18px; }
+  body.design-shell .shell.side-collapsed .side .nav-item.active::before { left: -12px; }
+  body.design-shell .shell.side-collapsed .side-foot {
+    margin: 6px 0 0; justify-content: center; padding: 8px 0;
+  }
+  body.design-shell .shell.side-collapsed .side-foot > div:not(.dev-ico),
+  body.design-shell .shell.side-collapsed .side-foot .dot { display: none; }
+  body.design-shell .shell.side-collapsed .side-meta { display: none; }
+}
+
+/* ---------------- responsive ---------------- */
+@media (max-width: 1420px) {
+  body.design-shell .topsearch-wrap { flex-basis: 280px; }
+}
+@media (max-width: 1180px) {
+  body.design-shell .shell { grid-template-columns: 1fr; }
+  body.design-shell .side { display: none; }
+  body.design-shell .topbar { padding: 0 22px; }
+  body.design-shell .topbar .menu-btn { display: grid; }
+  body.design-shell .topsearch-wrap { flex-basis: 240px; }
+  body.design-shell .shell .content { padding: 22px 22px 36px; }
+  body.design-shell .hub-tabs { padding: 8px 22px 0; }
+}
+@media (max-width: 980px) {
+  body.design-shell .topbar { padding: 0 20px; }
+  body.design-shell .topsearch-wrap { display: none; }
+  body.design-shell .crumbs { max-width: none; }
+  body.design-shell .shell .content { padding: 20px 20px 32px; }
+  body.design-shell .hub-tabs { padding: 8px 20px 0; }
+  body.design-shell .hub-tabs-hint { display: none; }
+}
+@media (max-width: 920px) {
+  body.design-shell .topbar .dev-btn { width: 34px; padding: 0; justify-content: center; gap: 0; }
+  body.design-shell .topbar .dev-btn > b,
+  body.design-shell .topbar .dev-btn .dev-sub,
+  body.design-shell .topbar .dev-btn > .dot,
+  body.design-shell .topbar .dev-btn .chev { display: none; }
+}
+@media (max-width: 720px) {
+  body.design-shell .topbar { height: 56px; padding: 0 14px; gap: 8px; }
+  body.design-shell .topbar .menu-btn { display: grid; }
+  body.design-shell .mobile-brand {
+    display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650;
+    letter-spacing: -.2px; color: var(--v2-ink);
+  }
+  body.design-shell .mobile-brand .logo {
+    width: 24px; height: 24px; border-radius: 7px; flex: none; overflow: hidden;
+  }
+  body.design-shell .mobile-brand .logo img { width: 100%; height: 100%; display: block; }
+  body.design-shell .crumbs,
+  body.design-shell .topsearch-wrap,
+  body.design-shell .topbar .dev-btn { display: none; }
+  body.design-shell .topbar .theme-btn { display: grid; color: var(--v2-accent); }
+  body.design-shell .topbar .theme-btn .sun-ico,
+  body.design-shell .topbar .theme-btn .moon-ico { display: none; }
+  body.design-shell .topbar .theme-btn .i { display: block; }
+  body.design-shell .top-actions { gap: 2px; }
+  body.design-shell .shell .content { padding: 16px 14px 28px; }
+  body.design-shell .hub-tabs { padding: 6px 14px 0; }
+}
+/* ---------------- 表单 select 箭头 ----------------
+   基础 select 箭头在某些覆盖顺序下会平铺整格；此处以更高优先级固定为右侧单箭头。 */
+body.design-shell .ui-field select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%238a919c' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 11px 11px;
+  padding-right: 26px;
+}
+/* ---------------- 移动端侧栏抽屉（设计稿 body.nav-open 同款） ----------------
+   点击顶栏汉堡 → 侧栏从左侧滑出 + 半透明遮罩；点遮罩 / 菜单项 / Esc 关闭。 */
+@media (max-width: 1180px) {
+  body.design-shell .nav-backdrop { display: none; }
+  body.design-shell.nav-open .nav-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 40;
+    background: rgba(10, 12, 16, .42); opacity: 0; transition: opacity .18s ease;
+  }
+  body.design-shell.nav-open .nav-backdrop.show { opacity: 1; }
+  body.design-shell.nav-open .side {
+    display: flex; position: fixed; left: 0; top: 0; bottom: 0; z-index: 41;
+    width: 264px; max-width: 86vw; box-shadow: var(--v2-shadow-pop, 0 18px 44px rgba(16,24,40,.22));
+    transform: translateX(-102%); transition: transform .2s ease;
+  }
+  body.design-shell.nav-open .side.mobile-open { transform: translateX(0); }
+}

@@ -1,0 +1,128 @@
+/* ============================================================
+   Routing & Firewall v3 · 局部补充样式
+   所有规则严格限定在 .ui-v2 .content.pg-rf 作用域内
+   ============================================================ */
+
+.ui-v2 .content.pg-rf .page-head { margin-top: 0; padding-top: 0; }
+.ui-v2 .content.pg-rf .page-head .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ui-v2 .content.pg-rf .page-head .actions .btn { flex: none; }
+.ui-v2 .content.pg-rf .card.span8 .card-head .btn.icon-only { flex: none; }
+
+/* 分类较多：tabs 横向滚动，隐藏滚动条，保证能滑到最后一项 */
+.ui-v2 .content.pg-rf .panel-tabs {
+  display: flex; flex-wrap: nowrap; max-width: 100%;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch; scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.ui-v2 .content.pg-rf .panel-tabs::-webkit-scrollbar { display: none; }
+.ui-v2 .content.pg-rf .panel-tab { flex: 0 0 auto; white-space: nowrap; }
+.ui-v2 .content.pg-rf .panel-tab .pt-count { flex: none; }
+
+.ui-v2 .content.pg-rf .toolbar { flex-wrap: wrap; }
+.ui-v2 .content.pg-rf .toolbar .btn { flex: none; }
+.ui-v2 .content.pg-rf .table-scroll { overflow-x: auto; }
+
+/* 表格：规则摘要与匹配条件过长时省略，避免撑破 span8 */
+.ui-v2 .content.pg-rf .dt .idx { color: var(--v2-faint); font-size: 10px; }
+
+/* 网关 / 接口：网关纯黑在上，接口灰色更细在下（对齐设计稿 fe80::1 / pppoe-out1） */
+.ui-v2 .content.pg-rf .dt .gw-cell .cell b { font: 600 10.5px/1.35 var(--v2-mono); color: var(--v2-ink); }
+.ui-v2 .content.pg-rf .dt .gw-cell .cell small { font-size: 9.5px; font-weight: 400; }
+.ui-v2 .content.pg-rf .dt .rt-cell .badge { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.ui-v2 .content.pg-rf .badge.policy { background: var(--v2-violet-soft); color: var(--v2-violet); }
+/* 路由表：类型(WAN/LAN/WG/LO) 与 路由类型(直连/静态/策略) 对齐设计稿 */
+.ui-v2 .content.pg-rf .dt .net-kind { min-width: 34px; text-align: center; }
+.ui-v2 .content.pg-rf .dt .badge.static,
+.ui-v2 .content.pg-rf .dt .badge.connected,
+.ui-v2 .content.pg-rf .dt .badge.dynamic,
+.ui-v2 .content.pg-rf .dt .badge.policy { background: transparent; color: var(--v2-ink-2); font-weight: 600; }
+.ui-v2 .content.pg-rf .dt .gw-cell .cell b { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* RouterOS 内置规则：只读，编辑入口置灰 */
+.ui-v2 .content.pg-rf .dt tr.is-builtin .row-more { opacity: .45; }
+
+/* 表格分页：与 DHCP/DNS 租约·解析卡片完全一致的小按钮（dh-pager，24px 方形） */
+.ui-v2 .content.pg-rf .table-foot .dh-pager { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.ui-v2 .content.pg-rf .table-foot .dh-pager .btn.icon-only { width: 24px; height: 24px; padding: 0; }
+.ui-v2 .content.pg-rf .table-foot .dh-pager .btn.dh-prev .i { transform: rotate(180deg); }
+.ui-v2 .content.pg-rf .table-foot .dh-pager .btn[disabled] { opacity: .4; cursor: default; }
+.ui-v2 .content.pg-rf .table-foot .dh-pager .mono { font-size: 10.5px; color: var(--v2-muted); font-variant-numeric: tabular-nums; }
+.ui-v2 .content.pg-rf .rf-pg-btn {
+  height: 22px; padding: 0 9px; border: 1px solid var(--v2-line); border-radius: 6px;
+  background: var(--v2-surface); color: var(--v2-muted);
+  font-family: inherit; font-size: 10.5px; font-weight: 550; line-height: 1;
+  white-space: nowrap; cursor: pointer;
+}
+.ui-v2 .content.pg-rf .rf-pg-btn:hover { color: var(--v2-accent); border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+.ui-v2 .content.pg-rf .dt .rule-cell { min-width: 190px; }
+.ui-v2 .content.pg-rf .dt .rule-cell .cell b { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-v2 .content.pg-rf .dt .rule-cell .cell small { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; color: var(--v2-faint); }
+/* 长文本省略：span.match 可块级省略；td.note 不能 display:block，否则整格垂直居中失效 */
+.ui-v2 .content.pg-rf .dt span.match { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-muted); }
+.ui-v2 .content.pg-rf .dt td.note { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-muted); }
+.ui-v2 .content.pg-rf .dt td.r.num { text-align: right; }
+.ui-v2 .content.pg-rf .dt .action-cell .badge { white-space: nowrap; }
+
+/* 读取失败时的真实错误提示 */
+.ui-v2 .content.pg-rf .rf-notice { display: flex; align-items: center; gap: 10px; margin: 12px 14px 14px; padding: 10px 12px; border: 1px solid var(--v2-red); border-radius: 8px; background: var(--v2-red-soft); color: var(--v2-red); font-size: 11px; line-height: 1.5; }
+.ui-v2 .content.pg-rf .rf-notice .btn { margin-left: auto; white-space: nowrap; }
+
+/* 下一跳探测卡片（对齐设计稿 health 行 + 配置按钮） */
+.ui-v2 .content.pg-rf .health-row { grid-template-columns: 84px minmax(0, 1fr) 52px; }
+.ui-v2 .content.pg-rf .nh-host { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ui-v2 .content.pg-rf .nh-host .dot { width: 5px; height: 5px; flex: none; box-shadow: none; }
+.ui-v2 .content.pg-rf .rf-next-foot { display: flex; justify-content: flex-end; padding-top: 10px; }
+.ui-v2 .content.pg-rf .rf-next-cfg {
+  height: 22px; padding: 0 8px; border: 1px solid var(--v2-line); border-radius: 6px;
+  background: var(--v2-surface); color: var(--v2-muted); font-size: 10px; font-weight: 400;
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+}
+.ui-v2 .content.pg-rf .rf-next-cfg .i { width: 12px; height: 12px; }
+.ui-v2 .content.pg-rf .rf-next-cfg:hover { color: var(--v2-accent); background: var(--v2-accent-soft); border-color: color-mix(in srgb, var(--v2-accent) 35%, var(--v2-line)); }
+
+/* 下一跳三地址配置弹窗：IP + RouterOS comment 两列 */
+.ui-modal .nh-cfg { display: flex; flex-direction: column; gap: 9px; }
+.ui-modal .nh-cfg-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 0 2px; font-size: 10.5px; font-weight: 500; color: var(--v2-faint); }
+.ui-modal .nh-cfg-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.ui-modal .nh-cfg-row input,
+.ui-modal .nh-cfg-iv select {
+  width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--v2-line); border-radius: 7px;
+  background: var(--v2-surface); color: var(--v2-ink); font: inherit; font-size: 11.5px; outline: none;
+}
+.ui-modal .nh-cfg-row input.nh-cfg-host { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.ui-modal .nh-cfg-row input:focus,
+.ui-modal .nh-cfg-iv select:focus { border-color: var(--v2-accent); box-shadow: 0 0 0 3px var(--v2-accent-soft); }
+.ui-modal .nh-cfg-row input.is-invalid { border-color: var(--v2-red); }
+.ui-modal .nh-cfg-extra { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
+.ui-modal .nh-cfg-iv { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--v2-muted); }
+.ui-modal .nh-cfg-iv select { width: 84px; height: 32px; }
+.ui-modal .nh-cfg-sw { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--v2-muted); }
+.ui-modal .nh-cfg-sw input { width: 14px; height: 14px; accent-color: var(--v2-accent); cursor: pointer; }
+
+/* rail 小条形统计 */
+.ui-v2 .content.pg-rf .rf-mini-list { display: flex; flex-direction: column; gap: 2px; }
+.ui-v2 .content.pg-rf .rf-mini-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 0; font-size: 10.5px; color: var(--v2-muted); }
+.ui-v2 .content.pg-rf .rf-mini-row > span { max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-v2 .content.pg-rf .rf-mini-row > b { color: var(--v2-ink-2); font-variant-numeric: tabular-nums; }
+.ui-v2 .content.pg-rf .rf-bar { display: block; flex: 1; min-width: 40px; height: 5px; border-radius: 4px; background: var(--v2-surface-3); overflow: hidden; }
+.ui-v2 .content.pg-rf .rf-bar > i { display: block; height: 100%; border-radius: 4px; background: var(--v2-accent); }
+.ui-v2 .content.pg-rf .rail .pg-empty { padding: 14px 4px; color: var(--v2-faint); font-size: 10.5px; }
+.ui-v2 .content.pg-rf .rail .pg-empty .i { width: 18px; height: 18px; margin-bottom: 6px; }
+
+/* 底部补充卡片：三列栅格，卡片自身不溢出 */
+.ui-v2 .content.pg-rf .rf-extra { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ui-v2 .content.pg-rf .rf-extra > .card { min-width: 0; }
+.ui-v2 .content.pg-rf .rf-extra .rail-body { min-width: 0; }
+.ui-v2 .content.pg-rf .rf-extra .kv b { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .ui-v2 .content.pg-rf .rf-extra { grid-template-columns: 1fr; }
+  .ui-v2 .content.pg-rf .panel-tabs { -webkit-overflow-scrolling: touch; }
+  .ui-v2 .content.pg-rf .dt { min-width: 700px; }
+  .ui-v2 .content.pg-rf .table-foot { flex-wrap: wrap; }
+  .ui-v2 .content.pg-rf .table-foot .dh-pager { margin-left: 0; }
+  .ui-v2 .content.pg-rf .toolbar .toolbar-note { display: none; }
+  .ui-v2 .content.pg-rf .page-head .actions .btn { padding: 0 10px; }
+  .ui-v2 .content.pg-rf .rf-mini-row > span { max-width: 50%; }
+  .ui-v2 .content.pg-rf .rf-extra .kv b { max-width: 55%; }
+}

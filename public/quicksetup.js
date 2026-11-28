@@ -168,6 +168,8 @@
 
   /* ---------- 向导步骤 ---------- */
   let currentStep = 1;
+  /* 首次渲染不滚动：否则会把顶部 hub 标签栏滚出视口 */
+  let currentStepRendered = false;
   const TOTAL_STEPS = 5;
   function goStep(n) {
     currentStep = Math.max(1, Math.min(TOTAL_STEPS, n));
@@ -187,10 +189,12 @@
     if (bar) bar.style.width = (currentStep / TOTAL_STEPS * 100) + '%';
     const cnt = $('qsStepCount'); if (cnt) cnt.textContent = currentStep + ' / ' + TOTAL_STEPS;
     if (currentStep === TOTAL_STEPS) refreshPreview();
-    const box = $('qsForm'); if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const box = $('qsForm'); if (box && currentStepRendered) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    currentStepRendered = true;
   }
 
   window.renderQuickSetupPage = function renderQuickSetupPage() {
+    currentStepRendered = false;
     /* 组合控件：输入框可手填 + ▾ 按钮展开接口菜单（菜单由 loadInterfaces 填充，确保点一下就有反应） */
     const ifaceInput = (inputId, def, help) => `<div class="qs-combo" data-combo="${inputId}">
       <input type="text" id="${inputId}" value="${def}" aria-label="${esc(L('接口名', 'Interface'))}"
@@ -353,7 +357,7 @@
             <div class="form-hint">${esc(L('预览密码已遮蔽；下载的 .rsc 与实际应用使用真实值。', 'Passwords masked in preview; real values used on download/apply.'))}</div>
           </div>
           <div class="qs-actions">
-            <button class="btn" id="qsPreview" type="button">${esc(L('刷新预览', 'Refresh'))}</button>
+            <button class="btn" id="qsPreview" type="button">${esc(L('重新生成', 'Regenerate'))}</button>
             <button class="btn" id="qsDownload" type="button">${esc(L('下载 .rsc', 'Download .rsc'))}</button>
             <button class="btn primary" id="qsApply" type="button">${esc(L('一键应用', 'Apply now'))}</button>
           </div>

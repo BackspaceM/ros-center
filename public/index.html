@@ -8,85 +8,159 @@
 <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/design.css">
+<link rel="stylesheet" href="/pages-v2.css">
+<link rel="stylesheet" href="/topology-v3.css">
+<link rel="stylesheet" href="/ui-v2.css">
+<link rel="stylesheet" href="/shell-v2.css">
+<link rel="stylesheet" href="/pages-v3.css">
+<link rel="stylesheet" href="/routing-firewall-v3.css">
+<link rel="stylesheet" href="/wireless-vpn-v3.css">
+<link rel="stylesheet" href="/dhcp-dns-v3.css">
+<link rel="stylesheet" href="/shell-design.css">
 </head>
-<body>
-<div class="nav-backdrop" id="navBackdrop" hidden></div>
-<div class="layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="side-brand">
-      <div class="logo" aria-hidden="true"><svg class="logo-svg" viewBox="0 0 64 64">
-        <g stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".8"><path d="M32 32 L32 16"/><path d="M32 32 L16 43"/><path d="M32 32 L48 43"/></g>
-        <g fill="currentColor"><circle cx="32" cy="14" r="5.5"/><circle cx="14" cy="44" r="5.5"/><circle cx="50" cy="44" r="5.5"/></g>
-        <circle cx="32" cy="32" r="9.5" fill="currentColor"/><circle cx="32" cy="32" r="4.2" fill="var(--blue)"/>
-      </svg></div>
-      <div class="brand-name"><b data-i18n="brand">ROS</b><small data-i18n="brand_sub">Center</small><span class="brand-ver" id="brandVer" title="当前版本 / Current version"></span></div>
-      <button class="side-collapse" id="collapseBtn" type="button" title="收起 / Collapse">‹</button>
+<body class="ui-v2 design-shell">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9.5 4v16"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="M12 13.5 15.4 9"/><circle cx="12" cy="14.5" r="1.4"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/></symbol>
+    <symbol id="i-nodes" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M12 7.2v4.3M12 11.5 6.6 15.8M12 11.5l5.4 4.3"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h3.5l2.2-5.2 3 10.4 2.4-6.2 1.6 3h5.3"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4"/><path d="m4 16 8 4 8-4"/></symbol>
+    <symbol id="i-dhcp" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M10 7.5h2M10 16.5h2"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8.2 6h7.6M18 8.2v7.6M8 6c6 0 5 10 8 10"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.2 19 6v5.3c0 4.4-2.9 7.4-7 9.2-4.1-1.8-7-4.8-7-9.2V6l7-2.8Z"/><path d="m9.2 12 2 2 3.6-3.8"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M4 9.5a13 13 0 0 1 16 0"/><path d="M6.8 12.8a9 9 0 0 1 10.4 0"/><path d="M9.6 16a5 5 0 0 1 4.8 0"/><circle cx="12" cy="19" r="1"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8.5 10V8a3.5 3.5 0 0 1 7 0v2"/><path d="M12 14v2"/></symbol>
+    <symbol id="i-speed" viewBox="0 0 24 24"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-4"/><path d="M4.5 16h2M17.5 16h2M6.8 9.6l1.4 1.4M17.2 9.6l-1.4 1.4"/></symbol>
+    <symbol id="i-device" viewBox="0 0 24 24"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 13V9M17 13V9"/><circle cx="7.2" cy="16.5" r=".9"/><circle cx="11" cy="16.5" r=".9"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M17.5 13.6a5.5 5.5 0 0 1 3 4.9"/></symbol>
+    <symbol id="i-log" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 6.5-2.5 8.5h17C20.5 15.5 18 15 18 9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7Z"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-1.9 0-1.3-1-1.7-1-2.8 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7Z"/><circle cx="7.5" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="10" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="7.5" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.6"/><path d="M20 5.5V11h-5.5"/></symbol>
+    <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M3.5 10h17M10 10v10"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4.5v14"/><path d="m6.5 13 5.5 5.5L17.5 13"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19.5v-14"/><path d="M6.5 11 12 5.5 17.5 11"/></symbol>
+    <symbol id="i-conn" viewBox="0 0 24 24"><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/><path d="M9.5 7H15a2 2 0 0 1 2 2v5.5"/><path d="M14.5 17H9a2 2 0 0 1-2-2V9.5"/></symbol>
+    <symbol id="i-ifaces" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></symbol>
+    <symbol id="i-ethernet" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="10" rx="2"/><path d="M8 9V6h8v3"/><path d="M8 13v2M12 13v2M16 13v2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-antenna" viewBox="0 0 24 24"><path d="M4.5 17a10 10 0 0 1 15 0"/><path d="M7.5 13.5a6 6 0 0 1 9 0"/><circle cx="12" cy="10" r="1.4"/><path d="M12 11.4V20"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10.5"/><path d="m7.5 10 4.5 4.5 4.5-4.5"/><path d="M5 19.5h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12.5h9.4L17.5 7M10 10.5v6M14 10.5v6"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 19.5V9"/><path d="m7.5 13.5 4.5-4.5 4.5 4.5"/><path d="M5 4.5h14"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5-10-6.5Z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5 20.5 19h-17L12 4.5Z"/><path d="M12 9.5v4.2M12 16.6h.01"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16l-6.2 7.2V20l-3.6-1.8v-5L4 6Z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h7M15 7h5M4 17h3M11 17h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  </defs>
+</svg>
+<div class="shell" id="shell">
+  <div class="nav-backdrop" id="navBackdrop" aria-hidden="true"></div>
+  <aside class="side" id="sidebar">
+    <div class="brand">
+      <div class="logo" id="sideLogo" aria-hidden="true"><img src="/logo.svg" alt=""></div>
+      <div class="brand-txt"><b>ROS Center</b><small id="brandVer">v1.1.43</small></div>
+      <button class="icon-btn side-collapse" id="collapseBtn" type="button" title="收起侧栏" aria-label="收起侧栏">
+        <svg class="i"><use href="#i-panel"/></svg>
+      </button>
     </div>
-    <div class="side-search" id="sideSearch">
-      <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      <input id="navSearch" type="search" data-i18n-ph="search_menu" placeholder="搜索菜单…" autocomplete="off">
-      <span class="kbd-hint" id="searchKbd" title="Command + K / Ctrl + K"><kbd id="kbdMod">⌘</kbd><span class="kbd-plus">+</span><kbd>K</kbd></span>
+
+    <nav class="nav" id="sideNav"></nav>
+
+    <div class="side-foot" id="sideFoot" title="切换设备 / Switch device">
+      <div class="dev-ico"><svg class="i"><use href="#i-device"/></svg></div>
+      <div class="side-foot-txt"><b id="sideDevName">主路由</b><small id="sideDevSub">RouterOS</small></div>
+      <span class="dot" id="sideDot"></span>
     </div>
-    <div class="nav-fold-bar"><span data-i18n="sidebar_hint">点击箭头折叠侧栏，拖动右侧边缘调整宽度</span><button id="foldAllBtn" type="button" title="收起/展开全部分组">−</button></div>
-    <nav class="side-nav" id="sideNav"></nav>
-    <div class="side-foot">
-      <div class="side-status"><span class="dot" id="sideDot"></span><b id="sideStream" class="side-stream" hidden></b><span id="sideMode" class="side-mode" hidden></span></div>
-      <div class="side-foot-actions">
-        <button class="side-logout" id="settingsShortcut" type="button" title="连接设置 / Connection settings">⚙</button>
-        <button class="side-logout" id="updateBadge" type="button" hidden title="发现新版本 / Update available" style="color:var(--blue)">↑</button>
-        <button class="side-logout" id="exportBtn" type="button" title="获取配置快照 / Export snapshot" data-i18n-title="export_snapshot">⇩</button>
-        <button class="side-logout" id="authLogoutBtn" type="button" title="退出登录 / Sign out" data-i18n-title="logout" hidden>⎋</button>
+    <div class="side-meta"><span id="sideMetaUptime">已运行 —</span><span id="sideMetaVer">v1.1.43</span></div>
+
+    <div class="side-hidden">
+      <select id="deviceSelect" aria-label="Device"></select>
+      <span class="device-dot" id="deviceDot"></span>
+      <span id="sideMode" hidden></span><b id="sideStream" hidden></b>
+      <button id="settingsShortcut" type="button" title="连接设置"></button>
+      <button id="updateBadge" type="button" hidden title="发现新版本"></button>
+      <button id="exportBtn" type="button" title="获取配置快照"></button>
+      <button id="authLogoutBtn" type="button" title="退出登录" hidden></button>
+      <button id="foldAllBtn" type="button"></button>
+      <button id="langBtn" type="button"><span id="langLabel">EN</span></button>
+      <select id="themeSelect" aria-label="Theme"></select>
+      <div class="health" id="health">
+        <span class="h-donut" id="cpuBar"><b id="cpuVal">--</b></span>
+        <span class="h-donut" id="memBar"><b id="memVal">--</b></span>
+        <span class="h-donut" id="diskBar"><b id="diskVal">--</b></span>
       </div>
+      <div class="uptime"><b id="uptimeText">--</b></div>
+      <div id="sideResize"></div>
     </div>
-    <div class="side-resize" id="sideResize" title="拖动调整宽度 / Drag to resize"></div>
   </aside>
 
   <div class="main">
     <header class="topbar">
-      <div class="top-left">
-        <button class="menu-toggle" id="menuToggle" type="button" aria-label="菜单">☰</button>
-        <button class="mobile-nav-btn" id="mobileNavBtn" type="button" aria-label="菜单 / Menu" title="菜单 / Menu">☰</button>
-        <div class="crumbs"><span id="crumbGroup">系统概览</span><span class="crumb-sep">/</span><b id="crumbSection">系统概览</b></div>
+      <button class="icon-btn menu-btn" id="mobileNavBtn" type="button" aria-label="菜单 / Menu" title="菜单 / Menu">
+        <svg class="i"><use href="#i-menu"/></svg>
+      </button>
+      <div class="mobile-brand">
+        <div class="logo" aria-hidden="true"><img src="/logo.svg" alt=""></div>
+        ROS Center
       </div>
-      <div class="top-right">
-        <div class="health" id="health">
-          <div class="health-item"><span class="h-label" data-i18n="cpu">CPU</span><span class="h-value" id="cpuVal">--</span><span class="h-bar"><i id="cpuBar"></i></span></div>
-          <div class="health-item"><span class="h-label" data-i18n="mem">内存</span><span class="h-value" id="memVal">--</span><span class="h-bar"><i id="memBar"></i></span></div>
-          <div class="health-item"><span class="h-label" data-i18n="disk">存储</span><span class="h-value" id="diskVal">--</span><span class="h-bar"><i id="diskBar"></i></span></div>
-        </div>
-        <span class="top-sep"></span>
-        <div class="uptime"><span data-i18n="uptime">运行</span> <b id="uptimeText">--</b></div>
-        <span class="top-sep"></span>
-        <label class="device-pick" title="切换设备 / Switch device">
-          <span class="device-icon">▣</span>
-          <select id="deviceSelect" aria-label="Device"></select>
-          <span class="device-dot" id="deviceDot"></span>
+      <div class="crumbs"><span id="crumbGroup">总览</span><svg class="i"><use href="#i-chevron"/></svg><b id="crumbSection">仪表盘</b></div>
+
+      <div class="topsearch-wrap">
+        <label class="topsearch" for="navSearch">
+          <svg class="i"><use href="#i-search"/></svg>
+          <input id="navSearch" type="search" placeholder="搜索页面、设备或规则…" autocomplete="off" aria-label="全局搜索">
+          <kbd id="searchKbd" title="Command + K / Ctrl + K"><span id="kbdMod">⌘</span>&nbsp;K</kbd>
         </label>
-        <span class="top-sep"></span>
-        <label class="theme-pick" title="界面风格 / Theme">
-          <span class="palette-icon">◐</span>
-          <select id="themeSelect" aria-label="Theme"></select>
-        </label>
-        <button class="mode-toggle" id="modeBtn" type="button" aria-label="Light / dark mode" title="浅色 / 深色 / 跟随系统">☀</button>
-        <button class="motion-toggle" id="motionBtn" type="button" aria-label="动画效果 / Motion" title="动画效果 / Motion">✦</button>
-        <button class="lang" id="langBtn" type="button"><span class="lang-globe"></span><span id="langLabel">EN</span></button>
-        <label class="auto-refresh" id="autoRefresh" title="自动刷新 / Auto refresh">
-          <span class="ar-icon" aria-hidden="true">⟳</span><span class="ar-label" data-i18n="auto_refresh">自动刷新</span>
-          <input type="checkbox" id="autoRefreshChk" checked><span class="ar-track" aria-hidden="true"><i></i></span>
-        </label>
-        <div class="admin" id="adminBtn" title="连接设置 / Connection settings"><span class="avatar">B</span><span id="adminName">Backspace</span><span class="caret">▾</span></div>
+        <div class="search-pop" id="searchPop" hidden></div>
+      </div>
+
+      <div class="top-actions">
+        <button class="dev-btn" id="devBtn" type="button" title="切换设备 / Switch device">
+          <span class="dev-ico sm"><svg class="i"><use href="#i-device"/></svg></span>
+          <b id="devBtnName">主路由</b>
+          <span class="dev-sub" id="devBtnSub">RouterOS</span>
+          <span class="dot" id="devBtnDot"></span>
+          <svg class="i chev"><use href="#i-chev-down"/></svg>
+        </button>
+        <button class="icon-btn theme-btn" id="modeBtn" type="button" aria-label="外观设置" aria-haspopup="dialog" aria-expanded="false" title="外观设置">
+          <svg class="i"><use href="#i-palette"/></svg>
+        </button>
+        <button class="icon-btn" id="bellBtn" type="button" title="通知 / Notifications" aria-label="Notifications">
+          <svg class="i"><use href="#i-bell"/></svg><span class="badge-dot" id="bellDot" hidden></span>
+        </button>
+        <button class="avatar" id="avatarBtn" type="button" title="账户 / Account">B</button>
       </div>
     </header>
 
-    <div class="content" id="content"></div>
+    <main class="content" id="content"></main>
     <div class="mobile-nav-menu" id="mobileNavMenu" hidden><div class="mnm-search"><input type="search" id="mnmSearch" placeholder="搜索菜单…" autocomplete="off"></div><div class="mnm-list" id="mnmList"></div></div>
   </div>
 </div>
 
 <div class="modal-mask" id="modalMask" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 <div class="toast-wrap" id="toastWrap"></div>
+<script src="/ui-v2.js"></script>
 <script src="/app.js"></script>
 <script src="/views.js"></script>
+<script src="/dash-v2.js"></script>
 <script src="/topology.js"></script>
 <script src="/ipmonitor.js"></script>
 <script src="/qrcode.bundle.js"></script>
@@ -95,5 +169,15 @@
 <script src="/quicksetup.js"></script>
 <script src="/resizable.js"></script>
 <script src="/config.js"></script>
+<script src="/pages-v2.js"></script>
+<script src="/nav-hub.js"></script>
+<script src="/pages-v3.js"></script>
+<script src="/interfaces-v3.js"></script>
+<script src="/routing-firewall-v3.js"></script>
+<script src="/wireless-vpn-v3.js"></script>
+<script src="/dhcp-dns-v3.js"></script>
+<script src="/system-v3.js"></script>
+<script src="/shell-v2.js"></script>
+<script src="/shell-design.js"></script>
 </body>
 </html>

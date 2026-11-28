@@ -1,0 +1,953 @@
+/* ============================================================
+   ROS Center · 拓扑页 v3（设计稿 topology.html 视觉）
+   仅作用域 body.topology-page；加载于 pages-v2.css 之后。
+   保留原有 SVG 渲染、DHCP 联动、图标上传与链路流量动画。
+   ============================================================ */
+
+/* ---------- 页面骨架：覆盖旧的整页画布布局 ---------- */
+body.ui-v2.topology-page .content {
+  display: block;
+  padding: 24px 28px 40px;
+  overflow: auto;
+}
+body.ui-v2.topology-page .page-head {
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+body.ui-v2.topology-page .topo-page-head h1 { letter-spacing: -.5px; }
+body.ui-v2.topology-page .topo-meta {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px 14px; margin-top: 7px;
+  font-size: 11.5px; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-meta b {
+  color: var(--v2-ink-2); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-meta-soft { color: var(--v2-faint); }
+body.ui-v2.topology-page .topo-fx-name {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 7px;
+  border-radius: 5px; background: var(--v2-accent-soft); color: var(--v2-accent-ink);
+  font-size: 10px; font-weight: 600;
+}
+body.ui-v2.topology-page .topo-warn {
+  color: var(--v2-amber); cursor: help;
+}
+body.ui-v2.topology-page .topo-page-actions {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 7px; flex-wrap: wrap; padding-top: 1px;
+}
+body.ui-v2.topology-page .topo-page-actions .btn { height: 28px; font-size: 11px; }
+body.ui-v2.topology-page .topo-page-actions .btn.primary { color: #fff; }
+body.ui-v2.topology-page .topo-page-actions .btn svg { width: 13px; height: 13px; }
+body.ui-v2.topology-page .topo-live {
+  display: inline-flex; align-items: center; gap: 7px; height: 26px;
+  padding: 0 10px; margin-right: 2px;
+  border: 1px solid var(--v2-line); border-radius: 999px;
+  background: var(--v2-surface); color: var(--v2-muted);
+  font-size: 10.5px; font-weight: 550; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-live .dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--v2-green);
+  box-shadow: 0 0 0 3px var(--v2-green-soft);
+  animation: topoLive 2.4s ease-in-out infinite;
+}
+@keyframes topoLive {
+  0%, 100% { box-shadow: 0 0 0 3px var(--v2-green-soft); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--v2-green) 10%, transparent); }
+}
+body.ui-v2.topology-page .topo-ipall-count {
+  min-width: 17px; height: 16px; padding: 0 4px; display: inline-grid; place-items: center;
+  border-radius: 999px; background: var(--v2-accent-soft); color: var(--v2-accent);
+  font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-ipall-count.zero { background: var(--v2-surface-3); color: var(--v2-faint); }
+body.ui-v2.topology-page .topo-dhcp-btn .topo-dhcp-count {
+  background: var(--v2-green-soft); color: var(--v2-green);
+}
+body.ui-v2.topology-page .topo-dhcp-btn .topo-dhcp-count.zero {
+  background: var(--v2-surface-3); color: var(--v2-faint);
+}
+
+/* ---------- 主网格：拓扑卡 + 右侧状态栏 ---------- */
+body.ui-v2.topology-page .topo-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 336px;
+  gap: 16px;
+  align-items: start;
+}
+body.ui-v2.topology-page .topo-card {
+  min-width: 0;
+  overflow: visible;
+}
+body.ui-v2.topology-page .topo-card-head {
+  padding-bottom: 0;
+}
+body.ui-v2.topology-page .card-title { color: var(--v2-ink); }
+body.ui-v2.topology-page .card-sub { color: var(--v2-faint); }
+body.ui-v2.topology-page .topo-card-status {
+  display: inline-flex; align-items: center; gap: 6px; height: 23px;
+  padding: 0 9px; border-radius: 6px;
+  background: var(--v2-green-soft); color: var(--v2-green);
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-card-status .dot { width: 5px; height: 5px; box-shadow: none; background: var(--v2-green); }
+body.ui-v2.topology-page .topo-card-status:has(.is-amber) {
+  background: var(--v2-amber-soft); color: var(--v2-amber);
+}
+body.ui-v2.topology-page .topo-card-status .dot.is-amber { background: var(--v2-amber); }
+
+/* 页签 */
+body.ui-v2.topology-page .topo-tabs {
+  margin-top: 10px;
+  padding: 0 18px;
+}
+body.ui-v2.topology-page .topo-tabs .panel-tab {
+  height: 35px; font-size: 12px; cursor: pointer;
+}
+body.ui-v2.topology-page .pt-count {
+  min-width: 19px; height: 17px; padding: 0 5px;
+  display: inline-grid; place-items: center; border-radius: 999px;
+  background: var(--v2-surface-3); color: var(--v2-faint);
+  font-size: 9.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-tabs .panel-tab.on .pt-count {
+  background: var(--v2-accent-soft); color: var(--v2-accent-ink);
+}
+body.ui-v2.topology-page .topo-tab-panel { display: none; }
+body.ui-v2.topology-page .topo-tab-panel.on { display: block; }
+
+/* 工具栏 */
+body.ui-v2.topology-page .topo-toolbar {
+  padding: 10px 18px;
+  gap: 8px;
+}
+body.ui-v2.topology-page .topo-chips { gap: 6px; }
+body.ui-v2.topology-page .topo-chips .chip {
+  height: 26px; border-radius: 999px; font-size: 11px; cursor: pointer;
+}
+body.ui-v2.topology-page .topo-chips .chip b {
+  font-size: 9.5px; font-weight: 600; color: var(--v2-faint);
+  font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-chips .chip.on {
+  background: var(--v2-accent-soft);
+  border-color: color-mix(in srgb, var(--v2-accent) 26%, transparent);
+  color: var(--v2-accent-ink);
+}
+body.ui-v2.topology-page .topo-chips .chip.on b { color: var(--v2-accent-ink); }
+body.ui-v2.topology-page .topo-zoom-dock {
+  display: flex; align-items: center; gap: 1px;
+  padding: 2px; border: 1px solid var(--v2-line); border-radius: 8px;
+  background: var(--v2-surface-2);
+}
+body.ui-v2.topology-page .topo-zoom-dock .topo-ctrl {
+  width: 26px; height: 26px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--v2-muted);
+  font-size: 14px; line-height: 1; display: grid; place-items: center; cursor: pointer;
+}
+body.ui-v2.topology-page .topo-zoom-dock .topo-ctrl:hover {
+  background: var(--v2-surface); color: var(--v2-ink-2);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+}
+body.ui-v2.topology-page .topo-zoom-dock .topo-dir {
+  width: auto; min-width: 60px; padding: 0 8px; font-size: 10.5px; font-weight: 550;
+}
+body.ui-v2.topology-page .topo-zoom {
+  min-width: 40px; text-align: center; font-size: 10.5px;
+  color: var(--v2-muted); font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-ctrl-sep {
+  width: 1px; height: 15px; margin: 0 3px; background: var(--v2-line);
+}
+body.ui-v2.topology-page .toolbar-note {
+  font-size: 10.5px; color: var(--v2-faint); white-space: nowrap;
+}
+
+/* 画布（点阵） */
+body.ui-v2.topology-page .topo-canvas-wrap {
+  position: relative;
+  flex: none;
+  min-height: 0;
+}
+body.ui-v2.topology-page .topo-stage {
+  position: relative; inset: auto;
+  height: clamp(480px, 54vh, 640px);
+  margin: 0 18px;
+  padding: 0;
+  border: 1px solid var(--v2-line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--v2-surface-2);
+  background-image: radial-gradient(color-mix(in srgb, var(--v2-faint) 24%, transparent) 1px, transparent 1px);
+  background-size: 18px 18px;
+  background-position: 0 0;
+}
+body.ui-v2.topology-page .topo-svg {
+  width: 100%; height: 100%; display: block;
+}
+body.ui-v2.topology-page .topo-stage.narrow {
+  overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+body.ui-v2.topology-page .topo-stage.narrow .topo-svg { min-width: 680px; }
+body.ui-v2.topology-page .topo-swipe-hint {
+  position: absolute; left: 50%; bottom: 14px; z-index: 4;
+  transform: translateX(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 5px 10px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--v2-line);
+  background: color-mix(in srgb, var(--v2-surface) 88%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(16, 24, 40, .08);
+  font-size: 10px; color: var(--v2-muted);
+  pointer-events: none;
+}
+body.ui-v2.topology-page .topo-swipe-hint[hidden] { display: none; }
+body.ui-v2.topology-page .topo-empty {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  padding: 24px; font-size: 12px; color: var(--v2-faint);
+}
+
+/* 链接线：物理链路=蓝色实线，无线链路=紫色虚线，代理隧道=棕黄色虚线；与图例 / 双击编辑的链路类型一致 */
+body.ui-v2.topology-page {
+  --topo-tunnel: #ad7b2b; /* 棕黄：代理隧道 */
+  --topo-tunnel-soft: #f7f0e2;
+  --topo-physical: #0b63f6; /* 蓝色：物理链路（不随配色主题变化） */
+}
+html[data-scheme="dark"] body.ui-v2.topology-page { --topo-tunnel: #d3a24a; --topo-tunnel-soft: #322815; --topo-physical: #5b9bff; }
+body.ui-v2.topology-page .topo-link {
+  fill: none;
+  stroke-width: 1.4;
+  stroke-dasharray: none;
+  opacity: .78;
+  transition: opacity .2s, stroke .2s;
+}
+body.ui-v2.topology-page .topo-link.lnk-physical {
+  stroke: var(--topo-physical);
+  stroke-dasharray: none;
+}
+body.ui-v2.topology-page .topo-link.lnk-wireless {
+  stroke: color-mix(in srgb, var(--v2-violet) 72%, var(--v2-line));
+  stroke-dasharray: 5 5;
+  opacity: .85;
+}
+body.ui-v2.topology-page .topo-link.lnk-tunnel {
+  stroke: var(--topo-tunnel);
+  stroke-dasharray: 6 4;
+  opacity: .85;
+}
+body.ui-v2.topology-page .topo-link.flowing {
+  opacity: .92;
+  animation: none;
+}
+body.ui-v2.topology-page .topo-link.filter-dim { opacity: .12; }
+body.ui-v2.topology-page .topo-link.fx-flow {
+  stroke: var(--v2-accent); stroke-width: 2.4;
+  opacity: 1; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--v2-accent) 60%, transparent));
+}
+body.ui-v2.topology-page .topo-flow {
+  fill: none; display: none;
+  stroke: var(--v2-accent); stroke-width: 2.2;
+  stroke-linecap: round; stroke-dasharray: 1 16;
+  opacity: .9; pointer-events: none;
+}
+body.ui-v2.topology-page .topo-flow.lnk-physical { stroke: var(--topo-physical); }
+body.ui-v2.topology-page .topo-flow.lnk-wireless { stroke: var(--v2-violet); }
+body.ui-v2.topology-page .topo-flow.lnk-tunnel { stroke: var(--topo-tunnel); }
+body.ui-v2.topology-page .topo-flow.flowing {
+  display: block;
+  animation: topoFlow var(--flow-dur, 2s) linear infinite;
+}
+body.ui-v2.topology-page .topo-flow.filter-dim { opacity: .1; }
+@keyframes topoFlow { to { stroke-dashoffset: -34; } }
+body.ui-v2.topology-page .topo-svg.panning { cursor: grabbing; }
+
+/* 节点卡片 */
+body.ui-v2.topology-page .topo-node { cursor: pointer; transition: opacity .18s; }
+body.ui-v2.topology-page .topo-node.filter-dim { opacity: .22; }
+body.ui-v2.topology-page .topo-node.custom { cursor: grab; }
+body.ui-v2.topology-page .topo-node.custom:active { cursor: grabbing; }
+body.ui-v2.topology-page .topo-node .node-card {
+  fill: var(--v2-surface);
+  stroke: var(--v2-line);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 2px 4px rgba(16, 24, 40, .06));
+}
+html[data-scheme="dark"] body.ui-v2.topology-page .topo-node .node-card {
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .36));
+}
+body.ui-v2.topology-page .topo-node:hover .node-card {
+  stroke: color-mix(in srgb, var(--v2-accent) 42%, var(--v2-line));
+  filter: drop-shadow(0 4px 10px rgba(16, 24, 40, .10));
+}
+body.ui-v2.topology-page .topo-node.selected .node-card {
+  stroke: var(--v2-accent);
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--v2-accent) 40%, transparent)) drop-shadow(0 4px 10px rgba(16, 24, 40, .12));
+}
+body.ui-v2.topology-page .topo-node.fx-pulse .node-card { animation: fxPulse .6s ease-in-out 3; }
+body.ui-v2.topology-page .topo-node.fx-ripple .node-card { stroke: var(--v2-accent); stroke-width: 2; }
+body.ui-v2.topology-page .topo-ripple {
+  fill: none; stroke: var(--v2-accent); stroke-width: 2;
+  transform-box: fill-box; transform-origin: center;
+  animation: fxRipple 1.1s ease-out 2;
+}
+body.ui-v2.topology-page .topo-light { filter: blur(1.2px); pointer-events: none; transition: opacity .35s ease; }
+body.ui-v2.topology-page .topo-rate-divider { stroke: var(--v2-line-soft); opacity: .9; }
+body.ui-v2.topology-page .topo-idle rect { fill: var(--v2-surface-3); stroke: var(--v2-line); }
+body.ui-v2.topology-page .topo-idle text { fill: var(--v2-faint); }
+
+/* 节点文字 */
+body.ui-v2.topology-page .topo-node .topo-name {
+  fill: var(--v2-ink); font-size: 11.5px; font-weight: 600; letter-spacing: -.05px;
+}
+body.ui-v2.topology-page .topo-node .topo-sub {
+  fill: var(--v2-muted); font-size: 9.5px; opacity: 1;
+}
+body.ui-v2.topology-page .topo-node .topo-mac {
+  fill: var(--v2-faint); font-size: 8.5px; letter-spacing: .1px;
+  font-family: var(--v2-mono);
+}
+body.ui-v2.topology-page .topo-node .topo-rate { font-size: 9px; font-weight: 600; }
+body.ui-v2.topology-page .topo-node .topo-rate.up { fill: var(--v2-accent); }
+body.ui-v2.topology-page .topo-node .topo-rate.down { fill: var(--v2-teal); }
+
+/* 图标块：类型色 */
+body.ui-v2.topology-page .topo-icon-bg.type-router { fill: var(--v2-accent-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-switch { fill: var(--v2-teal-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-ap { fill: var(--v2-violet-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-nas { fill: var(--v2-red-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-dns { fill: var(--v2-green-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-proxy { fill: var(--topo-tunnel-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-client { fill: var(--v2-amber-soft); }
+body.ui-v2.topology-page .topo-icon-bg.type-other { fill: var(--v2-surface-3); }
+body.ui-v2.topology-page .topo-icon-sym {
+  fill: none; stroke: var(--v2-muted); stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  pointer-events: none;
+}
+body.ui-v2.topology-page .topo-node.type-router .topo-icon-sym { stroke: var(--v2-accent); }
+body.ui-v2.topology-page .topo-node.type-switch .topo-icon-sym { stroke: var(--v2-teal); }
+body.ui-v2.topology-page .topo-node.type-ap .topo-icon-sym { stroke: var(--v2-violet); }
+body.ui-v2.topology-page .topo-node.type-nas .topo-icon-sym { stroke: var(--v2-red); }
+body.ui-v2.topology-page .topo-node.type-dns .topo-icon-sym { stroke: var(--v2-green); }
+body.ui-v2.topology-page .topo-node.type-proxy .topo-icon-sym { stroke: var(--topo-tunnel); }
+body.ui-v2.topology-page .topo-node.type-client .topo-icon-sym { stroke: var(--v2-amber); }
+html[data-scheme="dark"] body.ui-v2.topology-page .topo-icon-bg { fill: var(--v2-surface-3); }
+
+/* 灯光渐变色 */
+body.ui-v2.topology-page .light-stop-router { stop-color: var(--v2-accent); }
+body.ui-v2.topology-page .light-stop-switch { stop-color: var(--v2-teal); }
+body.ui-v2.topology-page .light-stop-ap { stop-color: var(--v2-violet); }
+body.ui-v2.topology-page .light-stop-nas { stop-color: var(--v2-red); }
+body.ui-v2.topology-page .light-stop-dns { stop-color: var(--v2-green); }
+body.ui-v2.topology-page .light-stop-proxy { stop-color: var(--topo-tunnel); }
+body.ui-v2.topology-page .light-stop-client { stop-color: var(--v2-amber); }
+body.ui-v2.topology-page .light-stop-other { stop-color: var(--v2-faint); }
+
+/* DHCP 状态点（HTML 侧定义显示状态） */
+body.ui-v2.topology-page .topo-dhcp-dot { stroke: var(--v2-surface); stroke-width: 1.2; }
+body.ui-v2.topology-page .topo-dhcp-dot.bound { fill: var(--v2-green); }
+body.ui-v2.topology-page .topo-dhcp-dot.waiting { fill: var(--v2-amber); }
+body.ui-v2.topology-page .topo-dhcp-dot.other { fill: var(--v2-faint); }
+
+/* 图例 / 底栏 */
+body.ui-v2.topology-page .topo-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--v2-line-soft);
+  font-size: 10px; color: var(--v2-faint);
+  flex-wrap: wrap;
+}
+body.ui-v2.topology-page .topo-legend {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 14px; padding: 0; margin: 0;
+  flex-wrap: wrap; font-size: 10px; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-legend span {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-legend .lk-phys i,
+body.ui-v2.topology-page .topo-legend .lk-wifi i,
+body.ui-v2.topology-page .topo-legend .lk-tunnel i {
+  width: 14px; height: 0; border-radius: 0; margin: 0;
+  background: none; border-top: 1.5px solid var(--topo-physical);
+}
+body.ui-v2.topology-page .topo-legend .lk-wifi i { border-top: 1.5px dashed var(--v2-violet); }
+body.ui-v2.topology-page .topo-legend .lk-tunnel i { border-top: 1.5px dashed var(--topo-tunnel); }
+body.ui-v2.topology-page .topo-legend .topo-legend-sep {
+  width: 1px; height: 11px; background: var(--v2-line); margin: 0 1px;
+}
+/* 设备分类色块：与节点射灯渐变同色 */
+body.ui-v2.topology-page .topo-legend .dev-cat {
+  background: transparent;
+}
+body.ui-v2.topology-page .topo-legend .dev-cat i {
+  width: 8px; height: 8px; margin: 0; border-radius: 2px;
+  border: 0; background: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-router i { background: var(--v2-accent); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-switch i { background: var(--v2-teal); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-ap i { background: var(--v2-violet); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-nas i { background: var(--v2-red); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-dns i { background: var(--v2-green); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-proxy i { background: var(--topo-tunnel); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-client i { background: var(--v2-amber); }
+body.ui-v2.topology-page .topo-legend .dev-cat.lg-other i { background: var(--v2-faint); }
+body.ui-v2.topology-page .topo-legend .lg-dhcp i {
+  width: 6px; height: 6px; margin: 0; border-radius: 50%;
+  border: 0; background: var(--v2-green);
+}
+body.ui-v2.topology-page .topo-legend .lg-dhcp.wait i { background: var(--v2-amber); }
+body.ui-v2.topology-page .topo-foot-count { font-variant-numeric: tabular-nums; }
+
+/* DHCP 抽屉位置：画布已是普通块级区域 */
+body.ui-v2.topology-page .topo-dhcp-drawer {
+  top: 12px; right: 28px; bottom: 12px;
+  width: min(368px, calc(100% - 48px));
+  border-color: var(--v2-line);
+  background: var(--v2-surface);
+}
+body.ui-v2.topology-page .dhcp-drawer-head {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--v2-green) 6%, var(--v2-surface)), var(--v2-surface));
+  border-bottom-color: var(--v2-line-soft);
+}
+body.ui-v2.topology-page .dhcp-drawer-head h3 { color: var(--v2-ink); }
+body.ui-v2.topology-page .dhcp-drawer-head p { color: var(--v2-muted); }
+body.ui-v2.topology-page .dhcp-search,
+body.ui-v2.topology-page .dhcp-refresh {
+  background: var(--v2-surface-2); border-color: var(--v2-line); color: var(--v2-muted);
+}
+body.ui-v2.topology-page .dhcp-search input { color: var(--v2-ink); }
+body.ui-v2.topology-page .dhcp-row { color: var(--v2-ink); }
+body.ui-v2.topology-page .dhcp-row:hover { background: var(--v2-surface-2); border-color: var(--v2-line); }
+body.ui-v2.topology-page .dhcp-drawer-foot {
+  background: var(--v2-surface-2); border-top-color: var(--v2-line-soft);
+}
+
+/* ---------- 链路列表 ---------- */
+body.ui-v2.topology-page .topo-link-scroll {
+  max-height: clamp(360px, 54vh, 640px);
+  overflow: auto;
+}
+body.ui-v2.topology-page .topo-link-table {
+  width: 100%; min-width: 660px; border-collapse: collapse;
+  font-size: 11.5px;
+}
+body.ui-v2.topology-page .topo-link-table th {
+  position: sticky; top: 0; z-index: 2;
+  padding: 9px 14px; text-align: left;
+  font-size: 10.5px; font-weight: 550; color: var(--v2-faint);
+  background: var(--v2-surface-2);
+  border-bottom: 1px solid var(--v2-line-soft);
+  white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-link-table th.r,
+body.ui-v2.topology-page .topo-link-table td.r { text-align: right; }
+body.ui-v2.topology-page .topo-link-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--v2-line-soft);
+  color: var(--v2-ink-2); vertical-align: middle;
+}
+body.ui-v2.topology-page .topo-link-table tbody tr { cursor: pointer; }
+body.ui-v2.topology-page .topo-link-table tbody tr:hover { background: var(--v2-surface-2); }
+body.ui-v2.topology-page .topo-link-table tbody tr:last-child td { border-bottom: 0; }
+body.ui-v2.topology-page .topo-link-table th:first-child,
+body.ui-v2.topology-page .topo-link-table td:first-child { padding-left: 18px; }
+body.ui-v2.topology-page .topo-link-table th:last-child,
+body.ui-v2.topology-page .topo-link-table td:last-child { padding-right: 14px; width: 34px; }
+body.ui-v2.topology-page .topo-link-pair {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+body.ui-v2.topology-page .topo-link-pair b {
+  max-width: 138px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; font-weight: 550; color: var(--v2-ink);
+}
+body.ui-v2.topology-page .topo-link-pair b:first-child { color: var(--v2-muted); font-weight: 500; }
+body.ui-v2.topology-page .topo-link-pair span { color: var(--v2-faint); font-size: 10px; }
+body.ui-v2.topology-page .topo-link-meta span {
+  display: block; font-family: var(--v2-mono); font-size: 10px; color: var(--v2-ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.ui-v2.topology-page .topo-link-meta small {
+  display: block; font-size: 9.5px; color: var(--v2-faint); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.ui-v2.topology-page .topo-link-table .cell-num b {
+  display: block; font-size: 11px; font-weight: 600; color: var(--v2-ink-2);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-link-table .cell-num small {
+  display: block; font-size: 9.5px; color: var(--v2-faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-link-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; color: var(--v2-muted); white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-link-status i {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-link-status.bound { color: var(--v2-green); }
+body.ui-v2.topology-page .topo-link-status.bound i { background: var(--v2-green); }
+body.ui-v2.topology-page .topo-link-status.waiting { color: var(--v2-amber); }
+body.ui-v2.topology-page .topo-link-status.waiting i { background: var(--v2-amber); }
+body.ui-v2.topology-page .topo-locate {
+  width: 24px; height: 24px; display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--v2-faint); cursor: pointer;
+}
+body.ui-v2.topology-page .topo-locate svg { width: 13px; height: 13px; }
+body.ui-v2.topology-page .topo-link-table tr:hover .topo-locate {
+  border-color: var(--v2-line); color: var(--v2-accent);
+  background: var(--v2-surface);
+}
+body.ui-v2.topology-page .topo-link-empty {
+  padding: 44px 20px !important; text-align: center;
+  color: var(--v2-faint); font-size: 11.5px;
+}
+body.ui-v2.topology-page .topo-link-foot {
+  padding: 10px 18px 12px;
+  border-top: 1px solid var(--v2-line-soft);
+  font-size: 10.5px; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-link-foot .mono { font-family: var(--v2-mono); font-size: 9.5px; }
+
+/* ---------- 右侧状态栏 ---------- */
+body.ui-v2.topology-page .topo-rail {
+  display: flex; flex-direction: column; gap: 14px;
+  min-width: 0;
+}
+body.ui-v2.topology-page .topo-rail-card { min-width: 0; }
+body.ui-v2.topology-page .topo-rail-card .card-head {
+  padding-bottom: 12px;
+}
+body.ui-v2.topology-page .topo-rail .rail-body {
+  padding: 0 18px 16px;
+}
+body.ui-v2.topology-page .topo-rail .badge {
+  display: inline-flex; align-items: center; height: 20px;
+  padding: 0 7px; border-radius: 6px;
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-rail .badge.allow { background: var(--v2-green-soft); color: var(--v2-green); }
+body.ui-v2.topology-page .topo-rail .badge.neutral { background: var(--v2-surface-3); color: var(--v2-muted); }
+body.ui-v2.topology-page .topo-rail-empty {
+  padding: 14px 0 4px; color: var(--v2-faint); font-size: 11px;
+}
+
+/* DHCP 统计 */
+body.ui-v2.topology-page .topo-stat-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin-top: 1px;
+}
+body.ui-v2.topology-page .topo-stat {
+  border: 1px solid var(--v2-line-soft);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: var(--v2-surface-2);
+  min-width: 0;
+}
+body.ui-v2.topology-page .topo-stat small {
+  display: block; font-size: 9.5px; color: var(--v2-faint); line-height: 1.2;
+}
+body.ui-v2.topology-page .topo-stat b {
+  display: block; margin-top: 4px;
+  font-size: 20px; line-height: 1.1; font-weight: 620; letter-spacing: -.6px;
+  color: var(--v2-ink); font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-stat span {
+  display: block; margin-top: 2px;
+  font-size: 9.5px; color: var(--v2-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.ui-v2.topology-page .topo-stat.waiting b { color: var(--v2-amber); }
+body.ui-v2.topology-page .topo-meter { margin-top: 12px; }
+body.ui-v2.topology-page .topo-meter-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 6px;
+  font-size: 10.5px; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-meter-head b {
+  color: var(--v2-ink-2); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-meter .bar {
+  display: block; height: 6px; border-radius: 999px;
+  background: var(--v2-surface-3); overflow: hidden;
+}
+body.ui-v2.topology-page .topo-meter .bar i {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--v2-accent), var(--v2-teal));
+  transition: width .4s ease;
+}
+body.ui-v2.topology-page .topo-rail .notice {
+  margin-top: 10px; padding: 9px 10px;
+  border: 1px solid var(--v2-line-soft); border-radius: 8px;
+  background: var(--v2-surface-2);
+  font-size: 10px; line-height: 1.55; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-rail .notice.green {
+  border-color: var(--v2-line-soft);
+  background: var(--v2-surface-2);
+  color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-rail .notice.green .i { color: var(--v2-green); }
+body.ui-v2.topology-page .topo-rail .notice.warn {
+  border-color: color-mix(in srgb, var(--v2-amber) 22%, var(--v2-line-soft));
+  background: color-mix(in srgb, var(--v2-amber-soft) 55%, var(--v2-surface-2));
+  color: var(--v2-amber);
+}
+body.ui-v2.topology-page .topo-rail-btn {
+  width: 100%; margin-top: 10px;
+  justify-content: space-between;
+  background: var(--v2-surface-2);
+}
+body.ui-v2.topology-page .topo-rail-btn:hover {
+  border-color: color-mix(in srgb, var(--v2-accent) 30%, var(--v2-line));
+  color: var(--v2-accent-ink);
+}
+
+/* 设备分布 */
+body.ui-v2.topology-page .topo-rail .kv {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--v2-line-soft);
+  font-size: 11px; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-rail .kv:last-of-type { border-bottom: 0; }
+body.ui-v2.topology-page .topo-rail .kv b {
+  color: var(--v2-ink-2); font-size: 11px; font-weight: 550;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-rail .kv > span { display: inline-flex; align-items: center; }
+body.ui-v2.topology-page .topo-type-dot {
+  width: 7px; height: 7px; flex: none;
+  display: inline-block; border-radius: 2px; margin-right: 7px;
+  background: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-type-dot.lg-router { background: var(--v2-accent); }
+body.ui-v2.topology-page .topo-type-dot.lg-switch { background: var(--v2-teal); }
+body.ui-v2.topology-page .topo-type-dot.lg-ap { background: var(--v2-violet); }
+body.ui-v2.topology-page .topo-type-dot.lg-nas { background: var(--v2-red); }
+body.ui-v2.topology-page .topo-type-dot.lg-dns { background: var(--v2-green); }
+body.ui-v2.topology-page .topo-type-dot.lg-proxy { background: var(--topo-tunnel); }
+body.ui-v2.topology-page .topo-type-dot.lg-client { background: var(--v2-amber); }
+body.ui-v2.topology-page .topo-rail-split {
+  height: 1px; background: var(--v2-line-soft); margin: 5px 0;
+}
+
+/* 设备状态摘要：一行正常状态 + 异常项分列（带状态点），无绿色底纹 */
+body.ui-v2.topology-page .topo-dev-status {
+  margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid var(--v2-line-soft);
+  font-size: 10.5px; line-height: 1.5;
+}
+body.ui-v2.topology-page .topo-dev-status-line,
+body.ui-v2.topology-page .topo-dev-status-item {
+  display: flex; align-items: center; gap: 7px; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-dev-status-line {
+  color: var(--v2-ink-2); font-weight: 550;
+}
+body.ui-v2.topology-page .topo-dev-status-items {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 5px;
+}
+body.ui-v2.topology-page .topo-dev-status .dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none; box-shadow: none;
+}
+body.ui-v2.topology-page .topo-dev-status .dot.is-green { background: var(--v2-green); }
+body.ui-v2.topology-page .topo-dev-status .dot.is-amber { background: var(--v2-amber); }
+body.ui-v2.topology-page .topo-dev-status .dot.is-red { background: var(--v2-red); }
+
+/* 操作说明 */
+body.ui-v2.topology-page .topo-help-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--v2-line-soft);
+}
+body.ui-v2.topology-page .topo-help-row:last-of-type { border-bottom: 0; }
+body.ui-v2.topology-page .topo-help-ic {
+  width: 26px; height: 26px; flex: none;
+  display: grid; place-items: center; border-radius: 7px;
+  background: var(--v2-surface-3); color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-help-ic .i {
+  width: 14px; height: 14px; fill: none; stroke: currentColor;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+body.ui-v2.topology-page .topo-help-row > div { min-width: 0; padding-top: 1px; }
+body.ui-v2.topology-page .topo-help-row b {
+  display: block; font-size: 11.5px; font-weight: 600; color: var(--v2-ink-2); line-height: 1.35;
+}
+body.ui-v2.topology-page .topo-help-row small {
+  display: block; margin-top: 2px;
+  font-size: 10px; line-height: 1.5; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-help-note {
+  margin-top: 10px; padding: 9px 10px;
+  border: 1px solid var(--v2-line-soft); border-radius: 8px;
+  background: var(--v2-surface-2);
+  font-size: 9.5px; line-height: 1.6; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-rail-actions {
+  display: flex; gap: 8px; margin-top: 10px;
+}
+body.ui-v2.topology-page .topo-rail-actions .btn { flex: 1; height: 28px; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1280px) {
+  body.ui-v2.topology-page .topo-grid { grid-template-columns: minmax(0, 1fr) 316px; }
+}
+@media (max-width: 1180px) {
+  body.ui-v2.topology-page .content { padding: 22px 22px 36px; }
+  body.ui-v2.topology-page .topo-grid { grid-template-columns: minmax(0, 1fr); }
+  body.ui-v2.topology-page .topo-rail {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px; align-items: start;
+  }
+}
+@media (max-width: 980px) {
+  body.ui-v2.topology-page .content { padding: 20px 20px 32px; }
+  body.ui-v2.topology-page .topo-page-head {
+    flex-direction: column; align-items: stretch; gap: 12px;
+  }
+  body.ui-v2.topology-page .topo-page-actions { justify-content: flex-start; }
+  body.ui-v2.topology-page .topo-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.ui-v2.topology-page .topo-rail-card:last-child { grid-column: 1 / -1; }
+  body.ui-v2.topology-page .topo-stage { height: clamp(460px, 58vh, 600px); }
+}
+@media (max-width: 720px) {
+  body.ui-v2.topology-page .content { padding: 16px 14px 28px; }
+  body.ui-v2.topology-page .page-head h1 { font-size: 23px; }
+  body.ui-v2.topology-page .topo-page-actions { gap: 6px; }
+  body.ui-v2.topology-page .topo-live { margin-right: 0; }
+  body.ui-v2.topology-page .topo-toolbar { padding: 8px 14px; gap: 7px; }
+  body.ui-v2.topology-page .topo-toolbar .spacer { display: none; }
+  body.ui-v2.topology-page .topo-chips {
+    width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px;
+  }
+  body.ui-v2.topology-page .topo-zoom-dock { order: 2; }
+  body.ui-v2.topology-page .toolbar-note { display: none; }
+  body.ui-v2.topology-page .topo-stage {
+    height: clamp(420px, 58vh, 540px);
+    margin: 0 14px;
+  }
+  body.ui-v2.topology-page .topo-tabs { padding: 0 14px; margin-top: 8px; }
+  body.ui-v2.topology-page .topo-foot { padding: 9px 14px; }
+  body.ui-v2.topology-page .topo-legend { gap: 10px; font-size: 9.5px; }
+  body.ui-v2.topology-page .topo-foot-count { display: block; width: 100%; text-align: right; }
+  body.ui-v2.topology-page .topo-rail { grid-template-columns: 1fr; }
+  body.ui-v2.topology-page .topo-rail-card:last-child { grid-column: auto; }
+  body.ui-v2.topology-page .topo-rail-card .card-head { padding: 14px 14px 10px; }
+  body.ui-v2.topology-page .topo-rail .rail-body { padding: 0 14px 14px; }
+  body.ui-v2.topology-page .topo-dhcp-drawer {
+    top: 8px; left: 8px; right: 8px; bottom: 8px; width: auto;
+  }
+  body.ui-v2.topology-page .topo-link-scroll { max-height: 58vh; }
+  body.ui-v2.topology-page .topo-link-table { min-width: 620px; }
+  body.ui-v2.topology-page .topo-link-table th:first-child,
+  body.ui-v2.topology-page .topo-link-table td:first-child { padding-left: 14px; }
+  body.ui-v2.topology-page .topo-link-pair b { max-width: 100px; }
+}
+@media (max-width: 440px) {
+  body.ui-v2.topology-page .topo-page-actions .btn { flex: 1 1 auto; }
+  body.ui-v2.topology-page .topo-live { width: 100%; justify-content: center; }
+  body.ui-v2.topology-page .topo-stat-grid { gap: 7px; }
+  body.ui-v2.topology-page .topo-stat { padding: 8px 9px; }
+  body.ui-v2.topology-page .topo-stat b { font-size: 18px; }
+}
+/* ---------- 顶栏 KPI（设计稿四卡） ---------- */
+body.ui-v2.topology-page .content > .topo-kpis {
+  margin: 0 0 16px;
+}
+body.ui-v2.topology-page .topo-kpis .kpi-foot span:first-child {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.ui-v2.topology-page .topo-kpis .kpi .status .dot {
+  box-shadow: none;
+}
+body.ui-v2.topology-page .topo-kpis .kpi .status .dot.is-muted { background: var(--v2-faint); }
+
+/* ---------- 右栏：链路质量 ---------- */
+body.ui-v2.topology-page .topo-rail .health {
+  display: flex; flex-direction: column; gap: 11px;
+  padding: 2px 0 12px;
+}
+body.ui-v2.topology-page .topo-rail .health-row {
+  display: grid; grid-template-columns: 62px minmax(0, 1fr) 48px;
+  align-items: center; gap: 10px;
+  font-size: 11px; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-rail .health-row > span:first-child {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.ui-v2.topology-page .topo-rail .health-row .bar {
+  display: block; height: 5px; border-radius: 999px;
+  background: var(--v2-surface-3); overflow: hidden;
+}
+body.ui-v2.topology-page .topo-rail .health-row .bar > i {
+  display: block; height: 100%; border-radius: 999px;
+  transition: width .4s ease;
+}
+body.ui-v2.topology-page .topo-rail .health-row b {
+  text-align: right; font-size: 11px; font-weight: 600;
+  color: var(--v2-ink-2); font-variant-numeric: tabular-nums;
+}
+body.ui-v2.topology-page .topo-rail .hairline {
+  height: 1px; background: var(--v2-line-soft); margin: 0 0 8px;
+}
+body.ui-v2.topology-page .topo-rail .notice {
+  display: block;
+}
+
+/* 链路质量：最多三条探测项，每行 名称/目标 · 延迟 · 抖动 · 丢包 · 状态；
+   数据与格式与仪表盘「系统状态」卡链路质量一致（同一份 netwatch 结果） */
+body.ui-v2.topology-page .topo-rail .topo-qtable {
+  display: flex; flex-direction: column; padding: 2px 0 10px;
+}
+body.ui-v2.topology-page .topo-rail .topo-qhead,
+body.ui-v2.topology-page .topo-rail .topo-qrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px 44px 36px 48px;
+  align-items: center; gap: 5px;
+}
+body.ui-v2.topology-page .topo-rail .topo-qhead {
+  padding-bottom: 6px; font-size: 9px; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-rail .topo-qhead span:nth-child(n+2) { text-align: right; }
+body.ui-v2.topology-page .topo-rail .topo-qrow {
+  padding: 7px 0; border-top: 1px solid var(--v2-line-soft);
+  font-size: 10px; color: var(--v2-muted);
+}
+body.ui-v2.topology-page .topo-rail .topo-qtarget {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--v2-ink-2); font-size: 10.5px;
+}
+body.ui-v2.topology-page .topo-rail .topo-qms,
+body.ui-v2.topology-page .topo-rail .topo-qjit,
+body.ui-v2.topology-page .topo-rail .topo-qloss {
+  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-rail .topo-qms { color: var(--v2-ink-2); font-weight: 600; }
+body.ui-v2.topology-page .topo-rail .topo-qstate {
+  display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px;
+  white-space: nowrap; font-size: 9.5px;
+}
+body.ui-v2.topology-page .topo-rail .topo-qstate .dot {
+  width: 5px; height: 5px; flex: none; box-shadow: none; background: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-rail .topo-qstate .dot.is-green { background: var(--v2-green); }
+body.ui-v2.topology-page .topo-rail .topo-qstate .dot.is-amber { background: var(--v2-amber); }
+body.ui-v2.topology-page .topo-rail .topo-qstate .dot.is-red { background: var(--v2-red); }
+body.ui-v2.topology-page .topo-rail .topo-qfoot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 8px; font-size: 9.5px; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-rail .topo-quality-cfg {
+  height: 24px; padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 26%, var(--v2-line));
+  border-radius: 6px; background: var(--v2-accent-soft);
+  color: var(--v2-accent-ink); font-size: 10px; font-weight: 550; cursor: pointer;
+}
+body.ui-v2.topology-page .topo-rail .topo-quality-cfg:hover { filter: brightness(.97); border-color: var(--v2-accent); }
+
+/* 探测设置：设计稿链路质量卡片在「抖动」下方增加的设置项 */
+body.ui-v2.topology-page .topo-qsettings {
+  margin-top: 10px; padding: 10px 11px;
+  border: 1px solid var(--v2-line-soft); border-radius: 9px;
+  background: var(--v2-surface-2);
+}
+body.ui-v2.topology-page .topo-qsettings-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 8px;
+}
+body.ui-v2.topology-page .topo-qsettings-head b {
+  font-size: 10.5px; font-weight: 600; color: var(--v2-ink-2);
+}
+body.ui-v2.topology-page .topo-qsettings-edit {
+  padding: 0; border: 0; background: transparent;
+  color: var(--v2-accent); font-size: 10px; font-weight: 550; cursor: pointer;
+}
+body.ui-v2.topology-page .topo-qsettings-edit:hover { text-decoration: underline; }
+body.ui-v2.topology-page .topo-qsettings-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px;
+}
+body.ui-v2.topology-page .topo-qsettings-grid > div { min-width: 0; }
+body.ui-v2.topology-page .topo-qsettings-grid small {
+  display: block; font-size: 9.5px; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-qsettings-grid b {
+  display: block; margin-top: 2px;
+  font-size: 11px; font-weight: 600; color: var(--v2-ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 线型图例：与拓扑图里的物理链路 / 无线链路颜色一致 */
+body.ui-v2.topology-page .topo-qlegend {
+  display: flex; align-items: center; gap: 13px;
+  margin-top: 10px; font-size: 9.5px; color: var(--v2-faint);
+}
+body.ui-v2.topology-page .topo-qlegend span {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-qlegend i {
+  display: inline-block; width: 12px; height: 0;
+  border-top: 1.5px solid var(--v2-teal);
+}
+body.ui-v2.topology-page .topo-qlegend .wifi i { border-top: 1.5px dashed var(--v2-violet); }
+
+/* ---------- 右栏：最近变更（设计稿 timeline 样式） ---------- */
+body.ui-v2.topology-page .topo-rail .timeline {
+  display: flex; flex-direction: column; gap: 13px;
+  padding-top: 2px;
+}
+body.ui-v2.topology-page .topo-rail .tl-item {
+  display: flex; gap: 10px; min-width: 0;
+}
+body.ui-v2.topology-page .topo-rail .tl-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  margin-top: 3px; background: var(--v2-accent);
+  box-shadow: 0 0 0 3px var(--v2-accent-soft);
+}
+body.ui-v2.topology-page .topo-rail .tl-item > div { min-width: 0; }
+body.ui-v2.topology-page .topo-rail .tl-item b {
+  display: block; font-size: 11.5px; font-weight: 550;
+  color: var(--v2-ink-2); line-height: 1.4;
+}
+body.ui-v2.topology-page .topo-rail .tl-item small {
+  display: block; margin-top: 2px;
+  font-size: 10px; line-height: 1.45; color: var(--v2-faint);
+}
+
+/* ---------- 工具栏说明靠右 ---------- */
+body.ui-v2.topology-page .topo-toolbar .toolbar-note { margin-left: auto; }
+
+@media (max-width: 460px) {
+  body.ui-v2.topology-page .topo-rail .health-row { grid-template-columns: 58px minmax(0, 1fr) 46px; }
+  body.ui-v2.topology-page .topo-rail .topo-qhead,
+  body.ui-v2.topology-page .topo-rail .topo-qrow { grid-template-columns: minmax(0, 1fr) 42px 40px 32px 44px; gap: 3px; }
+}
+body.ui-v2.topology-page .topo-rail .health { align-items: stretch; }
+body.ui-v2.topology-page .topo-rail .health-row { width: 100%; }
+
+/* 页签基础样式（design 复刻，旧版未覆盖到非 dash 页） */
+body.ui-v2.topology-page .topo-tabs {
+  display: flex; align-items: center; gap: 2px;
+  border-bottom: 1px solid var(--v2-line-soft);
+  overflow-x: auto; scrollbar-width: none;
+}
+body.ui-v2.topology-page .topo-tabs::-webkit-scrollbar { display: none; }
+body.ui-v2.topology-page .topo-tabs .panel-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 10px; border: 0; border-radius: 0; background: transparent;
+  font: inherit; font-size: 12px; font-weight: 550;
+  color: var(--v2-muted); white-space: nowrap;
+}
+body.ui-v2.topology-page .topo-tabs .panel-tab:hover { color: var(--v2-ink); }
+body.ui-v2.topology-page .topo-tabs .panel-tab.on { color: var(--v2-accent-ink); }
+body.ui-v2.topology-page .topo-tabs .panel-tab.on::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px;
+  height: 2px; border-radius: 2px; background: var(--v2-accent);
+}

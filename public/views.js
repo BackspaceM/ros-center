@@ -111,12 +111,12 @@ const QUALITY_KEY = () => 'rosCenter.qualityTargets.' + (state.deviceId || '');
 function qualityPrefs() {
   let p = null;
   try { p = JSON.parse(localStorage.getItem(QUALITY_KEY())); } catch (e) { /* ignore */ }
-  if (Array.isArray(p)) return { mode: 'icmp', interval: '1m', targets: p };
+  if (Array.isArray(p)) return { mode: 'icmp', interval: '1m', targets: p, enabled: true };
   if (p && Array.isArray(p.targets)) {
     return { mode: p.mode === 'netwatch' ? 'netwatch' : 'icmp',
-      interval: p.interval || '1m', targets: p.targets };
+      interval: p.interval || '1m', targets: p.targets, enabled: p.enabled !== false };
   }
-  return { mode: 'icmp', interval: '1m', targets: [] };
+  return { mode: 'icmp', interval: '1m', targets: [], enabled: true };
 }
 function qualityTargets() { return qualityPrefs().targets; }
 function qualityMode() { return qualityPrefs().mode; }
@@ -196,7 +196,7 @@ function dashQualityBlock() {
       const src = r.source === 'netwatch' ? L('Netwatch 探针', 'Netwatch') : L('ICMP 探测', 'ICMP');
       const tip = r.error ? `${src} · ${r.error}` : (r.source === 'netwatch' ? `${src}${r.since ? ' · ' + L('自', 'since') + ' ' + esc(r.since) : ''}` : src);
       return `<tr><td><b>${esc(r.label || r.host)}</b><small>${esc(r.host)} · ${esc(src)}</small></td>
-        <td class="num">${avg ? avg.toFixed(1) + ' ms' : '—'}</td><td class="num">${jit ? jit.toFixed(1) + ' ms' : '—'}</td>
+        <td class="num">${avg ? (avg > 0 && avg < 1 ? Math.round(avg * 1000) + ' µs' : avg.toFixed(1) + ' ms') : '—'}</td><td class="num">${jit ? (jit > 0 && jit < 1 ? Math.round(jit * 1000) + ' µs' : jit.toFixed(1) + ' ms') : '—'}</td>
         <td class="num">${r.loss == null ? '—' : loss + '%'}</td>
         <td><span class="tag ${cls}" title="${esc(tip)}">${label}</span></td></tr>`;
     }).join('') || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
@@ -216,6 +216,8 @@ function qtRow(host, label, mode) {
   </div>`;
 }
 function openQualityTargets() {
+  /* 统一复用设计稿 link-quality 表单（检测目标为文本框） */
+  if (typeof v2OpenProbeModal === 'function') { v2OpenProbeModal(); return; }
   const prefs = qualityPrefs();
   const modeInput = (value, title, desc, icon) => `<label class="qt-mode-card lease-card${prefs.mode === value ? ' selected' : ''}" data-mode="${value}">
     <input type="radio" name="qtMode" value="${value}" ${prefs.mode === value ? 'checked' : ''}>

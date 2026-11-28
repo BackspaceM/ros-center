@@ -2,6 +2,7 @@
 /* 检查更新：一屏总览（状态 + 操作 + 进度）、按运行方式收敛内容 */
 (function () {
   const MARK_KEY = 'ros-self-updating';
+  const ic = (id) => `<svg class="i" aria-hidden="true"><use href="#i-${id}"/></svg>`;
   let applyingTimer = null;
   let runCheck = null;   // 由 renderUpdatesPage 注入，paint 重写 DOM 后重新绑定「立即检查」
 
@@ -20,30 +21,78 @@
   function kindLabel(kind) {
     return { docker: 'Docker', desktop: L('桌面版', 'Desktop app'), source: L('源码运行', 'Source') }[kind] || kind || '—';
   }
+  function scanRow(label, value, tag) {
+    return `<div class="ui-scan-row"><span>${esc(label)}</span>${tag ? `<span class="tag">${esc(tag)}</span>` : `<b>${esc(value)}</b>`}</div>`;
+  }
 
-  /* ---------- 进度条：下载字节数 / Docker 逐层百分比 / 重启等待 ---------- */
+  /* ---------- 检查更新弹窗：复刻「设备与固件 · 检查更新」的扫描卡设计 ---------- */
+  async function checkUpdatesModal() {
+    if (!window.UI || !UI.openModal) return;
+    const cache = window.__updCache || {};
+    const rt = cache.runtime || {}, cfg = cache.config || {};
+    const src = (cache.limits && cache.limits.source) || cfg.source || 'github';
+    const srcLabel = src === 'dockerhub' ? 'Docker Hub' : 'GitHub Releases';
+    const curVer = rt.version || '—';
+    const kind = rt.selfUpdate || (cache.limits && cache.limits.selfUpdateKind) || rt.runtime || 'source';
+    const modal = UI.openModal({
+      title: L('检查更新', 'Check updates'), sub: L('ROS Center · 扫描控制台版本', 'ROS Center · scan console version'),
+      body: `<div class="ui-scan"><div class="ui-scan-head"><b>${esc(L('正在连接更新服务并扫描版本…', 'Connecting to update service and scanning…'))}</b><span>live</span></div>
+        <div class="ui-scan-bar"><i></i></div>
+        <div class="ui-scan-results">
+          ${scanRow(L('当前版本', 'Current version'), curVer)}
+          ${scanRow(L('检测源', 'Source'), srcLabel)}
+        </div></div>`,
+      actions: [{ label: L('关闭', 'Close') }]
+    });
+    let r = null, err = '';
+    try { r = await api('/api/update/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }
+    catch (e) { err = (e && e.message) || L('检查失败', 'Check failed'); }
+    if (!document.body.contains(modal.overlay)) return;
+    const st = (r && r.status) || {};
+    const latest = st.latest || {};
+    const hasUp = !!st.hasUpdate;
+    const latestV = latest.version || '—';
+    modal.body.innerHTML = `<div class="ui-statline">
+        <span><b>${esc(latestV)}</b>${esc(L('最新版本', 'Latest version'))}</span>
+        <span><b>${hasUp ? '1' : '0'}</b>${esc(L('控制台更新', 'Console update'))}</span>
+        <span><b>${esc(kindLabel(kind))}</b>${esc(L('运行方式', 'Runtime'))}</span>
+      </div>
+      <div class="ui-scan-results">
+        ${scanRow(L('当前版本', 'Current version'), curVer)}
+        ${scanRow(L('最新版本', 'Latest version'), latestV, hasUp ? L('可更新', 'Update') : L('已是最新', 'Up to date'))}
+        ${scanRow(L('检测源', 'Source'), srcLabel)}
+        ${st.checkedAt ? scanRow(L('检查时间', 'Checked'), fmtTime(st.checkedAt)) : ''}
+      </div>
+      ${err ? `<div class="ui-warning" style="margin-top:13px"><b>${esc(L('检查未完全成功', 'Check incomplete'))}</b>${esc(err)}</div>`
+        : `<div class="ui-warning" style="margin-top:13px"><b>${esc(L('说明', 'Note'))}</b>${esc(L('更新只替换程序文件，配置与数据完整保留，失败自动回滚。可在下方「更新设置」配置自动检查与检测源。', 'Updates only swap program files; config and data are kept, with rollback on failure. Configure auto-check and source below.'))}</div>`}`;
+    toast(L('版本检查完成', 'Version check complete'), 'ok');
+    if (r) {
+      window.__updCache = { ...(window.__updCache || {}), config: r.config, status: st };
+      paint(window.__updCache);
+      await loadSelf();
+    }
+  }
+
+  /* ---------- 进度条：与「设备与固件 · 检查更新」弹窗一致的扫描卡样式 ---------- */
   function progressHtml(p) {
     if (!p || !p.stage) return '';
     const stage = String(p.stage);
     const busy = ['download', 'pull', 'prepare', 'restart', 'switch'].includes(stage);
     if (!busy && stage !== 'error') {
-      return `<div class="upd-self-result">${esc(stage)} · ${esc(p.message || '')} · ${esc(fmtTime(p.at))}</div>`;
+      return `<div class="notice green" style="margin-top:12px">${ic('check')}<div>${esc(stage)} · ${esc(p.message || '')} · ${esc(fmtTime(p.at))}</div></div>`;
     }
     const pct = Number(p.percent);
     const known = Number.isFinite(pct) && pct >= 0 && (stage === 'download' || stage === 'pull');
-    const width = known ? Math.max(2, Math.min(100, pct)) : 0;
-    const label = stage === 'download' || stage === 'pull'
-      ? L('下载更新', 'Downloading') : stage === 'prepare' || stage === 'switch'
-        ? L('切换版本', 'Switching') : L('等待服务恢复', 'Waiting for restart');
+    const width = known ? Math.max(2, Math.min(100, pct)) : 38;
+    const label = stage === 'error' ? L('更新失败', 'Update failed')
+      : stage === 'download' || stage === 'pull' ? L('下载更新', 'Downloading') : stage === 'prepare' || stage === 'switch' ? L('切换版本', 'Switching') : L('等待服务恢复', 'Waiting for restart');
     const detail = known && Number(p.total) > 0
       ? `${fmtSize(p.loaded)} / ${fmtSize(p.total)} · ${pct}%`
       : (Number(p.loaded) > 0 ? fmtSize(p.loaded) : '');
-    const kind = stage === 'error' ? 'bad' : '';
-    return `<div class="upd-progress ${kind}">
-      <div class="upd-progress-top"><span>${esc(label)}${p.layer ? ' · ' + esc(String(p.layer).slice(0, 14)) : ''}</span>
-        <b>${esc(detail || (stage === 'error' ? '' : p.message || ''))}</b></div>
-      <div class="upd-bar"><i style="width:${width}%" class="${known ? '' : 'indet'}"></i></div>
-      <div class="topo-hint">${esc(p.message || '')}${p.at ? ' · ' + esc(fmtTime(p.at)) : ''}</div>
+    return `<div class="ui-scan" style="margin-top:12px">
+      <div class="ui-scan-head"><b>${esc(label)}${p.layer ? ' · ' + esc(String(p.layer).slice(0, 14)) : ''}</b><span>${esc(detail || (stage === 'error' ? '' : p.message || ''))}</span></div>
+      <div class="ui-scan-bar"><i style="width:${width}%${known ? ';animation:none' : ''}"></i></div>
+      <div class="ui-scan-results"><div class="ui-scan-row"><span>${esc(p.message || '')}${p.at ? ' · ' + esc(fmtTime(p.at)) : ''}</span>${known ? `<b>${pct}%</b>` : ''}</div></div>
     </div>`;
   }
   function setSelfProgress(text, kind, p) {
@@ -97,34 +146,40 @@
       st = 'ok'; title = L('已是最新版本', 'You are up to date');
       desc = L('当前运行的就是最新版本。', 'This is the newest available release.');
     }
+    const badge = $('updStateBadge');
+    if (badge) {
+      badge.className = 'badge ' + ({ ok: 'allow', new: 'reject', bad: 'drop', idle: 'neutral' }[st] || 'neutral');
+      badge.textContent = { ok: L('最新', 'Latest'), new: L('有更新', 'Update'), bad: L('检查失败', 'Failed'), idle: L('未检查', 'Not checked') }[st] || st;
+    }
+    const setTxt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    setTxt('updMetaVer', rt.version || '—');
+    setTxt('updMetaKind', kindLabel(rt.runtime));
+    setTxt('updMetaSrc', srcLabel);
+    setTxt('updFootLeft', s.checkedAt ? L('上次检查', 'Last check') + ' ' + fmtTime(s.checkedAt) : L('尚未检查', 'Not checked yet'));
     box.innerHTML = `
-      <div class="upd-focus-top ${st}">
-        <div class="upd-focus-icon">${stateIcon(st)}</div>
-        <div class="upd-focus-copy">
-          <div class="upd-focus-title">${esc(title)}</div>
-          <div class="upd-focus-desc ${st === 'bad' ? 'is-err' : ''}">${esc(desc)}</div>
+      <div class="upd-hero ${st}">
+        <span class="upd-hero-ico ${st}">${stateIcon(st)}</span>
+        <div class="upd-hero-copy">
+          <b>${esc(title)}</b>
+          <small class="${st === 'bad' ? 'is-err' : ''}">${esc(desc)}</small>
         </div>
-        <div class="upd-focus-actions">
-          <button class="btn" id="updCheck" type="button">${esc(L('立即检查', 'Check now'))}</button>
-          <button class="btn primary upd-cta" id="updCta" type="button" hidden>${esc(L('立即更新', 'Update now'))}</button>
-        </div>
+        <button class="btn primary" id="updCta" type="button" hidden>${esc(L('立即更新', 'Update now'))}</button>
       </div>
-      ${st === 'bad' ? `<div class="upd-check-hint">${esc(L('网络受限时，可在「网络与高级选项」填写代理或镜像源后重试。', 'If network is blocked, set a proxy or mirror under "Network & advanced" and retry.'))}</div>` : ''}
-      <div class="upd-versions">
-        <div class="upd-version"><span>${esc(L('当前版本', 'Current version'))}</span><b>${esc(rt.version || '—')}</b></div>
-        <div class="upd-varrow">→</div>
-        <div class="upd-version"><span>${esc(L('最新版本', 'Latest version'))}</span><b class="${s.hasUpdate ? 'is-new' : ''}">${esc(latestV)}</b></div>
-      </div>
-      <div class="upd-meta">
-        <span>${esc(L('运行方式', 'Runtime'))} <b>${esc(kindLabel(rt.runtime))}</b></span>
-        <span>${esc(L('检测源', 'Source'))} <b>${esc(srcLabel)}</b></span>
-        <span>${esc(L('上次检查', 'Last check'))} <b>${esc(fmtTime(s.checkedAt))}</b></span>
-        ${s.proxyUsed ? `<span>${esc(L('经代理', 'via proxy'))}</span>` : ''}
-      </div>
-      ${s.downloaded ? `<div class="upd-downloaded">${esc(L('已下载', 'Downloaded'))}: <b>${esc(s.downloaded.name)}</b> · ${esc(fmtSize(s.downloaded.size))}</div>` : ''}`;
+      <div class="kv"><span>${esc(L('当前版本', 'Current version'))}</span><b class="mono">${esc(rt.version || '—')}</b></div>
+      <div class="kv"><span>${esc(L('最新版本', 'Latest version'))}</span><b class="mono${s.hasUpdate ? ' upd-new' : ''}">${esc(latestV)}</b></div>
+      ${s.hasUpdate && s.latest && s.latest.publishedAt ? `<div class="kv"><span>${esc(L('发布时间', 'Published'))}</span><b>${esc(fmtTime(s.latest.publishedAt))}</b></div>` : ''}
+      <div class="kv"><span>${esc(L('运行方式', 'Runtime'))}</span><b>${esc(kindLabel(rt.runtime))}</b></div>
+      <div class="kv"><span>${esc(L('检测源', 'Source'))}</span><b>${esc(srcLabel)}</b></div>
+      <div class="kv"><span>${esc(L('上次检查', 'Last check'))}</span><b>${esc(fmtTime(s.checkedAt))}</b></div>
+      ${s.proxyUsed ? `<div class="kv"><span>${esc(L('网络', 'Network'))}</span><b>${esc(L('经代理', 'via proxy'))}</b></div>` : ''}
+      ${s.downloaded ? `<div class="notice blue">${ic('download')}<div>${esc(L('已下载', 'Downloaded'))}: <b>${esc(s.downloaded.name)}</b> · ${esc(fmtSize(s.downloaded.size))}</div></div>` : ''}
+      ${st === 'bad' ? `<div class="notice">${ic('alert')}<div>${esc(L('网络受限时，可在「网络与高级选项」填写代理或镜像源后重试。', 'If network is blocked, set a proxy or mirror under "Network & advanced" and retry.'))}</div></div>` : ''}`;
 
     const cta = $('updCta');
-    if (cta) cta.onclick = applySelf;   // 可用性由 paintSelf 统一控制
+    if (cta) {
+      cta.onclick = applySelf;   // 可用性由 paintSelf 统一控制
+      if (state.authRole === 'read') cta.hidden = true;
+    }
     const chk = $('updCheck');
     if (chk && runCheck) chk.onclick = () => runCheck(chk);
     const cmd = $('updDockerCmd');
@@ -141,7 +196,7 @@
     /* 唯一的更新入口：源码运行隐藏；桌面/Docker 可用即显示，忙时禁用 */
     const cta = $('updCta');
     if (cta) {
-      cta.hidden = kind === 'source' || !d.available;
+      cta.hidden = state.authRole === 'read' || kind === 'source' || !d.available;
       cta.disabled = !d.available || !!d.busy;
       cta.textContent = kind === 'docker' ? L('拉取并重建', 'Pull & recreate') : L('立即更新', 'Update now');
       const why = !d.available
@@ -150,22 +205,30 @@
       cta.title = why;
     }
 
-    /* 自检说明压成一行：不可用时给原因，有结果时给上次结果 */
+    /* 自检说明：不可用时给原因，有结果时给上次结果 */
     const note = $('updSelfNote');
     if (note) {
       let html = '';
       if (!d.available) {
         const reason = (d.reason || '').split('\n')[0] || L('当前环境不支持一键更新', 'Auto-update unavailable here');
-        html = `<div class="upd-note bad">${stateIcon('bad')}<span>${esc(reason)}</span></div>`;
-        if (kind === 'docker' && dk.socketExists) {
-          html += `<div class="upd-note-diag">socket ${esc(dk.socket)} · gid=${dk.socketGid} · uid/gid ${dk.processUid}/${dk.processGid}${dk.accessible === false ? ' · ' + esc(L('无权访问', 'no access')) : ''}</div>`;
-        }
+        html = `<div class="notice">${ic('alert')}<div><b>${esc(L('一键更新不可用', 'Auto-update unavailable'))}</b>：${esc(reason)}${kind === 'docker' && dk.socketExists ? `<br><span class="mono" style="font-size:10px">socket ${esc(dk.socket)} · gid=${dk.socketGid} · uid/gid ${dk.processUid}/${dk.processGid}${dk.accessible === false ? ' · ' + esc(L('无权访问', 'no access')) : ''}</span>` : ''}</div></div>`;
       } else if (r) {
         html = r.ok && !r.rolledBack
-          ? `<div class="upd-note ok">${stateIcon('ok')}<span>${esc(L('上次更新成功', 'Last update succeeded'))} · ${esc(r.version || '')} · ${esc(fmtTime(r.finishedAt || r.verifiedAt || r.at))}</span></div>`
-          : `<div class="upd-note bad">${stateIcon('bad')}<span>${esc(L('上次更新失败', 'Last update failed'))} · ${esc(r.error || (r.rolledBack ? 'rolled back' : ''))}</span></div>`;
+          ? `<div class="notice green">${ic('check')}<div><b>${esc(L('上次更新成功', 'Last update succeeded'))}</b> · ${esc(r.version || '')} · ${esc(fmtTime(r.finishedAt || r.verifiedAt || r.at))}</div></div>`
+          : `<div class="notice">${ic('alert')}<div><b>${esc(L('上次更新失败', 'Last update failed'))}</b> · ${esc(r.error || (r.rolledBack ? 'rolled back' : ''))}</div></div>`;
       }
       note.innerHTML = html;
+    }
+
+    /* 运行环境 rail：与 DHCP/DNS 卡片一致的 kv 行 */
+    const env = $('updEnvBody');
+    if (env) {
+      env.innerHTML = `
+        <div class="kv"><span>${esc(L('运行方式', 'Runtime'))}</span><b>${esc(kindLabel(kind))}</b></div>
+        <div class="kv"><span>${esc(L('一键更新', 'Auto-update'))}</span><b>${d.available ? esc(L('可用', 'Available')) : esc(L('不可用', 'Unavailable'))}</b></div>
+        ${kind === 'docker' ? `<div class="kv"><span>Docker socket</span><b class="mono">${dk.socketExists ? esc(L('已映射', 'Mounted')) : esc(L('未映射', 'Missing'))}</b></div>` : ''}
+        <div class="kv"><span>${esc(L('数据目录', 'Data directory'))}</span><b class="mono">/data</b></div>
+        <div class="kv"><span>${esc(L('配置与数据', 'Config & data'))}</span><b>${esc(L('更新时保留', 'Kept on update'))}</b></div>`;
     }
 
     /* 旧的进度不要一直挂着：15 分钟以上，或已有更新的完成时间晚于进度时间，就忽略 */
@@ -293,53 +356,58 @@
   }
 
   window.renderUpdatesPage = function renderUpdatesPage() {
+    $('content').className = 'content dash pg-updates';
     $('content').innerHTML = `
-      <div class="page-head upd-page-head" id="updPage" data-kind="source">
-        <div><h1>${esc(L('检查更新', 'Updates'))}</h1></div>
-        <div class="upd-head-actions">
-          <span class="upd-kind-chip" id="updKindChip">${esc(kindLabel(window.__updCache && window.__updCache.runtime && window.__updCache.runtime.selfUpdate))}</span>
-        </div></div>
+      <div class="page-head" id="updPage" data-kind="source">
+        <div><h1>${esc(L('检查更新', 'Updates'))}</h1>
+          <div class="meta"><span>ROS Center <b class="mono" id="updMetaVer">—</b></span><span class="sep"></span><span id="updMetaKind">—</span><span class="sep"></span><span id="updMetaSrc">—</span></div></div>
+        <div class="actions">
+          ${canEditNow() ? `<button class="btn ghost" id="updCheck" type="button">${ic('refresh')}${esc(L('立即检查', 'Check now'))}</button>` : ''}
+        </div>
+      </div>
 
-      <div class="upd-layout">
-        <!-- 主卡：版本状态焦点 -->
-        <section class="panel upd-focus-card">
-          <div id="updStatus" class="upd-status"><div class="empty">${esc(L('加载中…', 'Loading…'))}</div></div>
-          <div id="updSelfNote"></div>
-          <div id="updSelfProgress"></div>
+      <div class="grid align-start">
+        <section class="card span8">
+          <div class="card-head"><div><h2 class="card-title">${esc(L('版本状态', 'Version status'))}</h2><div class="card-sub">${esc(L('当前版本 · 最新版本 · 自检结果', 'Current, latest and self-check'))}</div></div><span class="badge neutral" id="updStateBadge">${esc(L('加载中', 'Loading'))}</span></div>
+          <div class="rail-body" id="updStatus"><div class="pg-empty">${esc(L('加载中…', 'Loading…'))}</div></div>
+          <div class="pg-upd-note" id="updSelfNote"></div>
+          <div class="pg-upd-note" id="updSelfProgress"></div>
+          <div class="table-foot"><span id="updFootLeft">—</span><span class="mono">/api/update/status</span></div>
         </section>
 
-        <!-- 设置卡 -->
-        <section class="panel upd-settings-card">
-          <div class="upd-card-head"><h2>${esc(L('更新设置', 'Settings'))}</h2></div>
-          <div class="upd-settings-body">
-            <div class="upd-setting-row">
-              <div class="upd-setting-label"><span>${esc(L('自动检查', 'Auto-check'))}</span>
-                <small>${esc(L('服务端定时检查，无需保持浏览器打开', 'Server-side schedule; no browser needed'))}</small></div>
-              <div class="upd-setting-ctrl">
+        <div class="span4 rail">
+          <section class="card">
+            <div class="card-head"><div><h2 class="card-title">${esc(L('运行环境', 'Runtime'))}</h2><div class="card-sub">${esc(L('运行方式与自更新能力', 'Runtime and self-update capability'))}</div></div></div>
+            <div class="rail-body" id="updEnvBody"><div class="kv"><span>${esc(L('运行方式', 'Runtime'))}</span><b>—</b></div></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><div><h2 class="card-title">${esc(L('更新方式', 'How updates work'))}</h2><div class="card-sub">${esc(L('Docker · 桌面版 · 源码运行', 'Docker, desktop, source'))}</div></div></div>
+            <div class="rail-body">
+              <div class="notice blue">${ic('shield')}<div>${esc(L('更新只替换程序文件，配置与数据完整保留；失败自动回滚。', 'Updates only swap program files; config and data are kept, with rollback on failure.'))}</div></div>
+              <div class="kv"><span>${esc(L('需重启服务', 'Restart required'))}</span><b>${esc(L('是', 'Yes'))}</b></div>
+              <div class="kv"><span>${esc(L('页面自动重连', 'Auto reconnect'))}</span><b>${esc(L('是', 'Yes'))}</b></div>
+              <div class="kv"><span>${esc(L('手动命令', 'Manual command'))}</span><b class="mono">git pull && restart</b></div>
+            </div>
+          </section>
+        </div>
+
+        ${canEditNow() ? `<section class="card span8">
+          <div class="card-head"><div><h2 class="card-title">${esc(L('更新设置', 'Update settings'))}</h2><div class="card-sub">${esc(L('自动检查 · 检测源 · 网络与高级选项', 'Auto-check, source, network & advanced'))}</div></div><span class="badge info">SELF-UPDATE</span></div>
+          <div class="rail-body">
+            <div class="kv"><span>${esc(L('自动检查', 'Auto-check'))}<small>${esc(L('服务端定时检查，无需保持浏览器打开', 'Server-side schedule; no browser needed'))}</small></span>
+              <b style="display:flex;align-items:center;gap:8px">
                 <label class="upd-switch"><input type="checkbox" id="updEnabled"><i></i></label>
                 <select id="updInterval" class="upd-inline-sel" aria-label="${esc(L('检查周期', 'Interval'))}">
                   <option value="1">1 ${esc(L('小时', 'h'))}</option><option value="6">6 ${esc(L('小时', 'h'))}</option>
                   <option value="12">12 ${esc(L('小时', 'h'))}</option><option value="24">24 ${esc(L('小时', 'h'))}</option>
                   <option value="168">7 ${esc(L('天', 'd'))}</option><option value="720">30 ${esc(L('天', 'd'))}</option></select>
-              </div>
-            </div>
-            <div class="upd-setting-row upd-only-desktop">
-              <div class="upd-setting-label"><span>${esc(L('自动下载安装包', 'Auto-download'))}</span>
-                <small>${esc(L('发现新版本时提前下载', 'Download the installer when a new version appears'))}</small></div>
-              <div class="upd-setting-ctrl"><label class="upd-switch"><input type="checkbox" id="updAutoDownload"><i></i></label></div>
-            </div>
-            <div class="upd-setting-row" id="updAutoApplyRow">
-              <div class="upd-setting-label"><span id="updAutoApplyLabel">${esc(L('自动更新', 'Auto-update'))}</span>
-                <small>${esc(L('发现新版本时自动应用', 'Apply new versions automatically'))}</small></div>
-              <div class="upd-setting-ctrl"><label class="upd-switch"><input type="checkbox" id="updAutoApply"><i></i></label></div>
-            </div>
-            <div class="upd-setting-row">
-              <div class="upd-setting-label"><span>${esc(L('检测源', 'Source'))}</span>
-                <small>${esc(L('随运行方式固定', 'Fixed by runtime'))}</small></div>
-              <div class="upd-setting-ctrl">
-                <select id="updSource" class="upd-inline-sel" disabled><option value="github">GitHub Releases</option><option value="dockerhub">Docker Hub</option></select>
-              </div>
-            </div>
+              </b></div>
+            <div class="kv upd-only-desktop"><span>${esc(L('自动下载安装包', 'Auto-download'))}<small>${esc(L('发现新版本时提前下载', 'Download the installer when a new version appears'))}</small></span>
+              <b><label class="upd-switch"><input type="checkbox" id="updAutoDownload"><i></i></label></b></div>
+            <div class="kv" id="updAutoApplyRow"><span><b id="updAutoApplyLabel" style="font-size:11px;color:var(--v2-ink-2)">${esc(L('自动更新', 'Auto-update'))}</b><small>${esc(L('发现新版本时自动应用', 'Apply new versions automatically'))}</small></span>
+              <b><label class="upd-switch"><input type="checkbox" id="updAutoApply"><i></i></label></b></div>
+            <div class="kv"><span>${esc(L('检测源', 'Source'))}<small>${esc(L('随运行方式固定', 'Fixed by runtime'))}</small></span>
+              <b><select id="updSource" class="upd-inline-sel" disabled><option value="github">GitHub Releases</option><option value="dockerhub">Docker Hub</option></select></b></div>
             <details class="upd-advanced">
               <summary>${esc(L('网络与高级选项', 'Network & advanced'))}</summary>
               <div class="form-row" id="updChannelRow"><label>${esc(L('发布通道', 'Channel'))}</label><div><select id="updChannel">
@@ -355,20 +423,23 @@
                 <input type="text" id="updProxy" placeholder="http://[user:pass@]host:port" autocomplete="off">
                 <div class="form-hint">${esc(L('服务端检查请求经此 CONNECT 代理；密码读取时以 *** 显示。', 'Server checks via this CONNECT proxy; stored password is masked on read.'))}</div></div></div>
             </details>
-            <div class="upd-save-row"><button class="btn primary" id="updSave" type="button">${esc(L('保存设置', 'Save'))}</button>
+            <div class="pg-btn-row"><button class="btn primary" id="updSave" type="button">${esc(L('保存设置', 'Save'))}</button>
               <button class="btn" id="updCheck2" type="button">${esc(L('保存并检查', 'Save & check'))}</button></div>
           </div>
-        </section>
+        </section>` : ''}
 
-        <details class="upd-help"><summary>${esc(L('工作原理与安全', 'How it works & safety'))}</summary>
-          <div class="upd-help-body">
-            <div class="upd-docker-only"><b>Docker</b> · ${esc(L('映射 /var/run/docker.sock 后，程序经 Docker Engine API 拉取新镜像，由一次性助手容器完成「停旧 → 删旧 → 以原名称/端口/卷/环境变量重建 → 启动」；仅 restart 不会换镜像。/app/data 未挂载时会拒绝执行。映射 socket 等同宿主机 root 级权限。手动更新命令：', 'With docker.sock mounted, the app pulls the new image and a helper container stops/removes/recreates/starts it with the same config. A plain restart keeps the old image. Refused when /app/data is not mounted. Socket access is host-root-equivalent. Manual update command:'))}
-              <pre class="upd-cmd" id="updDockerCmd"></pre></div>
-            <div class="upd-desktop-only"><b>${esc(L('桌面版', 'Desktop'))}</b> · ${esc(L('launcher 监管进程在网页点一次后下载轻量 app 更新包（仅源码）→ 校验 SHA256 与逐文件清单 → 程序退出 → 替换 app/ 并自动重启；失败自动回滚。data/ 全程不动。再次点击 App 只会在当前真实端口打开 WebUI，不会启动第二个服务。', 'The launcher downloads a small source-only bundle, verifies SHA256 and per-file manifest, then swaps app/ and restarts with rollback. data/ is untouched. Clicking the app again opens the WebUI on the current port instead of starting a second service.'))}</div>
-          </div></details>
+        <section class="card span4">
+          <div class="card-head"><div><h2 class="card-title">${esc(L('工作原理与安全', 'How it works & safety'))}</h2><div class="card-sub">${esc(L('Docker 手动更新命令', 'Manual Docker command'))}</div></div></div>
+          <div class="rail-body">
+            <div class="notice">${ic('device')}<div><b>Docker</b>：${esc(L('映射 /var/run/docker.sock 后可一键拉取并重建；/app/data 未挂载时会拒绝执行。映射 socket 等同宿主机 root 级权限。', 'With docker.sock mounted the app pulls and recreates the container; refused when /app/data is not mounted. Socket access is host-root-equivalent.'))}</div></div>
+            <pre class="upd-cmd" id="updDockerCmd"></pre>
+            <div class="notice">${ic('code')}<div><b>${esc(L('源码运行', 'Source'))}</b>：${esc(L('无需自更新，git pull 后重启进程即可；data/ 目录不受影响。', 'No self-update; git pull and restart the process. data/ is untouched.'))}</div></div>
+          </div>
+        </section>
       </div>`;
 
-    $('updSource').onchange = toggleSource;
+    const srcSel = $('updSource');
+    if (srcSel) srcSel.onchange = toggleSource;
     const collect = () => ({
       enabled: $('updEnabled').checked,
       autoDownload: $('updAutoDownload').checked,
@@ -386,23 +457,17 @@
       fill(r.config);
       return r;
     };
-    const check = async (btn, force = false) => {
+    const check = async (btn) => {
       if (btn) btn.disabled = true;
-      const box = $('updStatus');
-      if (box) box.innerHTML = `<div class="empty">${esc(L('正在检查…', 'Checking…'))}</div>`;
-      try {
-        const r = await api('/api/update/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: !!force }) });
-        paint({ ...(window.__updCache || {}), config: r.config, status: r.status });
-        await loadSelf();
-        toast(r.status && r.status.ok
-          ? (r.status.hasUpdate ? L('发现新版本 ', 'Update available ') + r.status.latest.version : L('已是最新版本', 'Already up to date'))
-          : (r.status && r.status.error) || L('检查完成', 'Check finished'), r.status && r.status.ok ? 'ok' : 'err');
-      } catch (e) { toast(e.message, 'err'); await reload(); }
+      try { await checkUpdatesModal(); }
+      catch (e) { toast((e && e.message) || L('检查失败', 'Check failed'), 'err'); await reload(); }
       if (btn) btn.disabled = false;
     };
     runCheck = check;
-    $('updSave').onclick = async () => { try { await save(); toast(L('设置已保存', 'Settings saved'), 'ok'); } catch (e) { toast(e.message, 'err'); } };
-    $('updCheck2').onclick = async () => { try { await save(); await check($('updCheck2'), true); } catch (e) { toast(e.message, 'err'); } };
+    const saveBtn = $('updSave');
+    if (saveBtn) saveBtn.onclick = async () => { try { await save(); toast(L('设置已保存', 'Settings saved'), 'ok'); } catch (e) { toast(e.message, 'err'); } };
+    const check2Btn = $('updCheck2');
+    if (check2Btn) check2Btn.onclick = async () => { try { await save(); await check(check2Btn, true); } catch (e) { toast(e.message, 'err'); } };
     reload(true).then(loadSelf);
     checkResume();
   };

@@ -1,0 +1,143 @@
+/* ============================================================
+   Wireless / VPN / Bandwidth v3 · 局部补充样式
+   所有规则严格限定在 .ui-v2 .content.pg-wvn 作用域内
+   通用组件（card / kpi / dt / toolbar / rail / kv 等）复用 design.css
+   ============================================================ */
+
+.ui-v2 .content.pg-wvn .page-head { margin-top: 0; padding-top: 0; }
+.ui-v2 .content.pg-wvn .page-head .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ui-v2 .content.pg-wvn .page-head .actions .btn { flex: none; }
+
+/* 分类较多（无线 8 类）：tabs 横向滚动，不挤压主卡片 */
+.ui-v2 .content.pg-wvn .panel-tabs {
+  display: flex; flex-wrap: nowrap; max-width: 100%;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch; scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.ui-v2 .content.pg-wvn .panel-tabs::-webkit-scrollbar { display: none; }
+.ui-v2 .content.pg-wvn .panel-tab { flex: 0 0 auto; white-space: nowrap; }
+.ui-v2 .content.pg-wvn .panel-tab .pt-count { flex: none; }
+
+/* 桌面端强制表格语义，避免旧移动端表格卡片样式把 td 变成块级导致列错位 */
+@media (min-width: 721px) {
+  .ui-v2 .content.pg-wvn .dt th,
+  .ui-v2 .content.pg-wvn .dt td { display: table-cell; }
+}
+
+.ui-v2 .content.pg-wvn .toolbar { flex-wrap: wrap; }
+.ui-v2 .content.pg-wvn .toolbar .btn { flex: none; }
+.ui-v2 .content.pg-wvn .table-scroll { overflow-x: auto; }
+
+/* 表格：长文本省略，避免撑破 span8（td 保持 table-cell，否则垂直居中会失效） */
+.ui-v2 .content.pg-wvn .dt td.td-note { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-muted); }
+.ui-v2 .content.pg-wvn .dt td.td-badge .badge { max-width: 100%; overflow: hidden; }
+.ui-v2 .content.pg-wvn .dt .chain,
+.ui-v2 .content.pg-wvn .dt .badge { white-space: nowrap; }
+.ui-v2 .content.pg-wvn .dt td.r.num { text-align: right; }
+.ui-v2 .content.pg-wvn .dt .sig-cell { min-width: 118px; }
+.ui-v2 .content.pg-wvn .dt .if-name > span { min-width: 0; }
+.ui-v2 .content.pg-wvn .dt .if-name b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-v2 .content.pg-wvn .if-badge .i { width: 14px; height: 14px; }
+
+/* SSID 卡片：右上角状态 + 操作菜单 */
+.ui-v2 .content.pg-wvn .ssid-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.ui-v2 .content.pg-wvn .ssid-tools .row-more { width: 22px; height: 22px; margin-left: 0; }
+.ui-v2 .content.pg-wvn .ssid-tools .row-more .i { width: 13px; height: 13px; }
+.ui-v2 .content.pg-wvn .rail .health-row > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 信号格：与无线设计稿一致的四格信号条 */
+.ui-v2 .content.pg-wvn .sig-cell { display: inline-flex; align-items: center; gap: 8px; }
+.ui-v2 .content.pg-wvn .sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.ui-v2 .content.pg-wvn .sig i { width: 3px; border-radius: 1px; background: var(--v2-line); }
+.ui-v2 .content.pg-wvn .sig i:nth-child(1) { height: 4px; }
+.ui-v2 .content.pg-wvn .sig i:nth-child(2) { height: 6px; }
+.ui-v2 .content.pg-wvn .sig i:nth-child(3) { height: 9px; }
+.ui-v2 .content.pg-wvn .sig i:nth-child(4) { height: 12px; }
+.ui-v2 .content.pg-wvn .sig i.on { background: var(--v2-green); }
+.ui-v2 .content.pg-wvn .sig.warn i.on { background: var(--v2-amber); }
+.ui-v2 .content.pg-wvn .sig.low i.on { background: var(--v2-red); }
+
+/* 读取失败时的真实错误提示 */
+.ui-v2 .content.pg-wvn .wv-notice { display: flex; align-items: center; gap: 10px; margin: 12px 14px 14px; padding: 10px 12px; border: 1px solid var(--v2-red); border-radius: 8px; background: var(--v2-red-soft); color: var(--v2-red); font-size: 11px; line-height: 1.5; }
+.ui-v2 .content.pg-wvn .wv-notice .btn { margin-left: auto; white-space: nowrap; }
+
+/* rail 内条形统计 */
+.ui-v2 .content.pg-wvn .wv-bar { display: block; flex: 1; min-width: 40px; height: 5px; border-radius: 4px; background: var(--v2-surface-3); overflow: hidden; }
+.ui-v2 .content.pg-wvn .wv-bar > i { display: block; height: 100%; border-radius: 4px; background: var(--v2-accent); }
+.ui-v2 .content.pg-wvn .rail .pg-empty { padding: 14px 4px; color: var(--v2-faint); font-size: 10.5px; }
+.ui-v2 .content.pg-wvn .rail .pg-empty .i { width: 18px; height: 18px; margin-bottom: 6px; }
+.ui-v2 .content.pg-wvn .rail .rank-row { min-width: 0; }
+.ui-v2 .content.pg-wvn .rail .rank-row .lbl { max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* VPN：span8 双卡片纵排 + 隧道摘要条 */
+.ui-v2 .content.pg-wvn .wv-main-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ui-v2 .content.pg-wvn .wv-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 0; margin: 0 16px 4px; padding: 10px 0; border-bottom: 1px solid var(--v2-line-soft); }
+.ui-v2 .content.pg-wvn .wv-strip .tunnel-k { padding: 0 18px; border-right: 1px solid var(--v2-line-soft); }
+.ui-v2 .content.pg-wvn .wv-strip .tunnel-k:first-child { padding-left: 0; }
+.ui-v2 .content.pg-wvn .wv-strip .tunnel-k small { display: block; font-size: 9.5px; color: var(--v2-faint); }
+.ui-v2 .content.pg-wvn .wv-strip .tunnel-k b { display: block; margin-top: 3px; font: 600 12px/1.3 var(--v2-mono); color: var(--v2-ink-2); }
+.ui-v2 .content.pg-wvn .wv-strip .badge { margin-left: auto; }
+
+/* 带宽：摘要条 */
+.ui-v2 .content.pg-wvn .wv-bw-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; align-items: center; margin: 12px 16px 4px; padding: 10px 12px; border: 1px solid var(--v2-line); border-radius: 9px; background: var(--v2-surface-3); }
+.ui-v2 .content.pg-wvn .wv-bw-summary .wv-bar { grid-column: 1 / -1; }
+
+/* 单例配置面板（AC 控制器 / AP 设置） */
+.ui-v2 .content.pg-wvn .wv-singleton { padding: 14px 18px 4px; }
+.ui-v2 .content.pg-wvn .wv-singleton-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.ui-v2 .content.pg-wvn .wv-singleton-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.ui-v2 .content.pg-wvn .wv-singleton-grid .kv b { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 底部补充卡片：四列栅格，卡片自身不溢出 */
+.ui-v2 .content.pg-wvn .wv-extra { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; }
+.ui-v2 .content.pg-wvn .wv-extra > .card { min-width: 0; }
+.ui-v2 .content.pg-wvn .wv-extra .rail-body { min-width: 0; }
+.ui-v2 .content.pg-wvn .wv-extra .kv b { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 扫描信道结果（弹窗内列出路由器实时上报的 SSID） */
+.ui-v2 .content.pg-wvn .scan-list { max-height: 320px; overflow-y: auto; }
+.ui-v2 .content.pg-wvn .scan-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--v2-line-soft); }
+.ui-v2 .content.pg-wvn .scan-row:last-child { border-bottom: 0; }
+.ui-v2 .content.pg-wvn .scan-ssid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ui-v2 .content.pg-wvn .scan-ssid b { font-size: 12px; color: var(--v2-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-v2 .content.pg-wvn .scan-ssid small { font-size: 9.5px; color: var(--v2-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-v2 .content.pg-wvn .scan-row .num { font-size: 11px; color: var(--v2-ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .ui-v2 .content.pg-wvn .wv-extra { grid-template-columns: 1fr; }
+  .ui-v2 .content.pg-wvn .wv-singleton-grid { grid-template-columns: 1fr; }
+  .ui-v2 .content.pg-wvn .wv-bw-summary { grid-template-columns: 1fr; }
+  .ui-v2 .content.pg-wvn .panel-tabs { -webkit-overflow-scrolling: touch; }
+  .ui-v2 .content.pg-wvn .toolbar .toolbar-note { display: none; }
+  .ui-v2 .content.pg-wvn .page-head .actions .btn { padding: 0 10px; }
+  .ui-v2 .content.pg-wvn .wv-strip .tunnel-k { padding: 0 10px; }
+  .ui-v2 .content.pg-wvn .wv-extra .kv b { max-width: 55%; }
+  .ui-v2 .content.pg-wvn .rail .rank-row .lbl { max-width: 50%; }
+
+  /* 窄屏保留表格形态 + 横向滚动，不套用通用移动卡片布局 */
+  .ui-v2 .content.pg-wvn .table-scroll table.dt { display: table; width: 100%; min-width: 700px; }
+  .ui-v2 .content.pg-wvn .table-scroll thead { display: table-header-group; }
+  .ui-v2 .content.pg-wvn .table-scroll tbody { display: table-row-group; }
+  .ui-v2 .content.pg-wvn .table-scroll tr { display: table-row; position: static; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .ui-v2 .content.pg-wvn .table-scroll td { display: table-cell; width: auto; padding: 0 8px; height: 41px; border: 0; border-bottom: 1px solid var(--v2-line-soft); white-space: nowrap; }
+  .ui-v2 .content.pg-wvn .table-scroll th { display: table-cell; }
+  .ui-v2 .content.pg-wvn .table-scroll td::before { display: none; }
+}
+
+/* WG 对端查看弹窗：客户端配置二维码 */
+.ui-v2 .wg-qr-card { margin-top: 12px; border: 1px solid var(--v2-line); border-radius: 10px; overflow: hidden; background: var(--v2-surface); }
+.ui-v2 .wg-qr-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--v2-line-soft); background: var(--v2-surface-2); }
+.ui-v2 .wg-qr-head b { font-size: 11.5px; color: var(--v2-ink); }
+.ui-v2 .wg-qr-head .mono { font-size: 10px; color: var(--v2-muted); }
+.ui-v2 .wg-qr-body { display: flex; gap: 14px; padding: 12px; align-items: flex-start; }
+.ui-v2 .wg-qr-body canvas { width: 180px; height: 180px; display: block; background: #fff; border-radius: 6px; flex: none; }
+.ui-v2 .wg-qr-side { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ui-v2 .wg-qr-side p { margin: 0; font-size: 10.5px; line-height: 1.6; color: var(--v2-muted); }
+.ui-v2 .wg-qr-side p.warn { color: var(--v2-amber); }
+.ui-v2 .wg-qr-side code { display: block; padding: 6px 8px; border: 1px solid var(--v2-line); border-radius: 6px; background: var(--v2-surface-3); font-size: 10px; word-break: break-all; color: var(--v2-ink-2); }
+.ui-v2 .wg-qr-btns { display: flex; gap: 6px; }
+@media (max-width: 720px) {
+  .ui-v2 .wg-qr-body { flex-direction: column; align-items: center; }
+  .ui-v2 .wg-qr-side { width: 100%; }
+}

@@ -96,18 +96,13 @@ jobs:
           path: dist/tauri-out/*
 
   portable:
-    name: Portable ZIP (macOS / Windows)
+    name: In-app update bundle (source only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - uses: actions/cache@v4
-        with:
-          path: dist/base
-          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
-      - run: node build/desktop.js --mac-x64
       - name: Build in-app update bundle (source only)
         run: node build/app-bundle.js
         env:
@@ -120,63 +115,9 @@ jobs:
             dist/*.zip
             dist/*.zip.sha256
 
-  macos:
-    name: macOS .pkg + .dmg (arm64 + x64)
-    # Intel macOS runner is available on all plans; pkgbuild/hdiutil just archive
-    # files, so both arm64 and x64 payloads can be produced on the same host.
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: actions/cache@v4
-        with:
-          path: dist/base
-          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
-      - run: node build/macos-installer.js --arch=all
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-installers
-          if-no-files-found: error
-          path: |
-            dist/*.pkg
-            dist/*.pkg.sha256
-            dist/*.dmg
-            dist/*.dmg.sha256
-
-  windows:
-    name: Windows .exe installer
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Ensure NSIS is available
-        shell: pwsh
-        run: |
-          $paths = @("C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe")
-          if (-not ($paths | Where-Object { Test-Path $_ })) {
-            choco install nsis -y --no-progress
-          }
-          & "C:\Program Files (x86)\NSIS\makensis.exe" /VERSION
-      - uses: actions/cache@v4
-        with:
-          path: dist/base
-          key: node-runtime-22.22.2-${{ runner.os }}-${{ runner.arch }}
-      - run: node build/windows-installer.js
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          if-no-files-found: error
-          path: |
-            dist/*.exe
-            dist/*.exe.sha256
-
   release:
     name: Publish GitHub Release
-    needs: [portable, macos, windows, tauri-macos, tauri-windows]
+    needs: [portable, tauri-macos, tauri-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -189,52 +130,34 @@ jobs:
           set -euo pipefail
           cat dist/*.sha256 > dist/SHA256SUMS.txt
           cat > /tmp/release-notes.md <<'EOF'
-          ## ROS Center 桌面版
+          ## ROS Center 桌面版（原生 App，无浏览器 / 无 CMD 黑框）
 
-          ### ✅ 推荐：Tauri 原生桌面应用（原生窗口 + 系统托盘，无浏览器、无 CMD 黑框）
-          下载文件名以 **`tauri-` 开头**的安装包，双击即是独立 App 窗口，不是浏览器标签页；
-          Windows 不弹黑色 CMD 框，macOS / Windows 都有系统托盘，关闭窗口默认最小化到托盘继续运行。
-          托盘左键打开窗口、右键菜单退出；可在「系统管理 → 设备管理 → 桌面版设置」改为直接退出。
+          本页只提供 **Tauri 原生桌面应用**：双击即是独立 App 窗口（内嵌 WebView），
+          **不会打开系统浏览器，Windows 也不会弹出黑色 CMD 窗口**；macOS / Windows 均有系统托盘，
+          关闭窗口默认最小化到托盘继续运行，托盘右键可退出。内置 Node.js 运行时，无需另装环境。
 
-          | 平台 | 请下载（`tauri-` 前缀） |
+          ### 请按平台下载
+
+          | 平台 | 安装包 |
           | --- | --- |
-          | macOS Apple Silicon | `tauri-macos-arm64-*.dmg` |
+          | macOS Apple Silicon（M 系列） | `tauri-macos-arm64-*.dmg` |
           | macOS Intel | `tauri-macos-x64-*.dmg` |
           | Windows x64 | `tauri-windows-x64-*.msi`（推荐）或 `tauri-windows-x64-*.exe` |
 
-          Windows 若缺少 WebView2 Runtime，安装器会自动引导安装。内置 Node.js 运行时，无需另装环境。
+          Windows 若缺少 WebView2 Runtime，安装器会自动引导安装（安装器已内嵌 bootstrapper，离线亦可）。
 
-          ### ⚠️ 兼容版（启动器 + 系统浏览器，无原生窗口/托盘）
-          文件名以 **`ROS-Center-` 或 `ros-center-` 开头**（没有 `tauri-` 前缀）。
-          启动后会自动打开系统浏览器访问 `http://localhost:10086`，Windows 会有启动器控制台窗口；
-          **如果你要的是独立 App 界面和系统托盘，不要下载这些**。仅在没有 WebView2 等环境受限时使用。
-
-          | 平台 | 兼容版安装包 | 绿色版 |
-          | --- | --- | --- |
-          | macOS Apple Silicon | `ROS-Center-*-macos-arm64.pkg` / `.dmg` | `ros-center-macos-arm64.zip` |
-          | macOS Intel | `ROS-Center-*-macos-x64.pkg` / `.dmg` | `ros-center-macos-x64.zip` |
-          | Windows x64 | `ROS-Center-*-windows-x64-setup.exe` | `ros-center-windows-x64.zip` |
-
-          请选择与芯片一致的 macOS 版本：Apple Silicon 用 `arm64`，Intel Mac 用 `x64`。
-
-          **macOS**：双击 `.pkg` 按向导安装到 `/Applications`，或双击 `.dmg` 把 App 拖进 Applications。
-          程序未签名，首次打开请右键 → 打开，或执行
+          **macOS**：双击 `.dmg` 把 App 拖进 Applications。程序未签名，首次打开请右键 → 打开，或执行
           `xattr -dr com.apple.quarantine "/Applications/ROS Center.app"`。
-          数据与配置在 `~/Library/Application Support/ROS Center/`。
+          数据与配置在 `~/Library/Application Support/ROS Center/`，卸载 App 不会删除。
 
-          **Windows**：运行 `*-setup.exe`，可创建开始菜单/桌面快捷方式，并可通过「设置 → 应用」或安装目录里的
-          `Uninstall.exe` 卸载。数据与配置在 `%LOCALAPPDATA%\ROS Center\`。
-          未签名程序如出现 SmartScreen，点「更多信息 → 仍要运行」。
+          **Windows**：运行 `.msi` 或 `.exe`，可创建开始菜单/桌面快捷方式并卸载。数据与配置在
+          `%LOCALAPPDATA%\ROS Center\`。未签名程序如出现 SmartScreen，点「更多信息 → 仍要运行」。
 
-          **绿色版**：解压后双击 `Start.command` / `Start.bat`，删除文件夹即卸载。
-
-          **应用内更新**：`ros-center-app-*.zip` 是仅含程序源码的轻量更新包（约 200KB），由
-          「系统管理 → 检查更新 → 应用内自动更新」自动下载，无需手动处理。
-          - 桌面版：装好本版（含 `launcher.js`）后，后续更新点一次按钮即可自动替换程序文件并重启，
-            不再需要重新下载 pkg/dmg/exe；数据目录不动，启动失败会自动回滚。
-          - Docker 版：在 compose 里额外映射 `/var/run/docker.sock` 后，可一键拉取新镜像并按原配置
-            重建容器（映射 docker.sock 会赋予容器宿主机 Docker 控制权，请自行评估）。
-          - 已安装 v1.0.0 的用户需手动安装一次本版，之后即可永久应用内更新。
+          ### 应用内更新
+          `ros-center-app-*.zip` 是仅含程序源码的轻量更新包（约 200KB），由
+          「系统管理 → 检查更新 → 应用内自动更新」自动下载，无需手动处理；数据目录不动，失败自动回滚。
+          Docker 版在 compose 里额外映射 `/var/run/docker.sock` 后可一键拉取新镜像重建容器
+          （映射 docker.sock 会赋予容器宿主机 Docker 控制权，请自行评估）。
 
           首次使用请在「系统管理 → 设备管理」添加 RouterOS 设备（API 端口 8728，建议只读账号）。
           `SHA256SUMS.txt` 为所有产物的校验和，`*.sha256` 为单文件校验和。

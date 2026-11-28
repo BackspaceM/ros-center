@@ -54,7 +54,7 @@ const I18N = {
     bak_import_ros_confirm: '导入将逐条执行备份中的 RouterOS 配置命令，可能覆盖现有配置。导入前会自动在路由器上生成回滚备份。确定继续吗？',
     bak_export_ok: '备份文件已下载', bak_import_ok: '导入完成', bak_import_result: '已执行 {n} 条命令，失败 {f} 条，回滚备份：{r}',
     ping_title: '网络诊断', ping_addr: '目标地址', ping_run: '开始测试', ping_result: '测试结果',
-    tools_title: '快捷工具', tools_sub: '常用运维操作', system_title: '系统信息',
+    tools_title: '运维工具', tools_sub: '常用运维操作', system_title: '系统信息',
     resources: '系统资源', system: '系统', note: '说明', warning: '注意',
     write_warn: '所有修改将实时写入 RouterOS。建议先在演示模式熟悉操作，生产环境修改前请先备份配置。',
     demo_mode_tip: '当前为演示模式，修改仅作用于本地内存，不会影响真实路由器。',
@@ -70,7 +70,7 @@ const I18N = {
     device_status: '状态', device_test: '测试连接', device_saved: '设备已保存', device_switch: '已切换到',
     device_current: '当前为主设备', device_count: '设备数量', device_hint: '点顶栏设备下拉即可切换；主设备决定默认显示哪台。',
     device_reconnect: '重新连接', device_no_password: '留空表示不修改', device_required: '请填写名称、地址、端口和账号',
-    theme_unifi: 'UniFi 风格', theme_default: '经典蓝', theme_glass: '毛玻璃', theme_porcelain: '青花瓷', theme_liquid: '液态玻璃',
+    theme_default: '经典蓝', theme_glass: '毛玻璃', theme_porcelain: '青花瓷', theme_liquid: '液态玻璃',
     theme_aurora: '极光', theme_ocean: '深海', theme_sakura: '樱粉', theme_mono: '黑白极简',
     theme_forest: '森林绿', theme_amber: '琥珀金', theme_violet: '紫罗兰', theme_coffee: '咖啡棕', theme_mint: '薄荷绿',
     mode_light: '浅色', mode_dark: '深色', mode_system: '跟随系统',
@@ -176,7 +176,7 @@ const I18N = {
     bak_import_ros_confirm: 'Restore will run every RouterOS config command from the backup and may overwrite existing settings. A rollback backup is saved on the router first. Continue?',
     bak_export_ok: 'Backup file downloaded', bak_import_ok: 'Restore complete', bak_import_result: 'Executed {n} commands, {f} failed, rollback backup: {r}',
     ping_title: 'Network diagnostic', ping_addr: 'Target address', ping_run: 'Run test', ping_result: 'Result',
-    tools_title: 'Quick tools', tools_sub: 'Common maintenance actions', system_title: 'System information',
+    tools_title: 'Tools', tools_sub: 'Common maintenance actions', system_title: 'System information',
     resources: 'System resources', system: 'System', note: 'Note', warning: 'Warning',
     write_warn: 'Changes are written to RouterOS immediately. Familiarize yourself in demo mode first and back up before production changes.',
     demo_mode_tip: 'Demo mode: changes only affect local memory and will not touch a real router.',
@@ -192,7 +192,7 @@ const I18N = {
     device_status: 'Status', device_test: 'Test connection', device_saved: 'Device saved', device_switch: 'Switched to',
     device_current: 'Primary device', device_count: 'Devices', device_hint: 'Use the device dropdown in the top bar to switch; the primary device is shown by default.',
     device_reconnect: 'Reconnect', device_no_password: 'Leave blank to keep', device_required: 'Name, host, port and user are required',
-    theme_unifi: 'UniFi', theme_default: 'Classic blue', theme_glass: 'Glass', theme_porcelain: 'Porcelain', theme_liquid: 'Liquid glass',
+    theme_default: 'Classic blue', theme_glass: 'Glass', theme_porcelain: 'Porcelain', theme_liquid: 'Liquid glass',
     theme_aurora: 'Aurora', theme_ocean: 'Deep sea', theme_sakura: 'Sakura', theme_mono: 'Mono',
     theme_forest: 'Forest', theme_amber: 'Amber', theme_violet: 'Violet', theme_coffee: 'Coffee', theme_mint: 'Mint',
     mode_light: 'Light', mode_dark: 'Dark', mode_system: 'System',
@@ -254,8 +254,8 @@ const tx = (obj) => (obj && (obj[lang] || obj.zh)) || '';
 const L = (zh, en) => (lang === 'zh' ? zh : en);
 
 /* ================= 状态 ================= */
+/* 自动刷新开关 UI 已移除：始终默认启用，不再读取/写入历史偏好 */
 let autoRefreshPref = true;
-try { autoRefreshPref = localStorage.getItem('ros-auto-refresh') !== '0'; } catch (e) { /* ignore */ }
 const state = {
   schema: null, section: 'dashboard', latest: null, points: [], ifHistory: new Map(),
   resourceHistory: [], connHistory: [], rows: [], rowFilter: '', page: 1, pageSize: 15, selectedIds: new Set(),
@@ -266,7 +266,7 @@ const state = {
   quality: null, qualityAt: 0, qualityLoading: false,
   autoRefresh: autoRefreshPref, autoTimer: null,
   collapsedGroups: new Set(), flyoutGroup: '', devices: [], deviceId: '', devicePrimary: '', webPort: 10086, hostPort: 0,
-  authEnabled: false, authUser: '', sort: { key: '#', dir: 'asc' },
+  authEnabled: false, authUser: '', authRole: 'admin', authDefaultPassword: false, canWrite: true, sort: { key: '#', dir: 'asc' },
 };
 try { JSON.parse(localStorage.getItem('ros-traffic-groups') || '[]').forEach((id) => state.collapsedGroups.add(id)); } catch (e) { /* ignore */ }
 const $ = (id) => document.getElementById(id);
@@ -274,22 +274,25 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 
 /* ================= 主题：配色风格 × 深浅模式 两套独立维度 =================
    theme = 配色风格；mode = light / dark / system，可任意组合，例如「深色 + 樱粉」。 */
-const THEMES = ['unifi', 'default', 'ocean', 'aurora', 'sakura', 'forest', 'amber', 'violet', 'coffee', 'mint', 'mono', 'glass', 'porcelain', 'liquid'];
+const THEMES = ['default', 'ocean', 'aurora', 'sakura', 'forest', 'amber', 'violet', 'coffee', 'mint', 'mono', 'glass', 'porcelain', 'liquid'];
 const MODES = ['light', 'dark', 'system'];
 const MODE_ICON = { light: '☀', dark: '☾', system: '◐' };
 const qs = new URLSearchParams(location.search);
 const urlTheme = qs.get('theme'), urlMode = qs.get('mode');
 const legacyTheme = localStorage.getItem('ros-traffic-theme'); // 旧版本单一主题键
-/* v2 起默认主题改为 UniFi：老用户首次升级时忽略旧偏好，之后仍尊重其手动选择 */
-let themeMigrated = false;
-try { themeMigrated = localStorage.getItem('ros-theme-v2') === '1'; } catch (e) { /* ignore */ }
+/* 默认经典蓝；旧的 unifi 主题已移除，历史偏好自动回落到经典蓝 */
 let theme;
 if (THEMES.includes(urlTheme)) theme = urlTheme;
-else if (!themeMigrated) theme = 'unifi';
-else theme = localStorage.getItem('ros-theme') || (legacyTheme && THEMES.includes(legacyTheme) ? legacyTheme : 'unifi');
+else {
+  const savedTheme = localStorage.getItem('ros-theme');
+  if (savedTheme === 'unifi') theme = 'default';
+  else if (THEMES.includes(savedTheme)) theme = savedTheme;
+  else if (legacyTheme && THEMES.includes(legacyTheme)) theme = legacyTheme;
+  else theme = 'default';
+}
 let mode = MODES.includes(urlMode) ? urlMode : (MODES.includes(localStorage.getItem('ros-mode')) ? localStorage.getItem('ros-mode')
   : (legacyTheme === 'dark' || legacyTheme === 'light' ? legacyTheme : 'system'));
-if (!THEMES.includes(theme)) theme = 'unifi';
+if (!THEMES.includes(theme)) theme = 'default';
 const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
 function effectiveMode() { return mode === 'system' ? (systemDark && systemDark.matches ? 'dark' : 'light') : mode; }
 function cssVar(name, fallback) {
@@ -347,9 +350,12 @@ function applyTheme(persist) {
   }
   const mb = $('modeBtn');
   if (mb) {
-    mb.textContent = MODE_ICON[mode];
-    mb.title = MODE_ICON[mode] + ' ' + (t('mode_' + mode) || mode);
     mb.dataset.mode = mode;
+    if (typeof window.__paintModeBtn === 'function') window.__paintModeBtn();
+    else {
+      mb.textContent = MODE_ICON[mode];
+      mb.title = MODE_ICON[mode] + ' ' + (t('mode_' + mode) || mode);
+    }
   }
   if (persist === false) return;
   try { localStorage.setItem('ros-theme', theme); localStorage.setItem('ros-mode', mode); localStorage.setItem('ros-theme-v2', '1'); } catch (e) { /* ignore */ }
@@ -357,7 +363,8 @@ function applyTheme(persist) {
 if (systemDark && systemDark.addEventListener) systemDark.addEventListener('change', () => { if (mode === 'system') { applyTheme(false); if (state.section === 'dashboard') renderDashboard(); } });
 
 /* 动画效果总开关（记忆偏好，关闭后所有 CSS 动画/过渡立即停用） */
-let motionOn = (() => { try { return localStorage.getItem('ros-motion') !== 'off'; } catch (e) { return true; } })();
+/* 动画总开关 UI 已移除：始终默认开启（拓扑图内仍可单独控制） */
+let motionOn = true;
 function applyMotion() {
   const root = document.documentElement;
   root.dataset.motion = motionOn ? 'on' : 'off';
@@ -423,8 +430,15 @@ async function api(path, opts) {
   const r = await fetch(path, opts);
   let d; try { d = await r.json(); } catch (e) { throw new Error('HTTP ' + r.status); }
   if (r.status === 401 && d.loginRequired) {
-    location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search);
-    throw new Error('Unauthorized');
+    /* 双保险：仅当服务端确实开启了登录保护时才跳转，避免 auth 关闭时误跳登录页形成死循环 */
+    try {
+      const au = await fetch('/api/auth').then((x) => x.json());
+      if (au && au.enabled === true && !au.authenticated) {
+        location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search);
+        throw new Error('Unauthorized');
+      }
+    } catch (e) { if (e && e.message === 'Unauthorized') throw e; }
+    throw new Error(d.error || 'HTTP 401');
   }
   if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
   return d;
@@ -516,18 +530,30 @@ function renderMobileNav(filter = '') {
     closeMobileNav(); navigate(b.dataset.section);
   });
 }
+/* 移动端侧栏：设计稿抽屉式（左侧滑出 + 半透明遮罩），不再用右上角下拉菜单 */
 function closeMobileNav() {
-  const menu = $('mobileNavMenu'), btn = $('mobileNavBtn');
-  if (menu) menu.hidden = true;
+  const sb = $('sidebar'), bd = $('navBackdrop'), btn = $('mobileNavBtn');
+  if (sb) sb.classList.remove('mobile-open');
+  if (bd) bd.classList.remove('show');
+  document.body.classList.remove('nav-open');
   if (btn) btn.setAttribute('aria-expanded', 'false');
+  /* 兼容：若旧的右上角下拉菜单仍被打开，一并收起 */
+  const menu = $('mobileNavMenu');
+  if (menu) menu.hidden = true;
 }
 function openMobileNav() {
-  const menu = $('mobileNavMenu'), btn = $('mobileNavBtn');
-  if (!menu || !btn) return;
-  const open = menu.hidden;
-  menu.hidden = !open;
-  btn.setAttribute('aria-expanded', String(open));
-  if (open) { renderMobileNav(); const s = $('mnmSearch'); if (s) { s.value = ''; setTimeout(() => s.focus(), 30); } }
+  const sb = $('sidebar'), bd = $('navBackdrop'), btn = $('mobileNavBtn');
+  if (!sb || !btn) return;
+  const open = !sb.classList.contains('mobile-open');
+  if (open) {
+    sb.classList.add('mobile-open');
+    if (bd) bd.classList.add('show');
+    document.body.classList.add('nav-open');
+    btn.setAttribute('aria-expanded', 'true');
+    /* 手机端抽屉里搜索框在侧栏顶部侧栏搜索（#navSearch），聚焦它 */
+    const inp = $('navSearch');
+    if (inp && getComputedStyle(inp).display !== 'none') setTimeout(() => inp.focus(), 30);
+  } else closeMobileNav();
 }
 /* Command+K / Ctrl+K：聚焦侧栏搜索，折叠时自动展开 */
 function focusNavSearch() {
@@ -548,7 +574,7 @@ document.addEventListener('keydown', (e) => {
 });
 /* 按分类 id 匹配图标，未命中时按名称关键字兜底 */
 const SECTION_ICONS = {
-  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link', ipMonitor: 'speed', security: 'shield',
+  dashboard: 'gauge', trafficStats: 'chart', systemTools: 'tools', connections: 'link', ipMonitor: 'speed',
   quickSetup: 'sliders', updates: 'package',
   interfaces: 'ethernet', ipAddresses: 'ip', dhcpClients: 'monitor', dhcpServers: 'server',
   dhcpNetworks: 'subnet', dhcpLeases: 'clipboard', dhcpOptions: 'tag', dhcpOptionSets: 'clipboard', dns: 'globe', dnsStatic: 'pin',
@@ -634,7 +660,7 @@ function iconSvg(name) {
 /* ================= 多设备切换 ================= */
 function renderDevicePicker() {
   const sel = $('deviceSelect'); if (!sel) return;
-  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}${d.enabled === false ? ' · ' + esc(L('已禁用', 'Disabled')) : ''}</option>`).join('');
+  sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
   sel.value = state.deviceId;
   const cur = state.devices.find((d) => d.id === state.deviceId);
   $('deviceDot').classList.toggle('live', !!(cur && (cur.status.mode === 'live' || cur.status.connected)));
@@ -664,8 +690,6 @@ async function switchDevice(id, silent) {
   state.points = []; state.resourceHistory = []; state.connHistory = []; state.ifHistory.clear(); restoreDashIface();
   state.latest = null; state.connRows = []; state.usageData = null; state.usageDetailPage = 1; state.usageIfaceSig = '';
   renderDevicePicker();
-  const nowDev = state.devices.find((x) => x.id === id);
-  if (nowDev && $('adminName')) $('adminName').textContent = nowDev.user || 'admin';
   if (socket) { const old = socket; socket = null; old.onclose = null; old.close(); }
   connect();
   await loadSnapshot();
@@ -676,7 +700,17 @@ async function switchDevice(id, silent) {
   if (!silent) { const d = state.devices.find((x) => x.id === id); toast(t('device_switch') + ' ' + (d ? d.name : ''), 'ok'); }
 }
 
+function roleHiddenSection(id) {
+  const sec = state.schema && state.schema.sections && state.schema.sections.find((s) => s.id === id);
+  if (sec && sec.adminOnly && state.authRole !== 'admin') return true;
+  if (state.authRole === 'read') return ['usersCenter', 'quickSetup', 'connectionSettings', 'webuiSettings', 'webuiBackup', 'dataPolicy', 'updates'].indexOf(id) >= 0;
+  if (state.authRole === 'write') return ['usersCenter', 'quickSetup', 'webuiSettings', 'webuiBackup', 'dataPolicy', 'updates'].indexOf(id) >= 0;
+  return false;
+}
+/* 只读 WebUI 账户：各页面据此隐藏新增/编辑/删除等写操作入口 */
+function canEditNow() { return state.authRole !== 'read'; }
 function navigate(id) {
+  if (roleHiddenSection(id)) return;
   closeMobileNav();
   state.section = id; state.rows = []; state.selectedIds.clear(); state.rowFilter = ''; state.page = 1;
   state.sort = { key: '#', dir: 'asc' };
@@ -958,8 +992,18 @@ function updateTopbar(d) {
   $('cpuVal').textContent = cpu + '%'; $('memVal').textContent = memPct + '%'; $('diskVal').textContent = diskPct + '%';
   setBar('cpuBar', cpu); setBar('memBar', memPct); setBar('diskBar', diskPct);
   $('uptimeText').textContent = fmtUptime(d.uptime);
+  const metaUp = $('sideMetaUptime');
+  if (metaUp) metaUp.textContent = L('已运行 ', 'Uptime ') + fmtUptime(d.uptime);
+  if (typeof v2SyncSideDevice === 'function') v2SyncSideDevice();
 }
-function setBar(id, pct) { const el = $(id); if (!el) return; el.style.width = Math.min(100, Math.max(0, pct)) + '%'; el.className = pct >= 85 ? 'high' : pct >= 65 ? 'warn' : ''; }
+/* 圆环进度：conic-gradient 用 CSS 变量驱动，中心显示百分比 */
+function setBar(id, pct) {
+  const el = $(id); if (!el) return;
+  const p = Math.min(100, Math.max(0, pct));
+  el.style.setProperty('--p', p + '%');
+  el.classList.toggle('high', p >= 85);
+  el.classList.toggle('warn', p >= 65 && p < 85);
+}
 
 /* ================= 页面路由 ================= */
 function renderPage() {
@@ -973,7 +1017,6 @@ function renderPage() {
   if (sec.id === 'dashboard') return renderDashboard();
   if (sec.id === 'trafficStats') return renderTrafficStats();
   if (sec.id === 'systemTools') return renderTools();
-  if (sec.id === 'security') return renderSecurityPage();
   if (sec.id === 'topology') return window.renderTopologyPage ? window.renderTopologyPage() : undefined;
   if (sec.id === 'ipMonitor') return window.renderIpMonitorPage ? window.renderIpMonitorPage() : undefined;
   if (sec.id === 'quickSetup') return window.renderQuickSetupPage ? window.renderQuickSetupPage() : undefined;
@@ -1031,7 +1074,9 @@ async function boot() {
     toast(t('mode_title') + ': ' + (t('mode_' + mode) || mode), 'ok');
     if (state.section === 'dashboard') renderDashboard();
   };
-  $('motionBtn').onclick = () => {
+  /* 动画总开关已移除：默认开启，不再提供顶栏切换（拓扑图内仍可单独控制） */
+  const motionBtn = $('motionBtn');
+  if (motionBtn) motionBtn.onclick = () => {
     motionOn = !motionOn;
     applyMotion();
     toast(L('动画效果', 'Motion') + ': ' + (motionOn ? L('已开启', 'On') : L('已关闭', 'Off')), 'ok');
@@ -1111,7 +1156,7 @@ async function boot() {
       const d = await api('/api/status');
       const statusText = d.mode === 'demo' ? t('demo_only') : (d.mode === 'live' ? t('device_online') : t('device_offline'));
       openModal(t('export_hint'), `<div class="ui-intro"><div class="ui-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg></div>
-          <div><b>${esc(t('export_hint'))}</b><p><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)} · <b>${L('状态', 'Status')}:</b> ${esc(statusText)} · <b>${t('system')}:</b> ${esc(d.user)}</p></div></div>
+          <div><b>${esc(t('export_hint'))}</b><p><b>RouterOS:</b> ${esc(d.host)}:${esc(d.port)} · <b>${L('状态', 'Status')}:</b> ${esc(statusText)}</p></div></div>
         <pre class="code">${esc(JSON.stringify({ host: d.host, port: d.port, mode: d.mode, interval: d.interval, uptime: d.uptime }, null, 2))}</pre>`,
         `<button class="btn" data-close>${t('close')}</button>`, (m) => { m.querySelector('[data-close]').onclick = closeModal; });
     } catch (e) { toast(e.message, 'err'); }
@@ -1121,18 +1166,38 @@ async function boot() {
   try {
     const au = await fetch('/api/auth').then((r) => r.json());
     state.authEnabled = !!au.enabled; state.authUser = au.user || '';
+    state.authRole = au.role === 'write' || au.role === 'read' ? au.role : 'admin';
+    state.authDefaultPassword = !!au.defaultPassword;
+    state.canWrite = state.authRole !== 'read';
+    document.body.classList.toggle('role-read', state.authRole === 'read');
+    document.body.classList.toggle('role-write', state.authRole === 'write');
     if (au.enabled) {
       if (!au.authenticated) { location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
       if (authLogout) authLogout.hidden = false;
     }
   } catch (e) { /* ignore */ }
-  $('adminBtn').onclick = () => navigate('connectionSettings');
+  /* 顶栏用户名入口已移除；设备管理仍可由侧栏 ⚙ 进入 */
+  const adminBtn = $('adminBtn');
+  if (adminBtn) adminBtn.onclick = () => navigate('connectionSettings');
   await loadDevices();
   restoreDashIface();
-  const curDev = state.devices.find((d) => d.id === state.deviceId);
-  if (curDev && curDev.user) $('adminName').textContent = curDev.user;
   try { state.schema = await api('/api/schema'); }
   catch (e) { document.body.innerHTML = '<div style="padding:40px;font:14px sans-serif">无法加载配置目录：' + esc(e.message) + '</div>'; return; }
+  /* WebUI 账户角色：按角色裁剪菜单，只读账户同时关闭所有写操作 */
+  const hiddenByRole = {
+    read: ['usersCenter', 'quickSetup', 'connectionSettings', 'webuiSettings', 'webuiBackup', 'dataPolicy', 'updates'],
+    write: ['usersCenter', 'quickSetup', 'webuiSettings', 'webuiBackup', 'dataPolicy', 'updates'],
+  };
+  const hiddenSections = hiddenByRole[state.authRole] || [];
+  if (state.authRole !== 'admin' && state.schema) {
+    state.schema.sections.forEach((s) => { if (s.adminOnly) hiddenSections.push(s.id); });
+  }
+  if (hiddenSections.length) {
+    state.schema.sections = state.schema.sections.filter((s) => hiddenSections.indexOf(s.id) < 0);
+    const groupsHave = new Set(state.schema.sections.map((s) => s.group));
+    state.schema.groups = state.schema.groups.filter((g) => groupsHave.has(g.id));
+  }
+  if (state.authRole === 'read') state.schema.sections.forEach((s) => { s.writable = false; });
   const urlSection = new URLSearchParams(location.search).get('section');
   const saved = urlSection || localStorage.getItem('ros-traffic-section');
   if (saved && state.schema.sections.some((s) => s.id === saved)) state.section = saved;
@@ -1143,6 +1208,10 @@ async function boot() {
   const current = state.schema.sections.find((s) => s.id === state.section);
   if (current) state.collapsedGroups.delete(current.group);
   applyLang();
+  /* 首次安装默认 admin/admin：登录后提醒创建正式管理员账户 */
+  if (state.authEnabled && state.authRole === 'admin' && state.authDefaultPassword) {
+    setTimeout(() => { if (typeof window.__rosDefaultPwdPrompt === 'function') window.__rosDefaultPwdPrompt(); }, 1400);
+  }
   const wantAdd = new URLSearchParams(location.search).get('action') === 'add';
   if (wantAdd) {
     const sec = state.schema.sections.find((s) => s.id === state.section);
@@ -1167,7 +1236,7 @@ async function boot() {
     badge.onclick = () => navigate('updates');
     api('/api/update/status').then((d) => {
       const on = !!(d.status && d.status.ok && d.status.hasUpdate);
-      badge.hidden = !on;
+      badge.hidden = state.authRole === 'read' || !on;
       if (on) badge.title = L('发现新版本 ', 'Update available ') + (d.status.latest || {}).version;
     }).catch(() => {});
   }

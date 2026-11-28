@@ -87,10 +87,14 @@ function topoIconFor(row, mac) {
 }
 
 /* ---------- 表头字段：可增删、排序、按分类+设备记忆 ---------- */
-const colsKey = (sec) => 'rosCenter.cols.' + (state.deviceId || '') + '.' + sec.id;
+const DHCP_DNS_SECTIONS = new Set(['dhcpNetworks', 'dhcpLeases', 'dhcpServers', 'dhcpClients', 'dhcpOptions', 'dhcpOptionSets', 'dns', 'dnsStatic']);
+const showRowNum = (sec) => !sec || !DHCP_DNS_SECTIONS.has(sec.id);
+/* DHCP 租约列结构改为「设备 + 地址 + MAC + 状态 + 主机名」，用版本后缀作一次性迁移 */
+const colsKey = (sec) => 'rosCenter.cols.' + (state.deviceId || '') + '.' + sec.id + (sec.id === 'dhcpLeases' ? '.v2' : '');
 function availableColumns(sec) {
   const keys = (sec.fields || []).map((f) => f.key).filter((k) => k !== '.id');
-  if ((sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key)) && !keys.includes('topoName')) keys.push('topoName');
+  /* DHCP 租约首列直接用 RouterOS comment + 设备图标，不再提供「设备名」列 */
+  if (sec.id !== 'dhcpLeases' && (sec.fields || []).some((f) => /mac[-_]?address/i.test(f.key)) && !keys.includes('topoName')) keys.push('topoName');
   /* DHCP 租约：可复用拓扑设备的实时上下行与设备类型（RouterOS 无此字段） */
   if (sec.id === 'dhcpLeases') for (const k of ['topoType', 'rateUp', 'rateDown']) if (!keys.includes(k)) keys.push(k);
   return keys;
@@ -99,7 +103,9 @@ function visibleColumns(sec) {
   const all = availableColumns(sec);
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(colsKey(sec))); } catch (e) { /* ignore */ }
-  const picked = (Array.isArray(saved) && saved.length ? saved : (sec.columns || all))
+  /* 设计稿列顺序由前端兜底，服务端 catalog.js 尚未重启时也立即生效 */
+  const fallback = sec.id === 'dhcpLeases' ? ['comment', 'address', 'mac-address', 'status', 'host-name'] : (sec.columns || all);
+  const picked = (Array.isArray(saved) && saved.length ? saved : fallback)
     .filter((k) => all.includes(k));
   return picked.length ? picked : all.slice(0, 5);
 }
@@ -240,7 +246,7 @@ function renderConfigPage(sec) {
       </div>
       <div class="table-scroll"><table><thead><tr>
         ${writable ? '<th style="width:36px"><input type="checkbox" class="check" id="checkAll"></th>' : ''}
-        <th class="sortable" data-sort="#" style="width:64px" title="${t('sort_hint')}">${t('seq')}</th>
+        ${showRowNum(sec) ? `<th class="sortable" data-sort="#" style="width:64px" title="${t('sort_hint')}">${t('seq')}</th>` : ''}
         ${cols.filter((c) => c !== '.id').map((c) => `<th class="sortable${numCol(c, sec) ? ' num' : ''}${(state.sort || {}).key === c ? ' sorted' : ''}" data-sort="${esc(c)}" title="${t('sort_hint')}">${esc(fieldLabel(sec, c))}${sortMark(c)}</th>`).join('')}
         ${writable ? `<th style="width:${sec.id === 'wireguard' || sec.id === 'wgPeers' ? 142 : 110}px"></th>` : ''}
       </tr></thead><tbody id="tbody"></tbody></table></div>
@@ -316,6 +322,7 @@ function fieldLabel(sec, key) {
   if (key === 'running') return L('运行', 'Running');
   if (key === '.id') return 'ID';
   if (key === 'topoName') return L('设备名', 'Device name');
+  if (key === 'comment' && sec && sec.id === 'dhcpLeases') return L('设备', 'Device');
   if (key === 'topoType') return L('设备类型', 'Device type');
   if (key === 'rateUp') return L('上行', 'Upload');
   if (key === 'rateDown') return L('下行', 'Download');
@@ -368,8 +375,13 @@ function renderRows(sec) {
     const rowno = (state.page - 1) * state.pageSize + ri + 1;
     return `<tr data-id="${esc(r['.id'])}" title="RouterOS .id: ${esc(r['.id'])}" class="${state.selectedIds.has(r['.id']) ? 'selected' : ''}">
     ${writable ? `<td><input type="checkbox" class="check rowcheck" data-id="${esc(r['.id'])}" ${state.selectedIds.has(r['.id']) ? 'checked' : ''}></td>` : ''}
-    <td class="num rownum">${rowno}</td>
-    ${cols.map((c) => `<td${numCol(c, sec) ? ' class="num"' : ''} data-label="${esc(fieldLabel(sec, c))}">${cellHtml(r, c, sec)}</td>`).join('')}
+    ${showRowNum(sec) ? `<td class="num rownum">${rowno}</td>` : ''}
+    ${cols.map((c) => {
+      const html = cellHtml(r, c, sec);
+      const blank = html === '' || html === '—' || html === '<span class="muted-cell">—</span>';
+      const cls = [numCol(c, sec) ? 'num' : '', blank ? 'is-empty' : ''].filter(Boolean).join(' ');
+      return `<td${cls ? ` class="${cls}"` : ''} data-label="${esc(fieldLabel(sec, c))}">${html}</td>`;
+    }).join('')}
     ${writable ? `<td class="row-actions-cell"><div class="row-actions">
       ${sec.runAction ? `<button class="icon-btn run" data-act="run" title="${esc(t('run_script_row'))}">▶</button>` : ''}
       ${!sec.runAction && sec.toggle !== false ? `<button class="icon-btn" data-act="toggle" title="${boolOn(r.disabled) ? t('enable') : t('disable')}">${boolOn(r.disabled) ? '○' : '●'}</button>` : ''}
@@ -438,10 +450,7 @@ function cellHtml(row, key, sec) {
     return fmtBytes(v);
   }
   if (key === 'comment' && sec && sec.id === 'dhcpLeases') {
-    /* 拓扑同步识别改为按 MAC/IP 关联拓扑节点（comment 现在只是可空备注） */
-    const n = topoNodeFor(row, row['mac-address']);
-    const isTopo = !!(n && n.id);
-    /* 历史 base64 元数据：解析出原备注继续展示，平滑过渡 */
+    /* 第一列：拓扑设备图标 + RouterOS 租约 comment，不再显示「拓扑同步」标签 */
     let legacy = '';
     if (String(v || '').startsWith('ROS-TOPO-v1:')) {
       try {
@@ -450,8 +459,13 @@ function cellHtml(row, key, sec) {
         const m = JSON.parse(decodeURIComponent(escape(atob(b)))); legacy = m.uc || '';
       } catch (e) { /* ignore */ }
     }
-    const shown = legacy || String(v || '');
-    return `${isTopo ? `<span class="tag blue" title="${esc(L('由网络拓扑同步生成', 'Synced from network topology'))}">${esc(L('拓扑同步', 'Topo sync'))}</span> ` : ''}${shown ? esc(shown) : '<span class="muted-cell">—</span>'}`;
+    const hit = topoIconFor(row, row['mac-address']);
+    const topo = topoNodeForMac(row, row['mac-address']);
+    const label = legacy || String(v || '') || (topo && topo.name) || '';
+    const icon = hit
+      ? `<img class="mac-topo-icon" src="${esc(hit.url)}" alt="" loading="lazy">`
+      : `<span class="lease-device-ico lg-${esc((topo && topo.type) || 'other')}"><svg class="i"><use href="#i-device"/></svg></span>`;
+    return `<span class="lease-device-cell" title="${esc(label)}">${icon}<b>${label ? esc(label) : '<span class="muted-cell">—</span>'}</b></span>`;
   }
   if (key === 'password' || key === 'private-key' || /pre-?shared-key/.test(key)) return '<span class="tag">••••••••</span>';
   const f = sec.fields.find((x) => x.key === key);
@@ -647,23 +661,8 @@ async function bulk(sec, action, ids) {
 }
 
 /* ================= 工具 / 系统操作 ================= */
-/* 运维工具：关键事件流 / 最近配置更改 / 备份状态（每 5 秒轮询日志） */
+/* 运维工具：备份状态 / 安全规则 / 链路探测与带宽配置摘要 */
 let toolsTimer = null;
-const TOOLS_EVENT_RE = /(interface|link|vpn|l2tp|pptp|ovpn|ipsec|wireguard|user|logg|dhcp|firewall|wifi|wireless|up|down)/i;
-const TOOLS_CHANGE_RE = /(chang|config|backup|add|remov|delet|set |updat|修改|新增|删除|备份|更新)/i;
-function toolFeedHtml(rows, kind) {
-  const list = (rows || []).filter((r) => {
-    const text = String(r.message || '');
-    return (kind === 'event' ? TOOLS_EVENT_RE : TOOLS_CHANGE_RE).test(text + ' ' + String(r.topics || ''));
-  }).slice(0, 8);
-  if (!list.length) return `<div class="empty">${t('no_data')}</div>`;
-  return `<div class="tool-feed">${list.map((r) => {
-    const msg = String(r.message || '');
-    const cls = /fail|error|down|drop|disconnect|reject|失败|断开/i.test(msg) ? 'red'
-      : /warn|up|connect|backup|成功/i.test(msg) ? 'amber' : 'blue';
-    return `<div class="tool-feed-row"><time>${esc(String(r.time || ''))}</time><span class="tag ${cls}">${esc(String(r.topics || ''))}</span><span class="tool-feed-msg">${esc(msg)}</span></div>`;
-  }).join('')}</div>`;
-}
 function toolSecurityHtml(data, countId) {
   const count = $(countId || 'toolSecurityCount');
   if (count) count.textContent = data ? num(data.total) + ' ' + L('条规则', 'rules') : '—';
@@ -671,42 +670,41 @@ function toolSecurityHtml(data, countId) {
   const rows = data.rows || [];
   return `<div class="table-scroll"><table class="mini-table">
     <thead><tr><th>${t('th_chain')}</th><th>${L('动作', 'Action')}</th><th>${t('th_rule')}</th><th class="num">${t('th_hits')}</th><th class="num">${t('th_bytes')}</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr><td>${esc(r.chain)}</td><td><span class="tag ${r.action === 'reject' ? 'amber' : 'red'}">${esc(r.action)}</span></td>
-      <td>${esc(r.comment || r.interface || r.id)}</td><td class="num">${num(r.packets).toLocaleString()}</td><td class="num">${fmtBytes(r.bytes)}</td></tr>`).join('')
+    <tbody>${rows.map((r) => `<tr><td data-label="${esc(t('th_chain'))}">${esc(r.chain)}</td><td data-label="${esc(L('动作', 'Action'))}"><span class="tag ${r.action === 'reject' ? 'amber' : 'red'}">${esc(r.action)}</span></td>
+      <td data-label="${esc(t('th_rule'))}">${esc(r.comment || r.interface || r.id)}</td><td class="num" data-label="${esc(t('th_hits'))}">${num(r.packets).toLocaleString()}</td><td class="num" data-label="${esc(t('th_bytes'))}">${fmtBytes(r.bytes)}</td></tr>`).join('')
       || `<tr><td colspan="5" class="empty">${t('no_data')}</td></tr>`}</tbody></table></div>`;
 }
-let securityTimer = null;
 async function refreshSecurity() {
   const box = $('securityBody') || $('toolSecurityFeed');
   const countId = $('securityBody') ? 'securityCount' : 'toolSecurityCount';
-  try { if (box) box.innerHTML = toolSecurityHtml(await api('/api/security'), countId); }
-  catch (e) { if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  try {
+    const d = await api('/api/security');
+    if (box) box.innerHTML = toolSecurityHtml(d, countId);
+  } catch (e) { if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
-function renderSecurityPage() {
-  $('content').innerHTML = `
-    <div class="page-head"><div><h1>${t('security_title')}</h1><p>${t('security_sub')}</p></div>
-      <div class="page-actions"><span class="tag" id="securityCount">—</span></div></div>
-    <div class="panel"><div class="panel-head"><div><h2>${t('security_title')}</h2><p class="sub">${t('security_sub')}</p></div></div>
-      <div class="panel-body dash-mini-body" id="securityBody"></div></div>`;
-  if (securityTimer) { clearInterval(securityTimer); securityTimer = null; }
-  refreshSecurity();
-  securityTimer = setInterval(() => {
-    if (state.section !== 'security') { clearInterval(securityTimer); securityTimer = null; return; }
-    refreshSecurity();
-  }, 15000);
+/* 运维工具页的探测 / 链路配置摘要（数据来自 views.js 的本地偏好） */
+function paintToolConfigMeta() {
+  const q = $('toolQualityMeta'), l = $('toolLinkMeta');
+  if (q && typeof qualityPrefs === 'function') {
+    const p = qualityPrefs();
+    const mode = p.mode === 'netwatch' ? L('Netwatch 探针', 'Netwatch probe') : L('ICMP 探测', 'ICMP ping');
+    const targets = (p.targets || []).filter((t) => t && t.host);
+    q.innerHTML = `<div class="tool-cfg-row"><span>${esc(L('当前模式', 'Mode'))}</span><b>${esc(mode)}</b></div>
+      <div class="tool-cfg-row"><span>${esc(L('探测目标', 'Targets'))}</span><b>${targets.length} / 5</b></div>
+      <div class="tool-cfg-tags">${targets.length
+        ? targets.map((t) => `<span class="tag">${esc(t.label || t.host)}</span>`).join('')
+        : `<span class="tool-cfg-empty">${esc(L('留空时自动使用网关与外部 DNS', 'Gateway and public DNS are used when empty'))}</span>`}</div>`;
+  }
+  if (l && typeof linkPrefs === 'function') {
+    const names = linkPrefs().map((p) => p.name).filter(Boolean);
+    l.innerHTML = `<div class="tool-cfg-row"><span>${esc(L('已选链路', 'Selected links'))}</span><b>${names.length} / 4</b></div>
+      <div class="tool-cfg-tags">${names.length
+        ? names.map((n) => `<span class="tag">${esc(n)}</span>`).join('')
+        : `<span class="tool-cfg-empty">${esc(L('按接口协商速率自动计算', 'Calculated from negotiated interface speed'))}</span>`}</div>`;
+  }
 }
 async function refreshToolsPanels() {
-  try {
-    const d = await api('/api/config?section=logs');
-    const rows = d.rows || [];
-    const ev = $('toolEventFeed'), cf = $('toolChangeFeed');
-    if (ev) ev.innerHTML = toolFeedHtml(rows, 'event');
-    if (cf) cf.innerHTML = toolFeedHtml(rows, 'change');
-  } catch (e) {
-    const ev = $('toolEventFeed'), cf = $('toolChangeFeed');
-    if (ev) ev.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
-    if (cf) cf.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
-  }
+  paintToolConfigMeta();
   await refreshSecurity();
   try {
     const d = await api('/api/backup/status');
@@ -774,11 +772,26 @@ function renderTools() {
         <div id="pingOut" class="ping-log"></div>
       </div></div>
     <div class="grid-2" style="margin-top:14px">
-      <div class="panel"><div class="panel-head"><div><h2>${t('event_stream_title')}</h2><p class="sub">${t('event_stream_sub')}</p></div>
-        <span class="tag green">● LIVE</span></div><div class="panel-body" id="toolEventFeed"></div></div>
-      <div class="panel"><div class="panel-head"><div><h2>${t('config_changes_title')}</h2><p class="sub">${t('config_changes_sub')}</p></div></div>
-        <div class="panel-body" id="toolChangeFeed"></div></div>
+      <div class="panel tool-cfg-panel"><div class="panel-head"><div><h2>${esc(L('链路质量探测', 'Link quality probes'))}</h2><p class="sub">${esc(L('系统工具 → Netwatch · RouterOS /Tool/Netwatch', 'System Tools → Netwatch · RouterOS /Tool/Netwatch'))}</p></div>
+        <button class="btn btn-sm" id="toolQualityCfg" type="button">${esc(L('配置探测目标', 'Configure targets'))}</button></div>
+        <div class="panel-body tool-cfg-body">
+          <div class="tool-cfg-intro"><span class="tool-cfg-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg></span>
+            <div><b>${esc(L('Netwatch 主机探测', 'Netwatch host probe'))}</b><p>${esc(L('在路由器的「系统工具 → Netwatch」添加目标地址后即可持续探测；这里的配置会同步到 /Tool/Netwatch，状态与延迟在仪表盘链路质量卡片展示。', 'Add targets under System Tools → Netwatch on the router for continuous probing. Settings here sync to /Tool/Netwatch; status and latency appear on the dashboard link-quality card.'))}</p></div></div>
+          <div class="tool-cfg-meta" id="toolQualityMeta"></div>
+        </div></div>
+      <div class="panel tool-cfg-panel"><div class="panel-head"><div><h2>${esc(L('关键链路利用率', 'Link utilization'))}</h2><p class="sub">${esc(L('接口协商速率 · RouterOS /Interface', 'Interface link speed · RouterOS /Interface'))}</p></div>
+        <button class="btn btn-sm" id="toolLinkCfg" type="button">${esc(t('link_settings'))}</button></div>
+        <div class="panel-body tool-cfg-body">
+          <div class="tool-cfg-intro"><span class="tool-cfg-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h16M6 18V9m6 9V5m6 13v-6"/></svg></span>
+            <div><b>${esc(L('链路带宽', 'Link capacity'))}</b><p>${esc(L('为运行中的接口设置带宽阈值（默认取协商速率），超过 60% / 85% / 95% 时在仪表盘分级显示。', 'Set capacity for running interfaces (defaults to negotiated speed); 60% / 85% / 95% thresholds are shown on the dashboard.'))}</p></div></div>
+          <div class="tool-cfg-meta" id="toolLinkMeta"></div>
+        </div></div>
     </div>`;
+  /* 链路质量探测 / 链路带宽：复用 views.js 配置弹窗，入口收敛到运维工具 */
+  const qc = $('toolQualityCfg');
+  if (qc) qc.onclick = () => { if (typeof openQualityTargets === 'function') openQualityTargets(); };
+  const lc = $('toolLinkCfg');
+  if (lc) lc.onclick = () => { if (typeof openLinkSettings === 'function') openLinkSettings(state.latest || {}); };
   /* ICMP 逐条流式诊断 */
   const stopPing = () => {
     if (window.__rosPingSource) { try { window.__rosPingSource.close(); } catch (e) { /* ignore */ } window.__rosPingSource = null; }
@@ -884,7 +897,7 @@ function renderTools() {
   toolsTimer = setInterval(() => {
     if (state.section !== 'systemTools') { clearInterval(toolsTimer); toolsTimer = null; return; }
     refreshToolsPanels();
-  }, 5000);
+  }, 15000);
 }
 
 /* ================= WireGuard 扫码添加 / 对端配置 ================= */
@@ -924,7 +937,7 @@ async function openWireguardQr(row, sec) {
     wgEndpoint: host, wgEndpointPort: String(iface['listen-port'] || '13231'),
     wgRoute: '0.0.0.0/0', wgDns: '10.0.0.1',
     wgPsk: peer['preshared-key'] && peer['preshared-key'] !== 'auto' ? peer['preshared-key'] : '',
-    wgKeepalive: String(peer['persistent-keepalive'] || '25'), wgResponder: boolOn(peer.responder),
+    wgKeepalive: (String(peer['persistent-keepalive'] || '').match(/\d+/) || ['25'])[0], wgResponder: boolOn(peer.responder),
   };
   if (window.WGKey) {
     if (!defaults.wgPriv) { const kp = WGKey.keypair(); defaults.wgPriv = kp.privateKey; defaults.wgClientPub = kp.publicKey; }
@@ -1061,7 +1074,7 @@ function renderConnectionSettings() {
             ${state.authEnabled ? `<button class="btn ghost-danger" id="authDisable">${t('login_disable')}</button>` : ''}
           </div>
           <div id="authResult"></div>
-          <div class="dev-subhead dev-port-head">${t('conn_web_port')}</div>
+          <div class="dev-subhead dev-port-head">${esc(L('端口设置', 'Port settings'))}</div>
           <div class="form-row"><label>${t('conn_web_port')}</label>
             <div><input type="number" id="cfgWebPort" min="1" max="65535" value="${esc(state.webPort || 10086)}">
               <p class="form-hint">${t('conn_web_port_hint')} · ${t('conn_host_port')}: ${esc(state.hostPort || state.webPort || 10086)}</p></div></div>
@@ -1119,7 +1132,7 @@ function renderConnectionSettings() {
       return `<div class="dev-card${primary ? ' primary' : ''}${active ? ' active' : ''}" data-dev="${esc(d.id)}">
         <div class="dev-card-top">
           <div class="dev-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="6" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><path d="M13 12h4M6 3v3M18 3v3"/></svg></div>
-          <div class="dev-card-id"><b>${esc(d.name)}</b><span>${esc(d.host)}:${esc(d.port)} · ${esc(d.user)}</span></div>
+          <div class="dev-card-id"><b>${esc(d.name)}</b><span class="dev-card-ip">${esc(d.host)}</span></div>
           <div class="dev-card-badges">${deviceStatusTag(d)}${primary ? `<span class="tag blue">${esc(t('device_current'))}</span>` : ''}${active ? `<span class="tag green">${esc(t('device_active'))}</span>` : ''}${d.demo ? `<span class="tag">${esc(t('conn_demo'))}</span>` : ''}</div>
         </div>
         <div class="dev-card-foot">

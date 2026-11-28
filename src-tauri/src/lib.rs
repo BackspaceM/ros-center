@@ -164,7 +164,9 @@ fn spawn_server(app: &tauri::AppHandle, state: &State<'_, AppState>) -> Result<(
         .env("ROS_DESKTOP", "1")
         .env("HOST", "127.0.0.1")
         .env("ROS_NO_BROWSER", "1")
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -187,17 +189,23 @@ fn show_window(app: &tauri::AppHandle) {
    NSIS 安装器已配置 webview2=download，这里是绿色版/运行时的兜底。 */
 #[cfg(windows)]
 fn ensure_webview2() {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+    /* CREATE_NO_WINDOW：reg / cmd 均为控制台子系统，不加标志会在启动时闪出黑框 */
+    const NO_WINDOW: u32 = 0x08000000;
     let installed = Command::new("reg")
         .args(["query", r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"])
+        .creation_flags(NO_WINDOW)
         .output().map(|o| o.status.success()).unwrap_or(false)
         || Command::new("reg")
         .args(["query", r"HKCU\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"])
+        .creation_flags(NO_WINDOW)
         .output().map(|o| o.status.success()).unwrap_or(false);
     if !installed {
         eprintln!("[ros-center] 未检测到 WebView2 Runtime，正在打开安装引导页");
         let _ = Command::new("cmd")
             .args(["/c", "start", "", "https://go.microsoft.com/fwlink/p/?LinkId=2124703"])
+            .creation_flags(NO_WINDOW)
             .spawn();
     }
 }

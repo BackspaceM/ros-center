@@ -43,17 +43,16 @@
   .login{width:100%;max-width:384px;background:var(--card);border:1px solid var(--line);border-radius:10px;
     box-shadow:var(--shadow);padding:32px 30px 24px}
   .brand{display:flex;align-items:center;gap:11px;margin-bottom:28px}
-  .logo{width:32px;height:32px;flex:none;border-radius:8px;background:var(--accent);
-    display:flex;align-items:flex-end;justify-content:center;gap:2.5px;padding-bottom:7px}
-  .logo span{width:3px;border-radius:2px;background:#fff}
-  .logo span:nth-child(1){height:7px;opacity:.6}
-  .logo span:nth-child(2){height:12px;opacity:.78}
-  .logo span:nth-child(3){height:9px;opacity:.9}
-  .logo span:nth-child(4){height:16px}
-  .brand b{display:block;font-size:15px;font-weight:700;letter-spacing:-.3px;line-height:1.2}
-  .brand small{display:block;color:var(--muted);font-size:10px;letter-spacing:1.2px;text-transform:uppercase;margin-top:2px}
+  .logo{width:34px;height:34px;flex:none;border-radius:9px;overflow:hidden}
+  .logo img{width:100%;height:100%;display:block}
+  .brand b{display:block;font-size:16px;font-weight:800;letter-spacing:-.35px;line-height:1.15}
+  .brand small{display:inline-block;margin-top:3px;padding:1px 6px;border-radius:999px;background:var(--soft);
+    border:1px solid var(--line);color:var(--muted);font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
   h1{margin:0 0 5px;font-size:21px;font-weight:600;letter-spacing:-.4px}
   .sub{margin:0 0 24px;color:var(--muted);font-size:12.5px}
+  .hint{margin:-12px 0 20px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));
+    border-radius:6px;background:color-mix(in srgb,var(--accent) 7%,var(--card));color:var(--ink);font-size:11.5px;line-height:1.5}
+  .hint code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);border:1px solid var(--line);border-radius:4px;padding:0 4px}
   label{display:block;font-size:12px;font-weight:500;margin:0 0 7px;color:var(--muted)}
   .field{position:relative;margin-bottom:16px}
   input{width:100%;height:40px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);
@@ -80,17 +79,24 @@
 <body>
 <div class="login">
   <div class="brand">
-    <div class="logo" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <div class="logo" aria-hidden="true"><img src="/logo.svg" alt=""></div>
     <div><b>ROS Center</b><small>sign in</small></div>
   </div>
   <h1 id="title">登录 ROS Center</h1>
   <p class="sub" id="sub">请输入 WebUI 账号与密码</p>
+  <p class="hint" id="hint" style="display:none"></p>
   <form id="form" autocomplete="on">
     <div class="field"><label for="user" id="lUser">账号</label><input id="user" name="username" autocomplete="username" required autofocus></div>
-    <div class="field"><label for="pass" id="lPass">密码</label><input id="pass" name="password" type="password" autocomplete="current-password" required>
+    <div class="field"><label for="pass" id="lPass">密码</label><input id="pass" name="password" type="password" autocomplete="current-password">
       <button class="eye" id="eye" type="button">显示</button></div>
     <button class="btn" id="go" type="submit">登 录</button>
     <div class="err" id="err"></div>
+  </form>
+  <form id="otpForm" style="display:none" autocomplete="off">
+    <div class="field"><label for="otp" id="lOtp">两步验证码</label><input id="otp" name="otp" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="000000" required></div>
+    <button class="btn" id="otpGo" type="submit">验 证 并 登 录</button>
+    <button class="eye" id="otpBack" type="button" style="display:block;margin:10px auto 0">返回</button>
+    <div class="err" id="otpErr"></div>
   </form>
   <div class="foot" id="foot">登录状态会保存在本浏览器的安全 Cookie 中</div>
 </div>
@@ -99,9 +105,8 @@
   var zh = (localStorage.getItem('ros-traffic-lang') || (navigator.language||'').slice(0,2)) !== 'en';
   var legacy = localStorage.getItem('ros-traffic-theme');
   var mode = localStorage.getItem('ros-mode') || (legacy === 'dark' ? 'dark' : legacy === 'light' ? 'light' : 'system');
-  var migrated = false;
-  try { migrated = localStorage.getItem('ros-theme-v2') === '1'; } catch(e){}
-  var theme = migrated ? (localStorage.getItem('ros-theme') || 'unifi') : 'unifi';
+  var saved = localStorage.getItem('ros-theme');
+  var theme = (!saved || saved === 'unifi') ? 'default' : saved;
   var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   var scheme = mode === 'system' ? (prefersDark ? 'dark' : 'light') : mode;
   document.documentElement.dataset.theme = theme;
@@ -117,9 +122,36 @@
   $('eye').textContent = zh ? '显示' : 'Show';
   $('go').textContent = zh ? '登 录' : 'Sign in';
   $('foot').textContent = zh ? '登录状态保存在本浏览器的安全 Cookie 中 · 7 天有效' : 'Session is kept in a secure HttpOnly cookie · valid for 7 days';
+  $('lOtp').textContent = zh ? '两步验证码' : 'Verification code';
+  $('otpGo').textContent = zh ? '验 证 并 登 录' : 'Verify & sign in';
+  $('otpBack').textContent = zh ? '返回' : 'Back';
+  $('sub').textContent = zh ? '请输入 WebUI 账号与密码' : 'Enter your WebUI username and password';
 
   fetch('/api/auth').then(function(r){ return r.json(); }).then(function(d){
-    if (d && d.enabled === false) { location.replace(next); return; }
+    if (d && d.defaultPassword) {
+      var h = $('hint');
+      h.innerHTML = zh
+        ? '当前为初始账户 <code>admin</code> / <code>admin</code>，登录后请立即新增管理员账户。'
+        : 'Default account <code>admin</code> / <code>admin</code> — add a new administrator right after signing in.';
+      h.style.display = '';
+    }
+    if (d && d.enabled === false) {
+      /* auth 关闭时直接进主页；但要防止 next 指回登录页或异常反复跳转造成死循环 */
+      if (/^\/login(\.html)?([?#]|$)/.test(next)) next = '/';
+      /* 仅统计最近 8 秒内的往返次数；正常进入主页后计数自然失效 */
+      var st = null;
+      try { st = JSON.parse(sessionStorage.getItem('ros-login-redirect') || 'null'); } catch(e){}
+      if (!st || Date.now() - (st.t || 0) > 8000) st = { t: Date.now(), n: 0 };
+      if (st.n >= 2) {
+        /* 已往返两次仍回到登录页，停下来让用户看到页面，而不是无限刷新 */
+        try { sessionStorage.removeItem('ros-login-redirect'); } catch(e){}
+        err.textContent = '服务暂时无法正常进入，请刷新重试 / Unable to enter, please refresh';
+        return;
+      }
+      st.n += 1; st.t = Date.now();
+      try { sessionStorage.setItem('ros-login-redirect', JSON.stringify(st)); } catch(e){}
+      location.replace(next);
+    }
   }).catch(function(){});
 
   $('eye').onclick = function(){
@@ -136,6 +168,15 @@
       body: JSON.stringify({ user: $('user').value.trim(), password: $('pass').value }) })
       .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
       .then(function(x){
+        if (x.d && x.d.need2fa) {
+          window.__pending2fa = x.d.pending;
+          $('form').style.display = 'none';
+          $('otpForm').style.display = '';
+          $('title').textContent = zh ? '两步验证' : 'Two-factor verification';
+          $('sub').textContent = zh ? '请输入验证器应用中的 6 位验证码' : 'Enter the 6-digit code from your authenticator';
+          $('otp').focus();
+          return;
+        }
         if (!x.ok || x.d.error) { err.textContent = x.d.error || (zh?'登录失败':'Login failed'); return; }
         location.replace(next);
       })
@@ -144,6 +185,28 @@
         go.disabled = false;
         go.textContent = zh ? '登 录' : 'Sign in';
       });
+  };
+  $('otpBack').onclick = function(){
+    $('otpForm').style.display = 'none'; $('form').style.display = '';
+    $('title').textContent = zh ? '登录 ROS Center' : 'Sign in to ROS Center';
+    $('sub').textContent = zh ? '请输入 WebUI 账号与密码' : 'Enter your WebUI username and password';
+    $('otpErr').textContent = ''; window.__pending2fa = null;
+  };
+  $('otpForm').onsubmit = function(e){
+    e.preventDefault();
+    var otpErr = $('otpErr'), otpGo = $('otpGo');
+    otpErr.textContent = '';
+    otpGo.disabled = true;
+    otpGo.textContent = zh ? '验证中…' : 'Verifying…';
+    fetch('/api/login/2fa', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pending: window.__pending2fa || '', code: $('otp').value.trim() }) })
+      .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+      .then(function(x){
+        if (!x.ok || x.d.error) { otpErr.textContent = x.d.error || (zh?'验证失败':'Verification failed'); return; }
+        location.replace(next);
+      })
+      .catch(function(){ otpErr.textContent = zh ? '无法连接服务，请稍后重试' : 'Connection failed. Try again.'; })
+      .finally(function(){ otpGo.disabled = false; otpGo.textContent = zh ? '验 证 并 登 录' : 'Verify & sign in'; });
   };
 })();
 </script>
